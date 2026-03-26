@@ -2,9 +2,6 @@ from typing import List
 
 
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> List[str]:
-    """
-    Chunk by paragraphs first, then merge into overlapping chunks.
-    """
     paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
     if not paragraphs:
         return []
@@ -14,7 +11,8 @@ def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> List[str
 
     for paragraph in paragraphs:
         current_text = "\n".join(current_chunk)
-        if len(current_text) + len(paragraph) < chunk_size:
+
+        if len(current_text) + len(paragraph) + 1 <= chunk_size:
             current_chunk.append(paragraph)
         else:
             if current_chunk:

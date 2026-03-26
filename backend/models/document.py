@@ -1,10 +1,11 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+
 from backend.database.database import Base
 
 
 class Document(Base):
-
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -12,9 +13,30 @@ class Document(Base):
     filename = Column(String, nullable=False)
     storage_path = Column(String, nullable=False)
 
+    processing_status = Column(String, nullable=False, default="pending")
+    processing_error = Column(Text, nullable=True)
+
     file_size = Column(Integer, nullable=False)
     file_type = Column(String, nullable=False)
     upload_timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    case_id = Column(Integer, ForeignKey("cases.id"), nullable=False)
-    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    extracted_text = Column(Text, nullable=True)
+    redacted_text = Column(Text, nullable=True)
+
+    case = relationship("Case", back_populates="documents")
+    tenant = relationship("Tenant")
+
+    chunks = relationship(
+        "DocumentChunk",
+        back_populates="document",
+        cascade="all, delete-orphan"
+    )
+
+    entities = relationship(
+        "DocumentEntity",
+        back_populates="document",
+        cascade="all, delete-orphan"
+    )

@@ -1,8 +1,10 @@
-from minio import Minio
-from backend.core.config import settings
 import os
 import tempfile
 import uuid
+
+from minio import Minio
+
+from backend.core.config import settings
 
 
 client = Minio(

@@ -1,43 +1,46 @@
-from minio import Minio
-from backend.core.config import settings
-import os
-import tempfile
-import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from backend.core.deps import get_db
+from backend.models.document import Document
+from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
+from backend.services.ai.rag_service import RagService
 
 
-client = Minio(
-    settings.MINIO_ENDPOINT,
-    access_key=settings.MINIO_ACCESS_KEY,
-    secret_key=settings.MINIO_SECRET_KEY,
-    secure=False
+router = APIRouter(prefix="/ai", tags=["AI"])
+
+pipeline = DocumentAIPipeline()
+rag_service = RagService(
+    vector_store=pipeline.vector_store,
+    embedding_service=pipeline.embedding_service
 )
 
-BUCKET_NAME = settings.MINIO_BUCKET
+
+class AskRequest(BaseModel):
+    question: str
+    top_k: int = 5
+    case_id: Optional[int] = None
+    document_id: Optional[int] = None
 
 
-def upload_file(file_data, filename):
-    if not client.bucket_exists(BUCKET_NAME):
-        client.make_bucket(BUCKET_NAME)
+@router.post("/process-document/{document_id}")
+def process_document(document_id: int, db: Session = Depends(get_db)):
+    document = db.query(Document).filter(Document.id == document_id).first()
 
-    object_name = f"documents/{uuid.uuid4()}_{filename}"
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
 
-    client.put_object(
-        BUCKET_NAME,
-        object_name,
-        file_data,
-        length=-1,
-        part_size=10 * 1024 * 1024
+    return pipeline.process_document(document, db)
+
+
+@router.post("/ask")
+def ask_question(data: AskRequest):
+    return rag_service.answer_question(
+        question=data.question,
+        top_k=data.top_k,
+        case_id=data.case_id,
+        document_id=data.document_id
     )
-
-    return object_name
-
-
-def download_file_to_temp(object_name: str) -> str:
-    suffix = os.path.splitext(object_name)[1] or ".pdf"
-
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    temp_file.close()
-
-    client.fget_object(BUCKET_NAME, object_name, temp_file.name)
-
-    return temp_file.name
