@@ -1,5 +1,7 @@
 from minio import Minio
 from backend.core.config import settings
+import os
+import tempfile
 
 
 client = Minio(
@@ -24,3 +26,14 @@ def upload_file(file_data, filename):
         length=-1,
         part_size=10 * 1024 * 1024
     )
+
+def download_file_to_temp(object_name: str) -> str:
+
+    suffix = os.path.splitext(object_name)[1] or ".pdf"
+
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    temp_file.close()  # IMPORTANT for Windows
+
+    client.fget_object(BUCKET_NAME, object_name, temp_file.name)
+
+    return temp_file.name
