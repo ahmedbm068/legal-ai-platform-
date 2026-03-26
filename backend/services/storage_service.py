@@ -2,6 +2,7 @@ from minio import Minio
 from backend.core.config import settings
 import os
 import tempfile
+import uuid
 
 
 client = Minio(
@@ -15,24 +16,27 @@ BUCKET_NAME = settings.MINIO_BUCKET
 
 
 def upload_file(file_data, filename):
-
     if not client.bucket_exists(BUCKET_NAME):
         client.make_bucket(BUCKET_NAME)
 
+    object_name = f"documents/{uuid.uuid4()}_{filename}"
+
     client.put_object(
         BUCKET_NAME,
-        filename,
+        object_name,
         file_data,
         length=-1,
         part_size=10 * 1024 * 1024
     )
 
-def download_file_to_temp(object_name: str) -> str:
+    return object_name
 
+
+def download_file_to_temp(object_name: str) -> str:
     suffix = os.path.splitext(object_name)[1] or ".pdf"
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    temp_file.close()  # IMPORTANT for Windows
+    temp_file.close()
 
     client.fget_object(BUCKET_NAME, object_name, temp_file.name)
 

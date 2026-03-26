@@ -1,27 +1,39 @@
 from typing import List
 
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 100) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> List[str]:
     """
-    Split text into overlapping chunks.
-    chunk_size and overlap are measured in words.
+    Chunk by paragraphs first, then merge into overlapping chunks.
     """
-    words = text.split()
-
-    if not words:
+    paragraphs = [p.strip() for p in text.split("\n") if p.strip()]
+    if not paragraphs:
         return []
 
     chunks = []
-    start = 0
+    current_chunk = []
 
-    while start < len(words):
-        end = start + chunk_size
-        chunk = words[start:end]
-        chunks.append(" ".join(chunk))
+    for paragraph in paragraphs:
+        current_text = "\n".join(current_chunk)
+        if len(current_text) + len(paragraph) < chunk_size:
+            current_chunk.append(paragraph)
+        else:
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+            current_chunk = [paragraph]
 
-        if end >= len(words):
-            break
+    if current_chunk:
+        chunks.append("\n".join(current_chunk))
 
-        start += chunk_size - overlap
+    if overlap <= 0 or len(chunks) <= 1:
+        return chunks
 
-    return chunks
+    overlapped_chunks = []
+    for i, chunk in enumerate(chunks):
+        if i == 0:
+            overlapped_chunks.append(chunk)
+            continue
+
+        prev_tail = chunks[i - 1][-overlap:]
+        overlapped_chunks.append(prev_tail + "\n" + chunk)
+
+    return overlapped_chunks

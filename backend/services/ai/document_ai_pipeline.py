@@ -1,8 +1,8 @@
 import os
-
 from sqlalchemy.orm import Session
 
 from backend.models.document import Document
+from backend.models.document_chunk import DocumentChunk
 from backend.services.ai.extraction_service import extract_text_from_pdf
 from backend.services.ai.chunking_service import chunk_text
 from backend.services.ai.embedding_service import EmbeddingService
@@ -15,7 +15,7 @@ class DocumentAIPipeline:
         self.embedding_service = EmbeddingService()
         self.vector_store = VectorStore(dimension=384)
 
-    def process_document(self, document: Document):
+    def process_document(self, document: Document, db: Session):
         temp_file_path = download_file_to_temp(document.storage_path)
 
         try:
@@ -28,10 +28,26 @@ class DocumentAIPipeline:
                 }
 
             chunks = chunk_text(text)
+
+            # delete old chunks for reprocessing
+            db.query(DocumentChunk).filter(DocumentChunk.document_id == document.id).delete()
+            db.commit()
+
             embeddings = self.embedding_service.embed_texts(chunks)
 
             metadatas = []
+            chunk_rows = []
+
             for i, chunk in enumerate(chunks):
+                chunk_rows.append(
+                    DocumentChunk(
+                        document_id=document.id,
+                        case_id=document.case_id,
+                        chunk_index=i,
+                        content=chunk
+                    )
+                )
+
                 metadatas.append({
                     "document_id": document.id,
                     "case_id": document.case_id,
@@ -39,6 +55,9 @@ class DocumentAIPipeline:
                     "chunk_index": i,
                     "chunk_text": chunk,
                 })
+
+            db.add_all(chunk_rows)
+            db.commit()
 
             self.vector_store.add_embeddings(embeddings, metadatas)
 

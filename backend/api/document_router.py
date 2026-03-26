@@ -1,19 +1,19 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Depends
 from sqlalchemy.orm import Session
-from pathlib import Path
-import uuid
 
 from backend.core.deps import get_db, get_current_user
 from backend.models.document import Document
 from backend.models.user import User
-from backend.models.case import Case
 from backend.services.storage_service import upload_file
+from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
 
 
 router = APIRouter(
     prefix="/documents",
     tags=["Documents"]
 )
+
+pipeline = DocumentAIPipeline()
 
 
 @router.post("/upload")
@@ -23,58 +23,39 @@ def upload_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    case = (
-        db.query(Case)
-        .filter(
-            Case.id == case_id,
-            Case.tenant_id == current_user.tenant_id
-        )
-        .first()
-    )
-
-    if not case:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Case not found"
-        )
-
-    original_filename = file.filename or "document.pdf"
-    file_extension = Path(original_filename).suffix.lower()
-    unique_id = uuid.uuid4().hex
-
-    stored_filename = f"{unique_id}{file_extension}"
-    storage_path = (
-        f"tenant_{current_user.tenant_id}/"
-        f"cases/{case_id}/"
-        f"documents/{stored_filename}"
-    )
+    filename = file.filename
 
     file.file.seek(0, 2)
     file_size = file.file.tell()
     file.file.seek(0)
 
-    file_type = file.content_type or "application/octet-stream"
-
-    upload_file(file.file, storage_path)
+    storage_path = upload_file(file.file, filename)
 
     new_doc = Document(
-        filename=original_filename,
+        filename=filename,
         storage_path=storage_path,
-        case_id=case_id,
-        tenant_id=current_user.tenant_id,
         file_size=file_size,
-        file_type=file_type
+        file_type=file.content_type,
+        case_id=case_id,
+        tenant_id=current_user.tenant_id
     )
 
     db.add(new_doc)
     db.commit()
     db.refresh(new_doc)
 
+    ai_result = pipeline.process_document(new_doc, db)
+
     return {
-        "message": "Document uploaded",
-        "document_id": new_doc.id,
-        "filename": new_doc.filename,
-        "storage_path": new_doc.storage_path,
-        "file_size": new_doc.file_size,
-        "file_type": new_doc.file_type
+        "document": {
+            "id": new_doc.id,
+            "filename": new_doc.filename,
+            "storage_path": new_doc.storage_path,
+            "file_size": new_doc.file_size,
+            "file_type": new_doc.file_type,
+            "upload_timestamp": new_doc.upload_timestamp,
+            "case_id": new_doc.case_id,
+            "tenant_id": new_doc.tenant_id
+        },
+        "ai_processing": ai_result
     }
