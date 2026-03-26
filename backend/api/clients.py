@@ -4,6 +4,7 @@ from sqlalchemy.sql import func
 
 from backend.core.permissions import require_roles
 from backend.core.deps import get_db, get_current_user
+from backend.core.enums import UserRole
 from backend.models.user import User
 from backend.models.client import Client
 from backend.api.client_schema import ClientCreate, ClientUpdate, ClientOut
@@ -11,14 +12,13 @@ from backend.api.client_schema import ClientCreate, ClientUpdate, ClientOut
 router = APIRouter(prefix="/clients", tags=["Clients"])
 
 
-# CREATE CLIENT
 @router.post("/", response_model=ClientOut, status_code=status.HTTP_201_CREATED)
 def create_client(
     client_data: ClientCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    require_roles(current_user, ["admin", "lawyer"])
+    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
 
     new_client = Client(
         name=client_data.name,
@@ -35,7 +35,6 @@ def create_client(
     return new_client
 
 
-# LIST CLIENTS
 @router.get("/", response_model=list[ClientOut])
 def list_clients(
     db: Session = Depends(get_db),
@@ -49,7 +48,6 @@ def list_clients(
     return clients
 
 
-# GET CLIENT
 @router.get("/{client_id}", response_model=ClientOut)
 def get_client(
     client_id: int,
@@ -68,7 +66,6 @@ def get_client(
     return client
 
 
-# UPDATE CLIENT
 @router.put("/{client_id}", response_model=ClientOut)
 def update_client(
     client_id: int,
@@ -76,7 +73,7 @@ def update_client(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    require_roles(current_user, ["admin", "lawyer"])
+    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
 
     client = db.query(Client).filter(
         Client.id == client_id,
@@ -105,15 +102,13 @@ def update_client(
     return client
 
 
-# DELETE CLIENT (SOFT DELETE)
-@router.delete("/{client_id}")
+@router.delete("/{client_id}", status_code=status.HTTP_200_OK)
 def delete_client(
     client_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-
-    require_roles(current_user, ["admin"])
+    require_roles(current_user, [UserRole.admin])
 
     client = db.query(Client).filter(
         Client.id == client_id,
@@ -125,7 +120,6 @@ def delete_client(
         raise HTTPException(status_code=404, detail="Client not found")
 
     client.deleted_at = func.now()
-
     db.commit()
 
     return {"message": "Client archived successfully"}

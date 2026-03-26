@@ -1,12 +1,13 @@
 from pydantic import BaseModel, EmailStr, ConfigDict
 from datetime import datetime
+from backend.core.enums import UserRole
 
 
 class UserRegister(BaseModel):
     name: str
     email: EmailStr
     password: str
-    role: str = "lawyer"
+    role: UserRole = UserRole.lawyer
     tenant_name: str
 
 
@@ -21,7 +22,7 @@ class UserOut(BaseModel):
     id: int
     name: str
     email: EmailStr
-    role: str
+    role: UserRole
     tenant_id: int
     created_at: datetime
 

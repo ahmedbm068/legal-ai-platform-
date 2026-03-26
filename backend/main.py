@@ -5,6 +5,7 @@ from backend.models.user import User
 from backend.models.tenant import Tenant
 from backend.models.client import Client
 from backend.models.case import Case
+from backend.api.document_router import router as document_router
 
 from backend.api import auth, users, clients, cases
 
@@ -16,6 +17,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(clients.router)
 app.include_router(cases.router)
+app.include_router(document_router)
 
 
 @app.get("/")

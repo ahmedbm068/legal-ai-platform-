@@ -1,8 +1,10 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy import Enum as SQLAlchemyEnum
 
 from backend.database.database import Base
+from backend.core.enums import UserRole
 
 
 class User(Base):
@@ -16,7 +18,11 @@ class User(Base):
 
     hashed_password = Column(String, nullable=False)
 
-    role = Column(String, nullable=False, default="lawyer")
+    role = Column(
+        SQLAlchemyEnum(UserRole),
+        nullable=False,
+        default=UserRole.lawyer
+    )
 
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
 

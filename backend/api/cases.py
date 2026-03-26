@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
+from sqlalchemy.sql import func
 
 from backend.core.permissions import require_roles
 from backend.core.deps import get_db, get_current_user
+from backend.core.enums import UserRole
 from backend.models.case import Case
 from backend.models.user import User
 from backend.models.client import Client
@@ -18,9 +19,12 @@ def create_case(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
+
     client = db.query(Client).filter(
         Client.id == case_data.client_id,
-        Client.tenant_id == current_user.tenant_id
+        Client.tenant_id == current_user.tenant_id,
+        Client.deleted_at == None
     ).first()
 
     if not client:
@@ -47,7 +51,10 @@ def list_cases(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return db.query(Case).filter(Case.tenant_id == current_user.tenant_id).all()
+    return db.query(Case).filter(
+        Case.tenant_id == current_user.tenant_id,
+        Case.deleted_at == None
+    ).all()
 
 
 @router.get("/{case_id}", response_model=CaseOut)
@@ -58,7 +65,8 @@ def get_case(
 ):
     case = db.query(Case).filter(
         Case.id == case_id,
-        Case.tenant_id == current_user.tenant_id
+        Case.tenant_id == current_user.tenant_id,
+        Case.deleted_at == None
     ).first()
 
     if not case:
@@ -74,18 +82,28 @@ def update_case(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
+
     case = db.query(Case).filter(
         Case.id == case_id,
-        Case.tenant_id == current_user.tenant_id
+        Case.tenant_id == current_user.tenant_id,
+        Case.deleted_at == None
     ).first()
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
+    if current_user.role != UserRole.admin and case.lawyer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update your assigned cases"
+        )
+
     if case_data.client_id is not None:
         client = db.query(Client).filter(
             Client.id == case_data.client_id,
-            Client.tenant_id == current_user.tenant_id
+            Client.tenant_id == current_user.tenant_id,
+            Client.deleted_at == None
         ).first()
 
         if not client:
@@ -114,15 +132,24 @@ def delete_case(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
+
     case = db.query(Case).filter(
         Case.id == case_id,
-        Case.tenant_id == current_user.tenant_id
+        Case.tenant_id == current_user.tenant_id,
+        Case.deleted_at == None
     ).first()
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
-    db.delete(case)
+    if current_user.role != UserRole.admin and case.lawyer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only delete your assigned cases"
+        )
+
+    case.deleted_at = func.now()
     db.commit()
 
-    return {"message": "Case deleted successfully"}
+    return {"message": "Case archived successfully"}

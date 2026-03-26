@@ -13,7 +13,11 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    existing_user = db.query(User).filter(
+        User.email == user_data.email,
+        User.deleted_at == None
+    ).first()
+
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
@@ -42,7 +46,10 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 def login(user_data: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == user_data.email).first()
+    user = db.query(User).filter(
+        User.email == user_data.email,
+        User.deleted_at == None
+    ).first()
 
     if not user or not verify_password(user_data.password, user.hashed_password):
         raise HTTPException(
@@ -51,9 +58,17 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
         )
 
     access_token = create_access_token(
-        data={"sub": str(user.id), "tenant_id": user.tenant_id}
+        data={
+            "sub": str(user.id),
+            "tenant_id": user.tenant_id,
+            "role": user.role.value if hasattr(user.role, "value") else user.role
+        }
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
 
 
 @router.get("/me", response_model=UserOut)
