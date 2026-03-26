@@ -9,8 +9,5 @@ router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @router.get("/", response_model=list[UserOut])
-def list_users(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def list_users(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     return db.query(User).filter(User.tenant_id == current_user.tenant_id).all()

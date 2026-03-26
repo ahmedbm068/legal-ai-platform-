@@ -1,30 +1,34 @@
 # Legal AI Platform
 
-AI-powered legal case management system.
+AI-powered legal case management and analysis platform.
 
 ## Features
 
 - Case management
 - Document management
 - Call transcription
-- AI document analysis
+- AI document classification
+- Legal entity extraction
 - Case outcome prediction
 
-## Tech Stack
+## Architecture
 
-Backend:
-- FastAPI
+The system follows a microservice-style architecture.
+
+Frontend → FastAPI Backend → AI Services
+
+Infrastructure:
 - PostgreSQL
 - Redis
 - MinIO
+- Docker
 
-AI:
-- Speech-to-text
-- Named Entity Recognition
-- Document classification
-- Summarization
-- Prediction models
+## API Documentation
 
-## Running the API
+Run backend:
 
-Activate the virtual environment:
+uvicorn backend.main:app --reload
+
+Open Swagger:
+
+http://127.0.0.1:8000/docs

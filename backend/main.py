@@ -1,16 +1,27 @@
 from fastapi import FastAPI
+
 from backend.database.database import Base, engine
-from backend.api import users
+from backend.models.user import User
+from backend.models.tenant import Tenant
+from backend.models.client import Client
+from backend.models.case import Case
+
+from backend.api import auth, users, clients, cases
 
 app = FastAPI(title="Legal AI Platform")
 
 Base.metadata.create_all(bind=engine)
 
+app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(clients.router)
+app.include_router(cases.router)
+
 
 @app.get("/")
 def root():
     return {"message": "Legal AI Platform API is running"}
+
 
 @app.get("/health")
 def health():

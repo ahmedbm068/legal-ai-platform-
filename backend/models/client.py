@@ -5,18 +5,18 @@ from sqlalchemy.sql import func
 from backend.database.database import Base
 
 
-class User(Base):
-    __tablename__ = "users"
+class Client(Base):
+    __tablename__ = "clients"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    name = Column(String, nullable=False)
+    name = Column(String, nullable=False, index=True)
 
-    email = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, nullable=True, index=True)
 
-    hashed_password = Column(String, nullable=False)
+    phone = Column(String, nullable=True)
 
-    role = Column(String, nullable=False, default="lawyer")
+    address = Column(String, nullable=True)
 
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
 
@@ -30,6 +30,6 @@ class User(Base):
 
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 
-    tenant = relationship("Tenant", back_populates="users")
+    tenant = relationship("Tenant", back_populates="clients")
 
-    cases = relationship("Case", back_populates="lawyer")
+    cases = relationship("Case", back_populates="client")
