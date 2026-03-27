@@ -26,6 +26,18 @@ class Document(Base):
     extracted_text = Column(Text, nullable=True)
     redacted_text = Column(Text, nullable=True)
 
+    summary = Column(Text, nullable=True)
+    summary_short = Column(Text, nullable=True)
+    summary_status = Column(String, nullable=False, default="not_started")
+    summary_error = Column(Text, nullable=True)
+    summary_generated_at = Column(DateTime(timezone=True), nullable=True)
+
+    document_type = Column(String, nullable=True)
+    summary_version = Column(String, nullable=True)
+    summary_source = Column(String, nullable=True)
+    insights_json = Column(Text, nullable=True)
+    last_intelligence_run_at = Column(DateTime(timezone=True), nullable=True)
+
     case = relationship("Case", back_populates="documents")
     tenant = relationship("Tenant")
 

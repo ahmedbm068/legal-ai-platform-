@@ -28,16 +28,18 @@ class DocumentAIPipeline:
             document.processing_status = "processing"
             document.processing_error = None
             db.commit()
+            db.refresh(document)
 
             temp_file_path = download_file_to_temp(document.storage_path)
 
             text = extract_text_from_pdf(temp_file_path)
             text = normalize_text(text)
 
-            if not text:
+            if not text or not text.strip():
                 document.processing_status = "failed"
                 document.processing_error = "No text could be extracted from the PDF."
                 db.commit()
+                db.refresh(document)
 
                 return {
                     "success": False,
@@ -58,8 +60,8 @@ class DocumentAIPipeline:
                     document_id=document.id,
                     label=e["label"],
                     value=e["value"],
-                    start_char=e["start_char"],
-                    end_char=e["end_char"]
+                    start_char=e.get("start_char"),
+                    end_char=e.get("end_char")
                 )
                 for e in entities
             ]
@@ -84,6 +86,8 @@ class DocumentAIPipeline:
                 chunk_rows.append(
                     DocumentChunk(
                         document_id=document.id,
+                        case_id=document.case_id,
+                        tenant_id=document.tenant_id,
                         chunk_index=i,
                         content=chunk
                     )
@@ -107,6 +111,7 @@ class DocumentAIPipeline:
             document.processing_status = "processed"
             document.processing_error = None
             db.commit()
+            db.refresh(document)
 
             return {
                 "success": True,
@@ -120,9 +125,11 @@ class DocumentAIPipeline:
 
         except Exception as e:
             db.rollback()
+
             document.processing_status = "failed"
             document.processing_error = str(e)
             db.commit()
+            db.refresh(document)
 
             return {
                 "success": False,

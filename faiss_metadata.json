@@ -12,5 +12,101 @@
     "filename": "sample_rental_contract.pdf",
     "chunk_index": 1,
     "chunk_text": "a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance\nThe Tenant agrees to maintain the property in good condition and notify the Landlord of any\ndamages or repairs required.\n6. Termination\nEither party may terminate the agreement with a 30-day written notice."
+  },
+  {
+    "document_id": 2,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 0,
+    "chunk_text": "Residential Rental Agreement (Sample Document)\nThis Rental Agreement is made between the Landlord and the Tenant. This document is a simple\nexample contract that can be used to test document uploading, processing, and AI question\nanswering in the Legal AI Platform.\n1. Parties\nThe Landlord agrees to rent the property located at 10 Example Street, and the Tenant agrees to\npay rent under the terms defined in this agreement.\n2. Rent Payment\nThe Tenant agrees to pay a monthly rent of 1200 USD on the first day of each month.\n3. Late Payment\nIf the rent is not paid within 5 days of the due date, a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance"
+  },
+  {
+    "document_id": 2,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 1,
+    "chunk_text": "a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance\nThe Tenant agrees to maintain the property in good condition and notify the Landlord of any\ndamages or repairs required.\n6. Termination\nEither party may terminate the agreement with a 30-day written notice."
+  },
+  {
+    "document_id": 3,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 0,
+    "chunk_text": "Residential Rental Agreement (Sample Document)\nThis Rental Agreement is made between the Landlord and the Tenant. This document is a simple\nexample contract that can be used to test document uploading, processing, and AI question\nanswering in the Legal AI Platform.\n1. Parties\nThe Landlord agrees to rent the property located at 10 Example Street, and the Tenant agrees to\npay rent under the terms defined in this agreement.\n2. Rent Payment\nThe Tenant agrees to pay a monthly rent of 1200 USD on the first day of each month.\n3. Late Payment\nIf the rent is not paid within 5 days of the due date, a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance"
+  },
+  {
+    "document_id": 3,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 1,
+    "chunk_text": "a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance\nThe Tenant agrees to maintain the property in good condition and notify the Landlord of any\ndamages or repairs required.\n6. Termination\nEither party may terminate the agreement with a 30-day written notice."
+  },
+  {
+    "document_id": 4,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 0,
+    "chunk_text": "Residential Rental Agreement (Sample Document)\nThis Rental Agreement is made between the Landlord and the Tenant. This document is a simple\nexample contract that can be used to test document uploading, processing, and AI question\nanswering in the Legal AI Platform.\n1. Parties\nThe Landlord agrees to rent the property located at 10 Example Street, and the Tenant agrees to\npay rent under the terms defined in this agreement.\n2. Rent Payment\nThe Tenant agrees to pay a monthly rent of 1200 USD on the first day of each month.\n3. Late Payment\nIf the rent is not paid within 5 days of the due date, a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance"
+  },
+  {
+    "document_id": 4,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 1,
+    "chunk_text": "a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance\nThe Tenant agrees to maintain the property in good condition and notify the Landlord of any\ndamages or repairs required.\n6. Termination\nEither party may terminate the agreement with a 30-day written notice."
+  },
+  {
+    "document_id": 5,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 0,
+    "chunk_text": "Residential Rental Agreement (Sample Document)\nThis Rental Agreement is made between the Landlord and the Tenant. This document is a simple\nexample contract that can be used to test document uploading, processing, and AI question\nanswering in the Legal AI Platform.\n1. Parties\nThe Landlord agrees to rent the property located at 10 Example Street, and the Tenant agrees to\npay rent under the terms defined in this agreement.\n2. Rent Payment\nThe Tenant agrees to pay a monthly rent of 1200 USD on the first day of each month.\n3. Late Payment\nIf the rent is not paid within 5 days of the due date, a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance"
+  },
+  {
+    "document_id": 5,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 1,
+    "chunk_text": "a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance\nThe Tenant agrees to maintain the property in good condition and notify the Landlord of any\ndamages or repairs required.\n6. Termination\nEither party may terminate the agreement with a 30-day written notice."
+  },
+  {
+    "document_id": 6,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 0,
+    "chunk_text": "Residential Rental Agreement (Sample Document)\nThis Rental Agreement is made between the Landlord and the Tenant. This document is a simple\nexample contract that can be used to test document uploading, processing, and AI question\nanswering in the Legal AI Platform.\n1. Parties\nThe Landlord agrees to rent the property located at 10 Example Street, and the Tenant agrees to\npay rent under the terms defined in this agreement.\n2. Rent Payment\nThe Tenant agrees to pay a monthly rent of 1200 USD on the first day of each month.\n3. Late Payment\nIf the rent is not paid within 5 days of the due date, a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance"
+  },
+  {
+    "document_id": 6,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 1,
+    "chunk_text": "a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance\nThe Tenant agrees to maintain the property in good condition and notify the Landlord of any\ndamages or repairs required.\n6. Termination\nEither party may terminate the agreement with a 30-day written notice."
+  },
+  {
+    "document_id": 6,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 0,
+    "chunk_text": "Residential Rental Agreement (Sample Document)\nThis Rental Agreement is made between the Landlord and the Tenant. This document is a simple\nexample contract that can be used to test document uploading, processing, and AI question\nanswering in the Legal AI Platform.\n1. Parties\nThe Landlord agrees to rent the property located at 10 Example Street, and the Tenant agrees to\npay rent under the terms defined in this agreement.\n2. Rent Payment\nThe Tenant agrees to pay a monthly rent of 1200 USD on the first day of each month.\n3. Late Payment\nIf the rent is not paid within 5 days of the due date, a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance"
+  },
+  {
+    "document_id": 6,
+    "case_id": 1,
+    "tenant_id": 1,
+    "filename": "sample_rental_contract.pdf",
+    "chunk_index": 1,
+    "chunk_text": "a late fee of 50 USD may be applied.\n4. Security Deposit\nThe Tenant shall pay a refundable security deposit equal to one month of rent.\n5. Maintenance\nThe Tenant agrees to maintain the property in good condition and notify the Landlord of any\ndamages or repairs required.\n6. Termination\nEither party may terminate the agreement with a 30-day written notice."
   }
 ]
