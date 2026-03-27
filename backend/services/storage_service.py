@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import tempfile
 import uuid
@@ -17,9 +19,13 @@ client = Minio(
 BUCKET_NAME = settings.MINIO_BUCKET
 
 
-def upload_file(file_data, filename):
+def ensure_bucket_exists() -> None:
     if not client.bucket_exists(BUCKET_NAME):
         client.make_bucket(BUCKET_NAME)
+
+
+def upload_file(file_data, filename: str) -> str:
+    ensure_bucket_exists()
 
     object_name = f"documents/{uuid.uuid4()}_{filename}"
 
@@ -35,6 +41,8 @@ def upload_file(file_data, filename):
 
 
 def download_file_to_temp(object_name: str) -> str:
+    ensure_bucket_exists()
+
     suffix = os.path.splitext(object_name)[1] or ".pdf"
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)

@@ -1,40 +1,94 @@
+from __future__ import annotations
+
 import json
 import os
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 import faiss
 import numpy as np
 
 
 class VectorStore:
-    def __init__(self, dimension: int, index_path: str = "faiss_index.bin", metadata_path: str = "faiss_metadata.json"):
+    def __init__(
+        self,
+        dimension: int,
+        index_path: str = "faiss_index.bin",
+        metadata_path: str = "faiss_metadata.json"
+    ):
         self.dimension = dimension
         self.index_path = index_path
         self.metadata_path = metadata_path
 
-        if os.path.exists(self.index_path):
-            self.index = faiss.read_index(self.index_path)
-        else:
-            self.index = faiss.IndexFlatL2(dimension)
+        self.index = self._load_or_create_index()
+        self.metadata = self._load_metadata()
 
+        if self.index.ntotal != len(self.metadata):
+            self._rebuild_index_from_metadata_embeddings()
+            self.save()
+
+    def _load_or_create_index(self):
+        if os.path.exists(self.index_path):
+            return faiss.read_index(self.index_path)
+        return faiss.IndexFlatIP(self.dimension)
+
+    def _load_metadata(self) -> List[Dict[str, Any]]:
         if os.path.exists(self.metadata_path):
             with open(self.metadata_path, "r", encoding="utf-8") as f:
-                self.metadata: List[Dict[str, Any]] = json.load(f)
-        else:
-            self.metadata = []
+                return json.load(f)
+        return []
 
     def save(self) -> None:
         faiss.write_index(self.index, self.index_path)
         with open(self.metadata_path, "w", encoding="utf-8") as f:
             json.dump(self.metadata, f, ensure_ascii=False, indent=2)
 
+    def _rebuild_index_from_metadata_embeddings(self) -> None:
+        self.index = faiss.IndexFlatIP(self.dimension)
+
+        vectors = []
+        for item in self.metadata:
+            embedding = item.get("embedding")
+            if embedding:
+                vectors.append(embedding)
+
+        if vectors:
+            np_vectors = np.array(vectors, dtype="float32")
+            self.index.add(np_vectors)
+
+    def remove_document_embeddings(self, document_id: int) -> None:
+        self.metadata = [
+            item for item in self.metadata
+            if item.get("document_id") != document_id
+        ]
+        self._rebuild_index_from_metadata_embeddings()
+        self.save()
+
     def add_embeddings(self, embeddings: List[List[float]], metadatas: List[Dict[str, Any]]) -> None:
         if not embeddings:
             return
 
-        vectors = np.array(embeddings, dtype="float32")
+        if len(embeddings) != len(metadatas):
+            raise ValueError("embeddings and metadatas must have the same length")
+
+        enriched_metadatas = []
+        clean_embeddings = []
+
+        for embedding, metadata in zip(embeddings, metadatas):
+            if not embedding:
+                continue
+
+            item = dict(metadata)
+            item["embedding"] = embedding
+
+            enriched_metadatas.append(item)
+            clean_embeddings.append(embedding)
+
+        if not clean_embeddings:
+            return
+
+        vectors = np.array(clean_embeddings, dtype="float32")
         self.index.add(vectors)
-        self.metadata.extend(metadatas)
+        self.metadata.extend(enriched_metadatas)
         self.save()
 
     def search(
@@ -42,21 +96,26 @@ class VectorStore:
         query_embedding: List[float],
         top_k: int = 5,
         case_id: Optional[int] = None,
-        document_id: Optional[int] = None
+        document_id: Optional[int] = None,
+        tenant_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        if self.index.ntotal == 0:
+        if not query_embedding or self.index.ntotal == 0:
             return []
 
         query_vector = np.array([query_embedding], dtype="float32")
-        search_k = max(top_k * 5, 20)
-        distances, indices = self.index.search(query_vector, min(search_k, self.index.ntotal))
+        search_k = min(max(top_k * 10, 30), self.index.ntotal)
+
+        scores, indices = self.index.search(query_vector, search_k)
 
         results = []
-        for distance, idx in zip(distances[0], indices[0]):
+        for score, idx in zip(scores[0], indices[0]):
             if idx == -1 or idx >= len(self.metadata):
                 continue
 
             item = self.metadata[idx]
+
+            if tenant_id is not None and item.get("tenant_id") != tenant_id:
+                continue
 
             if case_id is not None and item.get("case_id") != case_id:
                 continue
@@ -64,8 +123,13 @@ class VectorStore:
             if document_id is not None and item.get("document_id") != document_id:
                 continue
 
+            semantic_score = float(score)
+
             result = item.copy()
-            result["score"] = float(distance)
+            result["score"] = semantic_score
+            result["semantic_score"] = semantic_score
+            result["bm25_score"] = 0.0
+            result["retrieval_method"] = "semantic"
             results.append(result)
 
             if len(results) >= top_k:
