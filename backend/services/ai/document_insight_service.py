@@ -12,11 +12,11 @@ from backend.services.ai.legal_text_formatter import LegalTextFormatter
 class DocumentInsightService:
     MAX_INPUT_CHARS = 30000
     MAX_KEY_POINTS = 8
-    MAX_DATES = 12
-    MAX_PARTIES = 8
+    MAX_DATES = 8
+    MAX_PARTIES = 6
     MAX_RISKS = 8
     MAX_ACTIONS = 8
-    MAX_MISSING_EVIDENCE = 6
+    MAX_MISSING_EVIDENCE = 5
     MAX_PAYMENT_TERMS = 4
     MAX_TERMINATION_TERMS = 4
 
@@ -64,6 +64,9 @@ class DocumentInsightService:
         "order date",
         "document type",
         "jurisdiction",
+        "this case concerns",
+        "commercial dispute between",
+        "confidential internal note",
     ]
 
     SECTION_HEADERS = {
@@ -79,6 +82,8 @@ class DocumentInsightService:
         "payment terms",
         "termination terms",
         "document overview",
+        "case overview",
+        "client",
     }
 
     MISSING_EVIDENCE_HINTS = [
@@ -189,7 +194,7 @@ class DocumentInsightService:
             "legal_risks": legal_risks,
             "recommended_actions": recommended_actions,
             "summary_source": "elite_heuristic",
-            "summary_version": "v7",
+            "summary_version": "v9",
         }
 
     def to_json_string(self, insights: dict[str, Any]) -> str:
@@ -206,15 +211,15 @@ class DocumentInsightService:
         missing_evidence: list[str],
     ) -> str:
         intro_map = {
-            "contract": "This document appears to be a contract or contract-related record.",
-            "court_judgment": "This document appears to be a court judgment or court-related decision.",
-            "invoice": "This document appears to be an invoice or payment-related billing record.",
-            "legal_letter": "This document appears to be a legal letter or formal notice.",
-            "complaint": "This document appears to be a complaint or adversarial pleading.",
-            "identity_document": "This document appears to be an identity-related document.",
-            "evidence_attachment": "This document appears to be a supporting evidence attachment.",
-            "case_memo": "This document appears to be an internal legal case memo.",
-            "unknown": "This document appears to concern legal or administrative matters.",
+            "contract": "This document is a contract or contract-related record.",
+            "court_judgment": "This document is a court judgment or court-related decision.",
+            "invoice": "This document is an invoice or payment-related billing record.",
+            "legal_letter": "This document is a legal letter or formal notice.",
+            "complaint": "This document is a complaint or adversarial pleading.",
+            "identity_document": "This document is an identity-related document.",
+            "evidence_attachment": "This document is a supporting evidence attachment.",
+            "case_memo": "This document is an internal legal case memo.",
+            "unknown": "This document concerns legal or administrative matters.",
         }
 
         parts: list[str] = [intro_map.get(document_type, intro_map["unknown"])]
@@ -223,12 +228,12 @@ class DocumentInsightService:
         role_parties = [p for p in parties_detected if p in self.GENERIC_ROLES]
 
         if named_parties:
-            parts.append("The main named parties identified are " + ", ".join(named_parties[:3]) + ".")
+            parts.append("The main named parties are " + ", ".join(named_parties[:2]) + ".")
         elif role_parties:
             parts.append("The main legal roles identified are " + ", ".join(role_parties[:3]) + ".")
 
         if payment_terms:
-            parts.append("A payment obligation is mentioned in the document.")
+            parts.append("The document includes a payment obligation.")
         if termination_terms:
             parts.append("The document includes termination or notice-related mechanics.")
         if important_dates:
@@ -260,7 +265,7 @@ class DocumentInsightService:
         for item in important_dates[:2]:
             label = self._normalize_summary_sentence(item.get("label", "date")).replace("_", " ")
             value = self._normalize_summary_sentence(item.get("value", ""))
-            if value:
+            if value and label != "mentioned date":
                 self._append_unique(key_points, f"{label}: {value}")
 
         for item in legal_risks[:2]:
@@ -306,6 +311,8 @@ class DocumentInsightService:
                 label = self._label_date_from_context(text, raw_value)
                 key = (label, value.lower())
 
+                if label == "mentioned_date":
+                    continue
                 if key in seen:
                     continue
 
@@ -335,11 +342,47 @@ class DocumentInsightService:
                 seen.add(key)
                 results.append({"label": label, "value": value})
 
+        results = sorted(
+            results,
+            key=lambda x: self._rank_date_priority(x["label"]),
+            reverse=True
+        )
+
         return results[:self.MAX_DATES]
+
+    def _rank_date_priority(self, label: str) -> int:
+        priority_map = {
+            "contract_start_date": 10,
+            "invoice_due_date": 9,
+            "hearing_date": 9,
+            "invoice_date": 8,
+            "notice_date": 8,
+            "deadline_or_due_date": 8,
+            "cure_period_related_date": 7,
+            "settlement_related_date": 7,
+            "delivery_date": 6,
+            "order_date": 5,
+            "response_date": 5,
+            "recurring_payment_date": 4,
+            "deadline_or_time_limit": 4,
+            "notice_period": 4,
+            "cure_period": 4,
+            "settlement_period": 4,
+        }
+        return priority_map.get(label, 1)
 
     def _extract_parties(self, text: str, document_type: str) -> list[str]:
         named_parties: list[str] = []
         role_parties: list[str] = []
+
+        case_title_match = re.search(r"(?i)case title\s*:\s*([^\n]+)", text)
+        if case_title_match:
+            title = self._normalize_summary_sentence(case_title_match.group(1))
+            split_parties = re.split(r"(?i)\s+v\.?\s+|\s+vs\.?\s+", title)
+            for part in split_parties[:2]:
+                cleaned = self._clean_party_name(part)
+                if self._is_valid_party_name(cleaned):
+                    self._append_unique(named_parties, cleaned)
 
         corporate_patterns = [
             r"\b([A-Z][A-Za-z0-9&,\.\-\s]{1,60}\s+SARL)\b",
@@ -412,10 +455,22 @@ class DocumentInsightService:
         for pattern in self.PAYMENT_PATTERNS:
             for match in re.finditer(pattern, text, flags=re.IGNORECASE):
                 cleaned = self._normalize_summary_sentence(match.group(0))
+
+                lowered = cleaned.lower()
+                if "total unpaid amount" in lowered:
+                    cleaned = re.sub(
+                        r"(?i)^total unpaid amount claimed as immediately due by\s+",
+                        "Outstanding amount: ",
+                        cleaned,
+                    )
+                elif lowered.startswith("amount due"):
+                    cleaned = re.sub(r"(?i)^amount due[:\s]*", "Amount due: ", cleaned)
+
                 if not self._is_clean_text(cleaned):
                     continue
                 if len(cleaned) < 15:
                     continue
+
                 self._append_unique(results, cleaned)
 
         return results[:self.MAX_PAYMENT_TERMS]
@@ -425,11 +480,34 @@ class DocumentInsightService:
 
         for pattern in self.TERMINATION_PATTERNS:
             for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-                cleaned = self._normalize_summary_sentence(match.group(0))
+                raw = match.group(0)
+                cleaned = self._normalize_summary_sentence(raw)
+                lowered = cleaned.lower()
+
+                if "cure period" in lowered:
+                    period_match = re.search(r"(?i)cure period of ([^.,\n]+)", cleaned)
+                    if period_match:
+                        cleaned = f"A cure period of {period_match.group(1).strip()} is provided before termination."
+                    else:
+                        cleaned = "A cure period is provided before termination."
+
+                elif "terminate" in lowered and "material breach" in lowered:
+                    cleaned = "Either party may terminate the agreement in case of a material breach."
+
+                elif "written notice" in lowered:
+                    cleaned = "Termination requires prior written notice."
+
+                elif "material breach" in lowered:
+                    cleaned = "Termination rights are triggered by a material breach."
+
+                cleaned = cleaned.replace("expir", "expire")
+                cleaned = re.sub(r"\s*,\s*-\s*", ", ", cleaned)
+
                 if not self._is_clean_text(cleaned):
                     continue
-                if len(cleaned) < 15:
+                if len(cleaned) < 20:
                     continue
+
                 self._append_unique(results, cleaned)
 
         return results[:self.MAX_TERMINATION_TERMS]
@@ -444,23 +522,20 @@ class DocumentInsightService:
 
             lowered = stripped.lower()
 
-            if lowered in self.SECTION_HEADERS:
+            if lowered.rstrip(":") in self.SECTION_HEADERS:
                 continue
-
+            if lowered.startswith("records:"):
+                continue
             if any(header in lowered for header in self.SECTION_HEADERS):
                 continue
 
             if any(hint in lowered for hint in self.MISSING_EVIDENCE_HINTS):
-                cleaned = self._normalize_summary_sentence(stripped)
-                cleaned = cleaned.split(".")[0].split(" and ")[0].strip()
-
+                cleaned = self._trim_missing_evidence(stripped)
                 if self._is_reasonable_missing_evidence(cleaned):
                     self._append_unique(results, cleaned)
 
             if lowered.startswith(("did not attach", "no signed", "no ", "missing ")):
-                cleaned = self._normalize_summary_sentence(stripped)
-                cleaned = cleaned.split(".")[0].split(" and ")[0].strip()
-
+                cleaned = self._trim_missing_evidence(stripped)
                 if self._is_reasonable_missing_evidence(cleaned):
                     self._append_unique(results, cleaned)
 
@@ -571,7 +646,7 @@ class DocumentInsightService:
                 continue
             if cleaned and cleaned not in results:
                 results.append(cleaned)
-            if len(results) >= 3:
+            if len(results) >= 2:
                 break
 
         return results
@@ -615,8 +690,6 @@ class DocumentInsightService:
                 points += 3
             if "missing evidence" in lowered or "did not attach" in lowered:
                 points += 2
-            if len(sentence) > 80:
-                points += 1
 
             return points
 
@@ -625,7 +698,7 @@ class DocumentInsightService:
     def _label_date_from_context(self, text: str, date: str) -> str:
         around = self._extract_context_around_value(text, date).lower()
 
-        if "invoice due date" in around or "due date" in around:
+        if "invoice due date" in around or "payment due date" in around:
             return "invoice_due_date"
         if "invoice date" in around:
             return "invoice_date"
@@ -635,7 +708,7 @@ class DocumentInsightService:
             return "delivery_date"
         if "hearing" in around or "audience" in around:
             return "hearing_date"
-        if "effective date" in around or "start date" in around or "signed" in around or "agreement signed" in around:
+        if "effective date" in around or "start date" in around or "agreement signed" in around:
             return "contract_start_date"
         if "breach notice" in around or "formal notice" in around or "date of notice" in around:
             return "notice_date"
@@ -643,7 +716,7 @@ class DocumentInsightService:
             return "cure_period_related_date"
         if "settlement period" in around or "amicable settlement" in around:
             return "settlement_related_date"
-        if "deadline" in around or "payment due" in around:
+        if "deadline" in around:
             return "deadline_or_due_date"
         if "response" in around:
             return "response_date"
@@ -689,6 +762,8 @@ class DocumentInsightService:
 
         stop_markers = [
             "this document",
+            "this case concerns",
+            "commercial dispute between",
             "under the terms",
             "located at",
             "agrees to",
@@ -710,13 +785,18 @@ class DocumentInsightService:
         lowered = cleaned.lower()
         for marker in stop_markers:
             index = lowered.find(marker)
-            if index > 0:
+            if index >= 0:
                 cleaned = cleaned[:index].strip(" ,.;:-")
                 lowered = cleaned.lower()
 
         cleaned = re.sub(r"(?i)\s*[-–—:]?\s*(claimant|respondent|buyer|supplier|plaintiff|defendant|landlord|tenant|sender|recipient)\s*$", "", cleaned)
         cleaned = re.sub(r"(?i)\s+\bv\b\s*$", "", cleaned)
         cleaned = re.sub(r"(?i)\s+\bvs\.?\b\s*$", "", cleaned)
+
+        if "," in cleaned:
+            parts = [p.strip() for p in cleaned.split(",") if p.strip()]
+            if parts:
+                cleaned = parts[0]
 
         return cleaned.strip(" ,.;:-")
 
@@ -738,6 +818,8 @@ class DocumentInsightService:
             return False
         if any(token in lowered for token in ["invoice", "date", "amount due", "payment due"]):
             return False
+        if "," in value:
+            return False
 
         return True
 
@@ -752,7 +834,8 @@ class DocumentInsightService:
                     cleaned = candidate
                     break
 
-        return cleaned[:120].strip(" ,;:-")
+        cleaned = re.sub(r"(?i)^records:\s*", "", cleaned)
+        return cleaned[:110].strip(" ,;:-")
 
     def _is_reasonable_missing_evidence(self, value: str) -> bool:
         if not value:
@@ -762,11 +845,15 @@ class DocumentInsightService:
 
         if len(value) < 8:
             return False
-        if len(value) > 120:
+        if len(value) > 110:
             return False
         if lowered in {"missing", "proof of", "no"}:
             return False
         if any(header in lowered for header in self.SECTION_HEADERS):
+            return False
+        if lowered.startswith("risk that "):
+            return False
+        if lowered.startswith("records:"):
             return False
 
         return True
@@ -792,6 +879,8 @@ class DocumentInsightService:
             "recommended next steps:",
             "document overview",
             "prepared for testing",
+            "this case concerns",
+            "commercial dispute between",
         ]
 
         if any(fragment in lowered for fragment in blocked_fragments):

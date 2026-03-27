@@ -27,7 +27,7 @@ BLOCKED_ENTITY_VALUES = {
     "legal risks",
     "missing evidence",
     "recommended actions",
-    "atlas build sarl v",
+    "client",
 }
 
 BLOCKED_PREFIXES = (
@@ -46,6 +46,7 @@ BLOCKED_PREFIXES = (
     "legal risks:",
     "missing evidence:",
     "recommended next steps:",
+    "recommended actions:",
 )
 
 BLOCKED_EXACT_SHORT_VALUES = {
@@ -56,6 +57,10 @@ BLOCKED_EXACT_SHORT_VALUES = {
     "unknown",
     "yes",
     "no",
+    "client",
+    "confidential",
+    "internal",
+    "note",
 }
 
 ROLE_WORDS = {
@@ -93,7 +98,41 @@ HEADING_WORDS = {
     "clause",
     "article",
     "section",
+    "client",
+    "confidential",
+    "internal",
+    "note",
+    "preliminary",
+    "case",
 }
+
+CITY_NAMES = {
+    "tunis",
+    "sfax",
+    "sousse",
+    "monastir",
+    "nabeul",
+    "bizerte",
+    "kairouan",
+    "gabes",
+    "medenine",
+    "mahdia",
+    "gafsa",
+    "tozeur",
+    "kebili",
+    "zaghouan",
+    "beja",
+    "jendouba",
+    "siliana",
+    "kef",
+    "tataouine",
+    "kasserine",
+    "manouba",
+    "ariana",
+    "ben arous",
+}
+
+CURRENCY_CODES = {"TND", "USD", "EUR", "GBP", "MAD", "DZD", "QAR", "SAR"}
 
 EMAIL_PATTERN = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
 MONEY_PATTERN = re.compile(
@@ -112,6 +151,12 @@ DATE_PATTERN = re.compile(
 )
 ORG_SUFFIX_PATTERN = re.compile(
     r"(?i)\b(SARL|LLC|LTD|INC|GMBH|SA|SAS|BV|PLC|CORP|CORPORATION|COMPANY)\b"
+)
+BAD_ORG_TAIL_PATTERN = re.compile(
+    r"(?i)\b(date|mentioned|confidential|internal|note|preliminary|overview|summary)\b"
+)
+ORDER_OR_REFERENCE_PATTERN = re.compile(
+    r"(?i)\b(order|orders|invoice|case|document|article|section|clause)\b"
 )
 
 
@@ -142,16 +187,17 @@ def _strip_role_suffixes(value: str) -> str:
         "",
         cleaned,
     )
-    cleaned = re.sub(r"(?i)\s+\bv\b\s*$", "", cleaned)
+    cleaned = re.sub(r"(?i)\s+\bv\b\s*\.?\s*$", "", cleaned)
     cleaned = re.sub(r"(?i)\s+\bvs\.?\b\s*$", "", cleaned)
+    cleaned = re.sub(r"(?i)'s\b", "", cleaned)
 
     return _clean_entity_value(cleaned)
 
 
 def _looks_like_heading(value: str) -> bool:
-    lowered = value.lower().strip()
+    lowered = value.lower().strip().rstrip(":")
 
-    if lowered.endswith(":"):
+    if value.strip().endswith(":"):
         return True
 
     words = [w for w in re.split(r"\s+", lowered) if w]
@@ -167,7 +213,8 @@ def _looks_like_heading(value: str) -> bool:
 def _looks_like_email_or_url(value: str) -> bool:
     if EMAIL_PATTERN.search(value):
         return True
-    if "http://" in value.lower() or "https://" in value.lower() or "www." in value.lower():
+    lowered = value.lower()
+    if "http://" in lowered or "https://" in lowered or "www." in lowered:
         return True
     return False
 
@@ -177,11 +224,14 @@ def _looks_like_code_or_reference(value: str) -> bool:
 
     reference_patterns = [
         r"\binv-\d{4}-\d+\b",
+        r"\border\s+[a-z0-9\-]+\b",
+        r"\borders\s+[a-z0-9\-]+\b",
         r"\bcase\s+(id|no|number)\b",
         r"\border\s+date\b",
         r"\binvoice\s+number\b",
         r"\binvoice\s+date\b",
         r"\binvoice\s+due\s+date\b",
+        r"\bdelivery\s+date\s+mentioned\b",
         r"\barticle\s+\d+(\.\d+)?\b",
         r"\bsection\s+\d+(\.\d+)?\b",
         r"\bclause\s+\d+(\.\d+)?\b",
@@ -217,7 +267,7 @@ def _looks_like_bad_org_or_person(value: str) -> bool:
     if len(value.split()) > 8:
         return True
 
-    if any(word in lowered for word in [
+    blocked_fragments = [
         "invoice number",
         "invoice date",
         "due date",
@@ -228,7 +278,15 @@ def _looks_like_bad_org_or_person(value: str) -> bool:
         "used to test",
         "sample document",
         "recommended next steps",
-    ]):
+        "this case concerns",
+        "commercial dispute between",
+        "document type",
+        "prepared for testing",
+        "confidential internal note",
+        "date mentioned",
+    ]
+
+    if any(fragment in lowered for fragment in blocked_fragments):
         return True
 
     return False
@@ -264,6 +322,23 @@ def _is_valid_org(value: str) -> bool:
     if not re.search(r"[A-Za-z]", value):
         return False
 
+    if value.upper() in CURRENCY_CODES:
+        return False
+
+    lowered = value.lower()
+
+    if lowered in CITY_NAMES:
+        return False
+
+    if BAD_ORG_TAIL_PATTERN.search(value):
+        return False
+
+    if ORDER_OR_REFERENCE_PATTERN.search(value) and not ORG_SUFFIX_PATTERN.search(value):
+        return False
+
+    if "," in value:
+        return False
+
     return True
 
 
@@ -285,7 +360,7 @@ def _is_valid_location(value: str) -> bool:
     if any(lowered.startswith(prefix) for prefix in BLOCKED_PREFIXES):
         return False
 
-    if any(word in lowered for word in [
+    blocked_location_fragments = [
         "invoice",
         "order",
         "contract",
@@ -295,7 +370,10 @@ def _is_valid_location(value: str) -> bool:
         "evidence",
         "risk",
         "issue",
-    ]):
+        "client",
+        "confidential",
+    ]
+    if any(word in lowered for word in blocked_location_fragments):
         return False
 
     if re.fullmatch(r"[=\-._/\\\d\s]+", value):

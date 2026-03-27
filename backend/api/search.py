@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from backend.core.deps import get_db, get_current_user
 from backend.models.user import User
 from backend.services.lexical_search_service import lexical_search_documents
-from backend.api.intelligence_schema import SearchResponse
+from backend.api.intelligence_schema import RetrievalSearchResponse as SearchResponse
 
 
 router = APIRouter(prefix="/search", tags=["Search"])

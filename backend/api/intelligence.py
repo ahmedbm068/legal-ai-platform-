@@ -1,4 +1,5 @@
 import json
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -43,6 +44,26 @@ def get_tenant_document_or_404(
         )
 
     return document
+
+
+def normalize_insights_payload(raw_insights: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not raw_insights:
+        return None
+
+    insights = dict(raw_insights)
+
+    # Backward compatibility with older saved payloads
+    if "recommended_next_actions" not in insights:
+        insights["recommended_next_actions"] = insights.get("recommended_actions", [])
+
+    # Safe defaults for required list fields
+    insights.setdefault("key_points", [])
+    insights.setdefault("important_dates", [])
+    insights.setdefault("parties_detected", [])
+    insights.setdefault("legal_risks", [])
+    insights.setdefault("recommended_next_actions", [])
+
+    return insights
 
 
 @router.post("/documents/{document_id}/process", response_model=ProcessDocumentResponse)
@@ -270,7 +291,9 @@ def get_full_document_analysis(
     insights = None
     if document.insights_json:
         try:
-            insights = json.loads(document.insights_json)
+            parsed_insights = json.loads(document.insights_json)
+            if isinstance(parsed_insights, dict):
+                insights = normalize_insights_payload(parsed_insights)
         except json.JSONDecodeError:
             insights = None
 
@@ -279,7 +302,7 @@ def get_full_document_analysis(
         "filename": document.filename,
         "processing_status": document.processing_status,
         "processing_error": document.processing_error,
-        "summary_status": document.summary_status,
+        "summary_status": document.summary_status or "not_started",
         "summary_error": document.summary_error,
         "extracted_text_length": len(document.extracted_text or ""),
         "redacted_preview": (document.redacted_text or "")[:500],

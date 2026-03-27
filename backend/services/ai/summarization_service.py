@@ -35,6 +35,8 @@ class SummarizationService:
         "legal risks:",
         "missing evidence:",
         "recommended next steps:",
+        "this case concerns",
+        "commercial dispute between",
     }
 
     def get_source_text(self, document: Document) -> str:
@@ -100,7 +102,7 @@ class SummarizationService:
         document_type = self._clean_text(insights.get("document_type", "unknown"))
         general_summary = self._clean_text(insights.get("general_summary", ""))
 
-        parties = self._clean_string_list(insights.get("parties_detected", []))
+        parties = self._clean_parties(insights.get("parties_detected", []))
         important_dates = self._clean_date_items(insights.get("important_dates", []))
         payment_terms = self._clean_string_list(insights.get("payment_terms", []))
         termination_terms = self._clean_string_list(insights.get("termination_terms", []))
@@ -113,19 +115,19 @@ class SummarizationService:
 
         overview_lines: list[str] = []
         if general_summary:
-            overview_lines.append(general_summary)
+            overview_lines.append(self._make_summary_more_assertive(general_summary))
         else:
             overview_lines.append(
-                f"This document appears to be a {document_type.replace('_', ' ')}."
+                f"This document is a {document_type.replace('_', ' ')}."
                 if document_type and document_type != "unknown"
-                else "This document appears to concern legal or administrative matters."
+                else "This document concerns legal or administrative matters."
             )
 
         named_parties = [p for p in parties if p not in self.GENERIC_ROLE_NAMES]
         role_parties = [p for p in parties if p in self.GENERIC_ROLE_NAMES]
 
         if named_parties:
-            overview_lines.append("Main parties: " + ", ".join(named_parties[:3]) + ".")
+            overview_lines.append("Main parties: " + ", ".join(named_parties[:2]) + ".")
         elif role_parties:
             overview_lines.append("Main roles mentioned: " + ", ".join(role_parties[:3]) + ".")
 
@@ -150,10 +152,10 @@ class SummarizationService:
             sections.append("Key Obligations / Clauses:\n" + "\n".join(obligations_lines))
 
         date_lines: list[str] = []
-        for item in important_dates[:6]:
+        for item in important_dates[:4]:
             label = self._clean_text(item.get("label", "date")).replace("_", " ")
             value = self._clean_text(item.get("value", ""))
-            if value:
+            if value and label != "mentioned date":
                 date_lines.append(f"- {value} ({label})")
 
         if date_lines:
@@ -179,7 +181,7 @@ class SummarizationService:
 
     def _build_short_summary(self, insights: dict[str, Any], long_summary: str) -> str:
         document_type = self._clean_text(insights.get("document_type", "unknown")).replace("_", " ")
-        parties = self._clean_string_list(insights.get("parties_detected", []))
+        parties = self._clean_parties(insights.get("parties_detected", []))
         legal_risks = self._clean_string_list(insights.get("legal_risks", []))
         important_dates = self._clean_date_items(insights.get("important_dates", []))
         payment_terms = self._clean_string_list(insights.get("payment_terms", []))
@@ -187,9 +189,9 @@ class SummarizationService:
         parts: list[str] = []
 
         if document_type and document_type != "unknown":
-            parts.append(f"This document appears to be a {document_type}.")
+            parts.append(f"This document is a {document_type}.")
         else:
-            parts.append("This document appears to concern legal or administrative matters.")
+            parts.append("This document concerns legal or administrative matters.")
 
         named_parties = [p for p in parties if p not in self.GENERIC_ROLE_NAMES]
         if named_parties:
@@ -198,13 +200,12 @@ class SummarizationService:
         if payment_terms:
             parts.append("A payment obligation is identified in the document.")
 
-        if important_dates:
-            first_date = important_dates[0]
-            if first_date.get("value"):
-                parts.append(
-                    f"One important date is {self._clean_text(first_date['value'])} "
-                    f"({self._clean_text(first_date.get('label', 'date')).replace('_', ' ')})."
-                )
+        for date_item in important_dates:
+            label = self._clean_text(date_item.get("label", "date")).replace("_", " ")
+            value = self._clean_text(date_item.get("value", ""))
+            if value and label != "mentioned date":
+                parts.append(f"One important date is {value} ({label}).")
+                break
 
         if legal_risks:
             parts.append("The document also presents at least one legal or evidentiary risk.")
@@ -219,6 +220,34 @@ class SummarizationService:
 
         trimmed = short_summary[:self.MAX_SHORT_SUMMARY_CHARS].rsplit(" ", 1)[0].strip()
         return trimmed + "..."
+
+    def _make_summary_more_assertive(self, text: str) -> str:
+        if not text:
+            return ""
+
+        text = text.replace("appears to be", "is")
+        text = text.replace("appears to concern", "concerns")
+        text = text.replace("may indicate", "indicates")
+        return text
+
+    def _clean_parties(self, items: list[Any]) -> list[str]:
+        results: list[str] = []
+
+        for item in items or []:
+            cleaned = self._clean_text(str(item))
+            if not cleaned:
+                continue
+            if not self._is_summary_safe(cleaned):
+                continue
+
+            lowered = cleaned.lower()
+            if " v. " in lowered or " vs " in lowered or "this case concerns" in lowered or "," in cleaned:
+                continue
+
+            if cleaned not in results:
+                results.append(cleaned)
+
+        return results
 
     def _clean_string_list(self, items: list[Any]) -> list[str]:
         results: list[str] = []
@@ -246,6 +275,8 @@ class SummarizationService:
             value = self._clean_text(str(item.get("value", "")))
 
             if not value:
+                continue
+            if label == "mentioned_date":
                 continue
             if not self._is_summary_safe(label or "date"):
                 continue
