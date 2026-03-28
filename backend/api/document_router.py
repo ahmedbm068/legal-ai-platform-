@@ -5,7 +5,7 @@ from backend.core.deps import get_db, get_current_user
 from backend.models.case import Case
 from backend.models.document import Document
 from backend.models.user import User
-from backend.api.document_schema import DocumentUploadResponse
+from backend.api.document_schema import DocumentListItemOut, DocumentOut, DocumentUploadResponse
 from backend.services.storage_service import upload_file
 from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
 
@@ -18,13 +18,7 @@ router = APIRouter(
 pipeline = DocumentAIPipeline()
 
 
-@router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
-def upload_document(
-    case_id: int,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Case:
     case = (
         db.query(Case)
         .filter(
@@ -37,6 +31,62 @@ def upload_document(
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+
+    return case
+
+
+def get_tenant_document_or_404(db: Session, document_id: int, current_user: User) -> Document:
+    document = (
+        db.query(Document)
+        .filter(
+            Document.id == document_id,
+            Document.tenant_id == current_user.tenant_id
+        )
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    return document
+
+
+@router.get("/case/{case_id}", response_model=list[DocumentListItemOut])
+def list_case_documents(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
+
+    return (
+        db.query(Document)
+        .filter(
+            Document.case_id == case_id,
+            Document.tenant_id == current_user.tenant_id
+        )
+        .order_by(Document.upload_timestamp.desc(), Document.id.desc())
+        .all()
+    )
+
+
+@router.get("/{document_id}", response_model=DocumentOut)
+def get_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return get_tenant_document_or_404(db=db, document_id=document_id, current_user=current_user)
+
+
+@router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
+def upload_document(
+    case_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")

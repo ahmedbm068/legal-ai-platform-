@@ -6,29 +6,55 @@ AI-powered legal case management and analysis platform.
 
 - Case management
 - Document management
-- Call transcription
+- Case-centric legal copilot
+- Grounded retrieval and evidence display
 - AI document classification
 - Legal entity extraction
-- Case outcome prediction
+- Voice-ready workflow foundation
 
 ## Architecture
 
-The system follows a microservice-style architecture.
+The system currently follows a backend-first architecture:
 
-Frontend → FastAPI Backend → AI Services
+Frontend -> FastAPI Backend -> AI Services
 
 Infrastructure:
+
 - PostgreSQL
 - Redis
 - MinIO
 - Docker
 
-## API Documentation
+## Backend
 
-Run backend:
+Install Python dependencies:
 
+```bash
+pip install -r requirements.txt
+```
+
+Run the API:
+
+```bash
 uvicorn backend.main:app --reload
+```
 
-Open Swagger:
+Swagger:
 
-http://127.0.0.1:8000/docs
+`http://127.0.0.1:8000/docs`
+
+## Frontend
+
+The Sprint 2 frontend lives in [frontend/](/c:/Users/ahmed/Desktop/pfe.2/legal-ai-platform/frontend).
+
+Install frontend dependencies after Node.js is available locally:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Default frontend URL:
+
+`http://127.0.0.1:5173`

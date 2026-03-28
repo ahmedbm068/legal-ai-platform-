@@ -21,6 +21,21 @@ class DocumentOut(BaseModel):
     redacted_text: Optional[str] = None
 
 
+class DocumentListItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    filename: str
+    storage_path: str
+    processing_status: str
+    processing_error: Optional[str] = None
+    file_size: int
+    file_type: str
+    upload_timestamp: datetime
+    case_id: int
+    tenant_id: int
+
+
 class DocumentAIProcessingOut(BaseModel):
     success: bool
     message: str

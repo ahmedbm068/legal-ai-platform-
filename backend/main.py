@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database.database import Base, engine
+from backend.core.config import settings
 
 from backend.models.case import Case
 from backend.models.client import Client
@@ -22,6 +24,20 @@ from backend.api.search import router as search_router
 app = FastAPI(
     title="Legal AI Platform",
     version="1.0.0"
+)
+
+cors_origins = [
+    origin.strip()
+    for origin in settings.CORS_ORIGINS.split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins or ["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 Base.metadata.create_all(bind=engine)
