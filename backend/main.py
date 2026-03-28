@@ -14,8 +14,10 @@ from backend.models.document_entity import DocumentEntity
 from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
+from backend.models.consultation_request import ConsultationRequest
 
 from backend.api import auth, users, clients, cases
+from backend.api.consultations import router as consultations_router
 from backend.api.document_router import router as document_router
 from backend.api.intelligence import router as intelligence_router
 from backend.api.rag import router as rag_router
@@ -48,6 +50,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(clients.router)
 app.include_router(cases.router)
+app.include_router(consultations_router)
 app.include_router(document_router)
 app.include_router(rag_router)
 app.include_router(intelligence_router)

@@ -5,6 +5,7 @@ import type {
   CaseStatus,
   ChatMessage,
   Client,
+  ConsultationRequest,
   DocumentItem,
   FullDocumentAnalysis,
   SourceItem,
@@ -66,6 +67,7 @@ export default function App() {
   const [clients, setClients] = useState<Client[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [voiceRecordings, setVoiceRecordings] = useState<VoiceRecording[]>([]);
+  const [consultationRequests, setConsultationRequests] = useState<ConsultationRequest[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState<number | null>(null);
@@ -95,6 +97,7 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [uploading, setUploading] = useState(false);
   const [voiceUploading, setVoiceUploading] = useState(false);
+  const [intakeBuilding, setIntakeBuilding] = useState(false);
   const [recordingAudio, setRecordingAudio] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
@@ -119,6 +122,18 @@ export default function App() {
     () => voiceRecordings.find((item) => item.id === selectedRecordingId) ?? null,
     [voiceRecordings, selectedRecordingId]
   );
+
+  const selectedConsultationRequest = useMemo(() => {
+    if (!selectedRecordingId) {
+      return consultationRequests[0] ?? null;
+    }
+
+    return (
+      consultationRequests.find((item) => item.voice_recording_id === selectedRecordingId) ??
+      consultationRequests[0] ??
+      null
+    );
+  }, [consultationRequests, selectedRecordingId]);
 
   useEffect(() => {
     if (!token) {
@@ -166,16 +181,19 @@ export default function App() {
     setSelectedDocumentAnalysis(null);
     setSelectedDocumentId(null);
     setSelectedRecordingId(null);
+    setConsultationRequests([]);
     setActiveSources([]);
     setChatMessages([buildWelcomeMessage(targetCase?.title)]);
 
-    const [docs, recordings] = await Promise.all([
+    const [docs, recordings, requests] = await Promise.all([
       api.listCaseDocuments(currentToken, caseId),
       api.listVoiceRecordings(currentToken, caseId),
+      api.listConsultationRequests(currentToken, caseId),
     ]);
 
     setDocuments(docs);
     setVoiceRecordings(recordings);
+    setConsultationRequests(requests);
 
     if (recordings.length > 0) {
       setSelectedRecordingId(recordings[0].id);
@@ -364,6 +382,27 @@ export default function App() {
     }
   }
 
+  async function buildConsultationFromSelectedRecording() {
+    if (!token || !selectedRecordingId) {
+      return;
+    }
+
+    setIntakeBuilding(true);
+    setError(null);
+
+    try {
+      const response = await api.createConsultationFromRecording(token, selectedRecordingId);
+      setConsultationRequests((current) => {
+        const remaining = current.filter((item) => item.id !== response.consultation_request.id);
+        return [response.consultation_request, ...remaining];
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to build consultation request.");
+    } finally {
+      setIntakeBuilding(false);
+    }
+  }
+
   async function handleVoiceUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) {
@@ -429,6 +468,7 @@ export default function App() {
     setClients([]);
     setDocuments([]);
     setVoiceRecordings([]);
+    setConsultationRequests([]);
     setSelectedCaseId(null);
     setSelectedDocumentId(null);
     setSelectedRecordingId(null);
@@ -837,8 +877,87 @@ export default function App() {
                       selectedRecording.transcription_error ||
                       "Transcript not available yet."}
                   </p>
+                  <div className="voice-actions inline-actions">
+                    <button
+                      className="secondary-button"
+                      disabled={
+                        intakeBuilding ||
+                        selectedRecording.transcription_status !== "completed" ||
+                        !selectedRecording.transcript_text
+                      }
+                      onClick={() => void buildConsultationFromSelectedRecording()}
+                      type="button"
+                    >
+                      {intakeBuilding ? "Building intake..." : "Create intake request"}
+                    </button>
+                  </div>
                 </div>
               ) : null}
+            </div>
+
+            <div className="panel evidence-panel">
+              <div className="panel-header">
+                <div>
+                  <h3>Consultation intake</h3>
+                  <span>Transcript-to-booking workflow</span>
+                </div>
+              </div>
+
+              {selectedConsultationRequest ? (
+                <div className="analysis-stack">
+                  <div className="metric-grid">
+                    <div className="metric-card">
+                      <span>Status</span>
+                      <strong>{selectedConsultationRequest.status}</strong>
+                    </div>
+                    <div className="metric-card">
+                      <span>Booking</span>
+                      <strong>{selectedConsultationRequest.booking_intent}</strong>
+                    </div>
+                    <div className="metric-card">
+                      <span>Urgency</span>
+                      <strong>{selectedConsultationRequest.urgency_level}</strong>
+                    </div>
+                  </div>
+
+                  <div className="analysis-block">
+                    <h4>Client details</h4>
+                    <p>
+                      {selectedConsultationRequest.client_name || "Unknown client"}
+                      {selectedConsultationRequest.client_phone ? ` | ${selectedConsultationRequest.client_phone}` : ""}
+                      {selectedConsultationRequest.client_email ? ` | ${selectedConsultationRequest.client_email}` : ""}
+                    </p>
+                  </div>
+
+                  <div className="analysis-block">
+                    <h4>Issue summary</h4>
+                    <p>{selectedConsultationRequest.issue_summary}</p>
+                  </div>
+
+                  <div className="analysis-block">
+                    <h4>Case description</h4>
+                    <p>{selectedConsultationRequest.extracted_case_description || "No extracted description available."}</p>
+                  </div>
+
+                  <div className="analysis-block">
+                    <h4>Booking details</h4>
+                    <p>
+                      Preferred schedule: {selectedConsultationRequest.preferred_schedule || "Not detected"}
+                      <br />
+                      Legal area: {selectedConsultationRequest.legal_area || "Not detected"}
+                    </p>
+                  </div>
+
+                  <div className="analysis-block">
+                    <h4>Intake notes</h4>
+                    <p>{selectedConsultationRequest.intake_notes || "No additional intake notes."}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  Select a completed voice transcript and generate an intake request to extract booking and case details.
+                </div>
+              )}
             </div>
 
             <div className="panel">

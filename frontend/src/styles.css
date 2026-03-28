@@ -328,6 +328,11 @@ textarea {
   justify-content: flex-end;
 }
 
+.inline-actions {
+  margin-top: 0.85rem;
+  justify-content: flex-start;
+}
+
 .meta-card,
 .metric-card {
   background: rgba(255, 255, 255, 0.68);

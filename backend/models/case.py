@@ -42,3 +42,9 @@ class Case(Base):
         back_populates="case",
         cascade="all, delete-orphan"
     )
+
+    consultation_requests = relationship(
+        "ConsultationRequest",
+        back_populates="case",
+        cascade="all, delete-orphan"
+    )

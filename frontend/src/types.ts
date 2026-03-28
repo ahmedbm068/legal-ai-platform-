@@ -114,6 +114,27 @@ export interface VoiceRecording {
   updated_at: string;
 }
 
+export interface ConsultationRequest {
+  id: number;
+  case_id: number;
+  tenant_id: number;
+  voice_recording_id: number | null;
+  client_name: string | null;
+  client_email: string | null;
+  client_phone: string | null;
+  booking_intent: string;
+  urgency_level: string;
+  legal_area: string | null;
+  preferred_schedule: string | null;
+  issue_summary: string;
+  extracted_case_description: string | null;
+  intake_notes: string | null;
+  status: string;
+  extraction_source: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SourceItem {
   chunk_id: number | null;
   document_id: number;
@@ -154,6 +175,11 @@ export interface UploadedDocumentResponse {
 export interface UploadedVoiceRecordingResponse {
   recording: VoiceRecording;
   message: string;
+}
+
+export interface ConsultationFromTranscriptResponse {
+  message: string;
+  consultation_request: ConsultationRequest;
 }
 
 export interface ChatMessage {

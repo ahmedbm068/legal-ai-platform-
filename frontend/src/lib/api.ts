@@ -1,6 +1,8 @@
 import type {
   CaseItem,
   Client,
+  ConsultationFromTranscriptResponse,
+  ConsultationRequest,
   CopilotResponse,
   DocumentItem,
   FullDocumentAnalysis,
@@ -136,6 +138,17 @@ export const api = {
       formData,
     });
   },
+
+  listConsultationRequests: (token: string, caseId: number) =>
+    request<ConsultationRequest[]>(`/consultations/case/${caseId}`, {
+      token,
+    }),
+
+  createConsultationFromRecording: (token: string, recordingId: number) =>
+    request<ConsultationFromTranscriptResponse>(`/consultations/from-recording/${recordingId}`, {
+      method: "POST",
+      token,
+    }),
 
   getDocumentAnalysis: (token: string, documentId: number) =>
     request<FullDocumentAnalysis>(`/intelligence/documents/${documentId}/full-analysis`, {
