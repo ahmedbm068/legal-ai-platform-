@@ -4,10 +4,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database.database import Base, engine
+from backend.database.schema_sync import apply_legacy_schema_patches
 from backend.core.config import settings
 
 from backend.models.case import Case
 from backend.models.client import Client
+from backend.models.client_portal_account import ClientPortalAccount
 from backend.models.document import Document
 from backend.models.document_chunk import DocumentChunk
 from backend.models.document_entity import DocumentEntity
@@ -17,6 +19,7 @@ from backend.models.voice_recording import VoiceRecording
 from backend.models.consultation_request import ConsultationRequest
 
 from backend.api import auth, users, clients, cases
+from backend.api.client_portal import router as client_portal_router
 from backend.api.consultations import router as consultations_router
 from backend.api.document_router import router as document_router
 from backend.api.intelligence import router as intelligence_router
@@ -46,8 +49,10 @@ app.add_middleware(
 )
 
 Base.metadata.create_all(bind=engine)
+apply_legacy_schema_patches()
 
 app.include_router(auth.router)
+app.include_router(client_portal_router)
 app.include_router(users.router)
 app.include_router(clients.router)
 app.include_router(cases.router)

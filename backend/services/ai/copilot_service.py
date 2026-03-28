@@ -11,6 +11,7 @@ from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
 from backend.services.ai.agents.case_reasoning_agent import case_reasoning_agent
+from backend.services.ai.agents.drafting_agent import drafting_agent
 from backend.services.ai.command_parsing_service import command_parsing_service
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.rag_service import RagService
@@ -597,54 +598,17 @@ class CopilotService:
         case_summary = self._summarize_case(db=db, tenant_id=tenant_id, case_id=case_id)
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
 
-        base_summary = case_summary["answer"]
-
-        if self.rag_service.client:
-            prompt = f"""
-You are a legal AI assistant drafting a professional client update email.
-Use only the provided case summary.
-Do not invent facts.
-Keep the tone clear, professional, and concise.
-
-Case summary:
-{base_summary}
-
-Return only the email body.
-"""
-            try:
-                response = self.rag_service.client.responses.create(
-                    model=self.model,
-                    input=prompt
-                )
-                email_body = (response.output_text or "").strip()
-
-                if email_body:
-                    return {
-                        "answer": email_body,
-                        "used_fallback": False,
-                        "fallback_reason": None,
-                        "confidence": "high",
-                        "scope": "case",
-                        "sources": case_summary["sources"]
-                    }
-            except Exception:
-                pass
-
-        fallback_email = (
-            f"Subject: Update on Case {case.id} - {case.title}\n\n"
-            "Dear Client,\n\n"
-            "I am writing to provide you with an update regarding your case.\n\n"
-            f"{base_summary}\n\n"
-            "Please let me know if you would like a more detailed breakdown of any document or issue.\n\n"
-            "Best regards,\n"
-            "Your Legal Team"
+        draft_result = drafting_agent.draft_client_update_email(
+            case_id=case.id,
+            case_title=case.title,
+            case_summary=case_summary["answer"],
         )
 
         return {
-            "answer": fallback_email,
-            "used_fallback": True,
-            "fallback_reason": "Used template-based drafting fallback",
-            "confidence": "medium",
+            "answer": (draft_result.payload.get("email_body") or "").strip(),
+            "used_fallback": not bool(draft_result.payload.get("used_llm")),
+            "fallback_reason": None if draft_result.payload.get("used_llm") else "Used drafting agent template fallback",
+            "confidence": "high" if draft_result.payload.get("used_llm") else "medium",
             "scope": "case",
             "sources": case_summary["sources"]
         }

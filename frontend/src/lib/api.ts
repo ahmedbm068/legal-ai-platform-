@@ -1,4 +1,5 @@
 import type {
+  AgentWorkflowResponse,
   CaseItem,
   Client,
   ConsultationFromTranscriptResponse,
@@ -160,5 +161,12 @@ export const api = {
       method: "POST",
       token,
       body: { message, top_k: topK },
+    }),
+
+  runAgentWorkflow: (token: string, caseId: number, objective?: string, topK = 5) =>
+    request<AgentWorkflowResponse>("/ai/agent-workflow", {
+      method: "POST",
+      token,
+      body: { case_id: caseId, objective, top_k: topK },
     }),
 };

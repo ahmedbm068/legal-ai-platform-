@@ -382,6 +382,25 @@ textarea {
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
+.workflow-launcher {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: end;
+}
+
+.workflow-launcher textarea {
+  min-height: 88px;
+  background: rgba(255, 255, 255, 0.14);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.workflow-launcher textarea::placeholder {
+  color: rgba(255, 255, 255, 0.72);
+}
+
 .message-stream {
   display: grid;
   gap: 0.9rem;
@@ -464,6 +483,44 @@ textarea {
   border: 1px solid rgba(27, 67, 50, 0.14);
 }
 
+.workflow-stage-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.workflow-stage-card {
+  border-radius: 18px;
+  border: 1px solid rgba(27, 67, 50, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.workflow-stage-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+}
+
+.workflow-stage-topline span {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.76rem;
+}
+
+.workflow-trace {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.workflow-trace span {
+  color: var(--text-soft);
+  font-size: 0.9rem;
+}
+
 .upload-button input {
   position: absolute;
   inset: 0;
@@ -508,7 +565,8 @@ textarea {
 
   .workspace-header,
   .chat-composer,
-  .message {
+  .message,
+  .workflow-launcher {
     grid-template-columns: 1fr;
   }
 }

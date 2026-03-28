@@ -158,6 +158,27 @@ export interface CopilotResponse {
   sources: SourceItem[];
 }
 
+export interface WorkflowStage {
+  agent_name: string;
+  success: boolean;
+  warnings: string[];
+  error: string | null;
+  trace: string[];
+}
+
+export interface AgentWorkflowResponse {
+  case_id: number;
+  case_title: string;
+  objective: string;
+  retrieval_query: string;
+  summary: string;
+  verified_summary: string;
+  client_email: string;
+  sources: SourceItem[];
+  stages: Record<string, WorkflowStage>;
+  stage_outputs: Record<string, Record<string, unknown>>;
+}
+
 export interface UploadedDocumentResponse {
   document: DocumentItem;
   ai_processing: {

@@ -1,6 +1,14 @@
-import { useRef, useState } from "react";
-import { fetchIntakeStatus, submitIntake } from "./lib/api";
-import type { PublicIntakeResponse, PublicIntakeStatus } from "./types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  fetchIntakeStatus,
+  fetchPortalDashboard,
+  loginPortalAccount,
+  registerPortalAccount,
+  submitAuthenticatedPortalIntake,
+} from "./lib/api";
+import type { ClientPortalConsultation, ClientPortalDashboard, PublicIntakeStatus } from "./types";
+
+const TOKEN_STORAGE_KEY = "legal-ai-client-portal-token";
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -15,38 +23,111 @@ function formatDate(value?: string | null) {
 }
 
 export default function App() {
-  const [form, setForm] = useState({
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY));
+  const [dashboard, setDashboard] = useState<ClientPortalDashboard | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const [authForm, setAuthForm] = useState({
     tenant_name: "",
-    client_name: "",
-    client_email: "",
-    client_phone: "",
-    client_address: "",
+    full_name: "",
+    email: "",
+    password: "",
+    phone: "",
+    address: "",
+  });
+  const [intakeForm, setIntakeForm] = useState({
     issue_summary: "",
     case_description: "",
     preferred_schedule: "",
   });
   const [referenceInput, setReferenceInput] = useState("");
+  const [statusResult, setStatusResult] = useState<PublicIntakeStatus | null>(null);
   const [voiceFile, setVoiceFile] = useState<File | null>(null);
   const [supportingDocument, setSupportingDocument] = useState<File | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [submitResult, setSubmitResult] = useState<PublicIntakeResponse | null>(null);
-  const [statusResult, setStatusResult] = useState<PublicIntakeStatus | null>(null);
-  const [statusLoading, setStatusLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    void loadDashboard(token);
+  }, [token]);
+
+  const latestConsultation = useMemo<ClientPortalConsultation | null>(() => {
+    return dashboard?.consultations[0] ?? null;
+  }, [dashboard]);
+
+  async function loadDashboard(currentToken: string) {
+    try {
+      setDashboardLoading(true);
+      setError(null);
+      const nextDashboard = await fetchPortalDashboard(currentToken);
+      setDashboard(nextDashboard);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to load portal dashboard.";
+      setError(message);
+      localStorage.removeItem(TOKEN_STORAGE_KEY);
+      setToken(null);
+      setDashboard(null);
+    } finally {
+      setDashboardLoading(false);
+    }
+  }
+
+  async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitting(true);
+    setAuthLoading(true);
     setError(null);
-    setSubmitResult(null);
+    setSuccess(null);
+
+    try {
+      const authResponse =
+        authMode === "register"
+          ? await registerPortalAccount({
+              tenant_name: authForm.tenant_name,
+              full_name: authForm.full_name,
+              email: authForm.email,
+              password: authForm.password,
+              phone: authForm.phone || undefined,
+              address: authForm.address || undefined,
+            })
+          : await loginPortalAccount(authForm.email, authForm.password);
+
+      localStorage.setItem(TOKEN_STORAGE_KEY, authResponse.access_token);
+      setToken(authResponse.access_token);
+      setSuccess(authMode === "register" ? "Account created. Your secure client portal is ready." : null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to authenticate.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function handleIntakeSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token) {
+      return;
+    }
+
+    setSubmitLoading(true);
+    setError(null);
+    setSuccess(null);
 
     try {
       const payload = new FormData();
-      Object.entries(form).forEach(([key, value]) => payload.append(key, value));
+      payload.append("issue_summary", intakeForm.issue_summary);
+      payload.append("case_description", intakeForm.case_description);
+      payload.append("preferred_schedule", intakeForm.preferred_schedule);
       if (voiceFile) {
         payload.append("voice_note", voiceFile);
       }
@@ -54,13 +135,19 @@ export default function App() {
         payload.append("supporting_document", supportingDocument);
       }
 
-      const result = await submitIntake(payload);
-      setSubmitResult(result);
-      setReferenceInput(result.public_reference);
+      const nextDashboard = await submitAuthenticatedPortalIntake(token, payload);
+      setDashboard(nextDashboard);
+      setSuccess("Consultation request submitted successfully.");
+      setIntakeForm({ issue_summary: "", case_description: "", preferred_schedule: "" });
+      setVoiceFile(null);
+      setSupportingDocument(null);
+      if (nextDashboard.consultations[0]?.public_reference) {
+        setReferenceInput(nextDashboard.consultations[0].public_reference);
+      }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to submit intake request.");
+      setError(caught instanceof Error ? caught.message : "Unable to submit consultation request.");
     } finally {
-      setSubmitting(false);
+      setSubmitLoading(false);
     }
   }
 
@@ -72,12 +159,11 @@ export default function App() {
 
     setStatusLoading(true);
     setError(null);
-
     try {
       const result = await fetchIntakeStatus(referenceInput.trim());
       setStatusResult(result);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to fetch intake status.");
+      setError(caught instanceof Error ? caught.message : "Unable to fetch request status.");
     } finally {
       setStatusLoading(false);
     }
@@ -129,86 +215,242 @@ export default function App() {
     }
   }
 
+  function logout() {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    setToken(null);
+    setDashboard(null);
+    setStatusResult(null);
+    setSuccess(null);
+  }
+
+  if (!token || !dashboard) {
+    return (
+      <div className="portal-shell">
+        <section className="hero hero-split">
+          <div>
+            <div className="eyebrow">Client Legal Portal</div>
+            <h1>Secure client access for consultation requests, updates, and follow-up.</h1>
+            <p>
+              This portal is separate from the internal legal workspace. Clients can securely sign in,
+              submit consultation requests, upload voice notes and supporting files, and track request status
+              without touching internal AI tools.
+            </p>
+          </div>
+          <div className="hero-points">
+            <span>Secure sign in</span>
+            <span>Private dashboard</span>
+            <span>Voice + document intake</span>
+            <span>Reference-based tracking</span>
+          </div>
+        </section>
+
+        <section className="portal-grid auth-grid">
+          <div className="card auth-card">
+            <div className="card-header">
+              <div>
+                <h2>Portal access</h2>
+                <span>Professional client account flow</span>
+              </div>
+            </div>
+
+            <div className="auth-tabs">
+              <button
+                className={authMode === "login" ? "active" : ""}
+                onClick={() => setAuthMode("login")}
+                type="button"
+              >
+                Sign in
+              </button>
+              <button
+                className={authMode === "register" ? "active" : ""}
+                onClick={() => setAuthMode("register")}
+                type="button"
+              >
+                Create account
+              </button>
+            </div>
+
+            <form className="form-grid" onSubmit={handleAuthSubmit}>
+              {authMode === "register" ? (
+                <>
+                  <label>
+                    Law firm / tenant name
+                    <input
+                      required
+                      value={authForm.tenant_name}
+                      onChange={(event) => setAuthForm((current) => ({ ...current, tenant_name: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Full name
+                    <input
+                      required
+                      value={authForm.full_name}
+                      onChange={(event) => setAuthForm((current) => ({ ...current, full_name: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Phone
+                    <input
+                      value={authForm.phone}
+                      onChange={(event) => setAuthForm((current) => ({ ...current, phone: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Address
+                    <input
+                      value={authForm.address}
+                      onChange={(event) => setAuthForm((current) => ({ ...current, address: event.target.value }))}
+                    />
+                  </label>
+                </>
+              ) : null}
+
+              <label>
+                Email
+                <input
+                  required
+                  type="email"
+                  value={authForm.email}
+                  onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  required
+                  type="password"
+                  value={authForm.password}
+                  onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+                />
+              </label>
+
+              <button className="primary-button full-span" disabled={authLoading} type="submit">
+                {authLoading ? "Working..." : authMode === "login" ? "Enter portal" : "Create secure account"}
+              </button>
+            </form>
+          </div>
+
+          <div className="stack">
+            <div className="card">
+              <div className="card-header">
+                <div>
+                  <h2>Track a request</h2>
+                  <span>Status lookup by reference</span>
+                </div>
+              </div>
+
+              <form className="status-form" onSubmit={handleStatusLookup}>
+                <input
+                  placeholder="Enter intake reference"
+                  value={referenceInput}
+                  onChange={(event) => setReferenceInput(event.target.value)}
+                />
+                <button className="secondary-button" disabled={statusLoading} type="submit">
+                  {statusLoading ? "Checking..." : "Check status"}
+                </button>
+              </form>
+
+              {statusResult ? (
+                <div className="result-box">
+                  <strong>{statusResult.public_reference}</strong>
+                  <p>Status: {statusResult.status}</p>
+                  <p>Client: {statusResult.client_name || "Unknown"}</p>
+                  <p>Issue: {statusResult.issue_summary}</p>
+                  <p>Preferred schedule: {statusResult.preferred_schedule || "Not provided"}</p>
+                  <p>Submitted: {formatDate(statusResult.created_at)}</p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="card">
+              <div className="card-header">
+                <div>
+                  <h2>Portal standards</h2>
+                  <span>Client-safe by design</span>
+                </div>
+              </div>
+              <ul className="safe-list">
+                <li>Secure client-only access</li>
+                <li>Private dashboard for submissions and references</li>
+                <li>Voice note and supporting file upload</li>
+                <li>No access to internal agents, prompts, or legal workspace tools</li>
+              </ul>
+            </div>
+
+            {success ? <div className="success-banner">{success}</div> : null}
+            {error ? <div className="error-banner">{error}</div> : null}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="portal-shell">
-      <section className="hero">
-        <div className="eyebrow">Client Intake Portal</div>
-        <h1>Request a legal consultation without touching the internal AI workspace.</h1>
-        <p>
-          This portal is separate from the internal legal dashboard. Clients can describe their issue,
-          upload documents, send a voice note, and receive a reference for follow-up.
-        </p>
+      <section className="hero hero-dashboard">
+        <div>
+          <div className="eyebrow">Secure Client Workspace</div>
+          <h1>Welcome back, {dashboard.account.full_name}.</h1>
+          <p>
+            Submit new consultation requests, attach supporting materials, and track your recent requests in a
+            clean professional portal built separately from the internal legal AI workspace.
+          </p>
+        </div>
+        <div className="dashboard-summary">
+          <div className="summary-card">
+            <span>Law firm</span>
+            <strong>{dashboard.account.tenant_name || `Tenant #${dashboard.account.tenant_id}`}</strong>
+          </div>
+          <div className="summary-card">
+            <span>Requests</span>
+            <strong>{dashboard.consultations.length}</strong>
+          </div>
+          <div className="summary-card">
+            <span>Latest status</span>
+            <strong>{latestConsultation?.status || "No requests yet"}</strong>
+          </div>
+          <button className="secondary-button" onClick={logout} type="button">
+            Sign out
+          </button>
+        </div>
       </section>
 
-      <section className="portal-grid">
+      <section className="portal-grid dashboard-grid">
         <div className="card">
           <div className="card-header">
             <div>
               <h2>New consultation request</h2>
-              <span>Safe public intake only</span>
+              <span>Private submission for your client account</span>
             </div>
           </div>
 
-          <form className="form-grid" onSubmit={handleSubmit}>
-            <label>
-              Law firm / tenant name
-              <input
-                required
-                value={form.tenant_name}
-                onChange={(event) => setForm((current) => ({ ...current, tenant_name: event.target.value }))}
-              />
-            </label>
-            <label>
-              Full name
-              <input
-                required
-                value={form.client_name}
-                onChange={(event) => setForm((current) => ({ ...current, client_name: event.target.value }))}
-              />
-            </label>
-            <label>
-              Email
-              <input
-                type="email"
-                value={form.client_email}
-                onChange={(event) => setForm((current) => ({ ...current, client_email: event.target.value }))}
-              />
-            </label>
-            <label>
-              Phone
-              <input
-                value={form.client_phone}
-                onChange={(event) => setForm((current) => ({ ...current, client_phone: event.target.value }))}
-              />
-            </label>
-            <label className="full-span">
-              Address
-              <input
-                value={form.client_address}
-                onChange={(event) => setForm((current) => ({ ...current, client_address: event.target.value }))}
-              />
-            </label>
+          <form className="form-grid" onSubmit={handleIntakeSubmit}>
             <label className="full-span">
               Short issue summary
               <textarea
                 required
-                value={form.issue_summary}
-                onChange={(event) => setForm((current) => ({ ...current, issue_summary: event.target.value }))}
+                value={intakeForm.issue_summary}
+                onChange={(event) => setIntakeForm((current) => ({ ...current, issue_summary: event.target.value }))}
               />
             </label>
             <label className="full-span">
               Detailed case description
               <textarea
-                value={form.case_description}
-                onChange={(event) => setForm((current) => ({ ...current, case_description: event.target.value }))}
+                value={intakeForm.case_description}
+                onChange={(event) =>
+                  setIntakeForm((current) => ({ ...current, case_description: event.target.value }))
+                }
               />
             </label>
             <label className="full-span">
               Preferred schedule
               <input
                 placeholder="Example: next Tuesday at 3 PM"
-                value={form.preferred_schedule}
-                onChange={(event) => setForm((current) => ({ ...current, preferred_schedule: event.target.value }))}
+                value={intakeForm.preferred_schedule}
+                onChange={(event) =>
+                  setIntakeForm((current) => ({ ...current, preferred_schedule: event.target.value }))
+                }
               />
             </label>
 
@@ -246,8 +488,8 @@ export default function App() {
               </label>
             </div>
 
-            <button className="primary-button full-span" disabled={submitting} type="submit">
-              {submitting ? "Submitting..." : "Submit consultation request"}
+            <button className="primary-button full-span" disabled={submitLoading} type="submit">
+              {submitLoading ? "Submitting..." : "Submit consultation request"}
             </button>
           </form>
         </div>
@@ -256,19 +498,50 @@ export default function App() {
           <div className="card">
             <div className="card-header">
               <div>
-                <h2>Track request</h2>
-                <span>Safe status lookup by reference</span>
+                <h2>Recent requests</h2>
+                <span>Everything tied to your client account</span>
+              </div>
+            </div>
+
+            {dashboardLoading ? (
+              <div className="result-box">Loading dashboard...</div>
+            ) : dashboard.consultations.length > 0 ? (
+              <div className="request-list">
+                {dashboard.consultations.map((item) => (
+                  <div key={item.id} className="request-card">
+                    <div className="request-topline">
+                      <strong>{item.case_title}</strong>
+                      <span>{item.status}</span>
+                    </div>
+                    <p>{item.issue_summary}</p>
+                    <small>
+                      Ref: {item.public_reference || "Pending"} | Preferred schedule:{" "}
+                      {item.preferred_schedule || "Not provided"} | {formatDate(item.created_at)}
+                    </small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="result-box">No requests yet. Submit your first consultation request to begin.</div>
+            )}
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <div>
+                <h2>Quick status lookup</h2>
+                <span>Reference-based confirmation</span>
               </div>
             </div>
 
             <form className="status-form" onSubmit={handleStatusLookup}>
               <input
-                placeholder="Enter intake reference"
+                placeholder="Enter request reference"
                 value={referenceInput}
                 onChange={(event) => setReferenceInput(event.target.value)}
               />
               <button className="secondary-button" disabled={statusLoading} type="submit">
-                {statusLoading ? "Checking..." : "Check status"}
+                {statusLoading ? "Checking..." : "Check"}
               </button>
             </form>
 
@@ -276,7 +549,6 @@ export default function App() {
               <div className="result-box">
                 <strong>{statusResult.public_reference}</strong>
                 <p>Status: {statusResult.status}</p>
-                <p>Client: {statusResult.client_name || "Unknown"}</p>
                 <p>Issue: {statusResult.issue_summary}</p>
                 <p>Preferred schedule: {statusResult.preferred_schedule || "Not provided"}</p>
                 <p>Submitted: {formatDate(statusResult.created_at)}</p>
@@ -284,39 +556,7 @@ export default function App() {
             ) : null}
           </div>
 
-          <div className="card">
-            <div className="card-header">
-              <div>
-                <h2>What this portal does</h2>
-                <span>And what it does not do</span>
-              </div>
-            </div>
-            <ul className="safe-list">
-              <li>Submit a consultation request</li>
-              <li>Upload documents and voice notes</li>
-              <li>Share scheduling preferences</li>
-              <li>Receive a public reference for follow-up</li>
-              <li>No access to internal AI agents, prompts, or case workspace tools</li>
-            </ul>
-          </div>
-
-          {submitResult ? (
-            <div className="card success-card">
-              <div className="card-header">
-                <div>
-                  <h2>Request submitted</h2>
-                  <span>Save this reference</span>
-                </div>
-              </div>
-              <div className="result-box">
-                <strong>{submitResult.public_reference}</strong>
-                <p>{submitResult.message}</p>
-                <p>Client: {submitResult.client_name}</p>
-                <p>Status: {submitResult.status}</p>
-              </div>
-            </div>
-          ) : null}
-
+          {success ? <div className="success-banner">{success}</div> : null}
           {error ? <div className="error-banner">{error}</div> : null}
         </div>
       </section>

@@ -2,17 +2,20 @@
   font-family: "Manrope", sans-serif;
   line-height: 1.5;
   font-weight: 500;
-  color: #1a1f24;
+  color: #17242d;
   background:
-    radial-gradient(circle at top right, rgba(26, 82, 118, 0.18), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(215, 159, 64, 0.14), transparent 30%),
-    linear-gradient(180deg, #f5f8fb 0%, #eef2f5 100%);
-  --panel: rgba(255, 255, 255, 0.82);
-  --border: rgba(28, 54, 74, 0.12);
-  --text-soft: #5f6a72;
-  --accent: #144b6a;
-  --accent-2: #b67b14;
-  --danger: #922f2f;
+    radial-gradient(circle at top left, rgba(13, 67, 102, 0.18), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(178, 132, 55, 0.12), transparent 30%),
+    linear-gradient(180deg, #f4f7fb 0%, #eaf0f5 100%);
+  --panel: rgba(255, 255, 255, 0.84);
+  --panel-strong: rgba(255, 255, 255, 0.94);
+  --border: rgba(23, 52, 74, 0.1);
+  --text-soft: #5f6d78;
+  --text-faint: #81909a;
+  --accent: #123f5a;
+  --accent-2: #b8842b;
+  --success: #206c4d;
+  --danger: #8f2d2d;
   --shadow: 0 24px 60px rgba(27, 38, 49, 0.12);
 }
 
@@ -37,29 +40,35 @@ textarea {
   font: inherit;
 }
 
+button {
+  cursor: pointer;
+}
+
 input,
 textarea {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 0.85rem 1rem;
-  background: rgba(255, 255, 255, 0.88);
+  border-radius: 16px;
+  padding: 0.9rem 1rem;
+  background: rgba(255, 255, 255, 0.92);
+  color: #17242d;
 }
 
 textarea {
-  min-height: 110px;
+  min-height: 116px;
   resize: vertical;
 }
 
 .portal-shell {
-  padding: 2rem;
+  padding: 1.5rem;
   display: grid;
-  gap: 1.5rem;
+  gap: 1.25rem;
 }
 
 .hero,
 .card,
-.error-banner {
+.error-banner,
+.success-banner {
   border: 1px solid var(--border);
   border-radius: 28px;
   background: var(--panel);
@@ -69,19 +78,52 @@ textarea {
 
 .hero {
   padding: 2rem;
-  background: linear-gradient(135deg, rgba(20, 75, 106, 0.96), rgba(13, 45, 65, 0.92));
+  background: linear-gradient(135deg, rgba(18, 63, 90, 0.97), rgba(14, 40, 59, 0.94));
   color: white;
 }
 
 .hero h1 {
-  margin: 0.35rem 0 0.8rem;
-  font-size: clamp(2rem, 4vw, 3.5rem);
+  margin: 0.4rem 0 0.8rem;
+  font-size: clamp(2.2rem, 4vw, 4rem);
   line-height: 1.02;
 }
 
 .hero p {
-  max-width: 60rem;
+  max-width: 56rem;
   color: rgba(255, 255, 255, 0.82);
+}
+
+.hero-split,
+.hero-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  gap: 1.25rem;
+  align-items: end;
+}
+
+.hero-points,
+.dashboard-summary {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.hero-points span,
+.summary-card {
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.9rem 1rem;
+}
+
+.summary-card span {
+  display: block;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.82rem;
+}
+
+.summary-card strong {
+  display: block;
+  margin-top: 0.2rem;
 }
 
 .eyebrow {
@@ -89,20 +131,26 @@ textarea {
   letter-spacing: 0.16em;
   font-size: 0.74rem;
   font-weight: 800;
-  color: #f8c768;
+  color: #f0c566;
 }
 
 .portal-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-  gap: 1.25rem;
+  gap: 1.2rem;
+}
+
+.auth-grid,
+.dashboard-grid {
+  grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
 }
 
 .card {
   padding: 1.25rem;
+  background: var(--panel-strong);
 }
 
-.stack {
+.stack,
+.request-list {
   display: grid;
   gap: 1rem;
 }
@@ -120,11 +168,48 @@ textarea {
 }
 
 .card-header span,
+.upload-box small,
+.record-box small,
 .safe-list,
 .result-box p,
-.upload-box small,
-.record-box small {
+.request-card p,
+.request-card small {
   color: var(--text-soft);
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.auth-tabs button,
+.primary-button,
+.secondary-button {
+  border-radius: 999px;
+  border: none;
+  padding: 0.92rem 1.2rem;
+}
+
+.auth-tabs button {
+  flex: 1;
+  background: rgba(18, 63, 90, 0.08);
+  color: var(--text-soft);
+}
+
+.auth-tabs button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.primary-button {
+  background: linear-gradient(120deg, var(--accent), #1d6088);
+  color: white;
+}
+
+.secondary-button {
+  background: rgba(18, 63, 90, 0.1);
+  color: var(--accent);
 }
 
 .form-grid {
@@ -149,37 +234,25 @@ textarea {
 }
 
 .upload-box,
-.record-box {
-  border: 1px dashed rgba(20, 75, 106, 0.25);
+.record-box,
+.request-card,
+.result-box {
   border-radius: 20px;
+  border: 1px solid rgba(18, 63, 90, 0.1);
+  background: rgba(247, 250, 252, 0.86);
   padding: 1rem;
+}
+
+.upload-box,
+.record-box {
   display: grid;
   gap: 0.6rem;
-  background: rgba(244, 249, 252, 0.78);
 }
 
 .upload-box input {
   padding: 0;
   border: none;
   background: transparent;
-}
-
-.primary-button,
-.secondary-button {
-  border: none;
-  border-radius: 999px;
-  padding: 0.9rem 1.2rem;
-  cursor: pointer;
-}
-
-.primary-button {
-  background: linear-gradient(120deg, var(--accent), #206890);
-  color: white;
-}
-
-.secondary-button {
-  background: rgba(20, 75, 106, 0.1);
-  color: var(--accent);
 }
 
 .status-form {
@@ -190,34 +263,46 @@ textarea {
 
 .safe-list {
   margin: 0;
-  padding-left: 1.2rem;
+  padding-left: 1.1rem;
 }
 
-.result-box {
-  border-radius: 20px;
-  border: 1px solid rgba(20, 75, 106, 0.1);
-  background: rgba(255, 255, 255, 0.74);
-  padding: 1rem;
+.request-topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
 }
 
-.result-box strong {
-  font-size: 1.1rem;
+.request-topline span {
+  color: var(--accent-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.76rem;
+  font-weight: 700;
 }
 
-.success-card {
-  border-color: rgba(37, 123, 79, 0.18);
-  background: rgba(242, 251, 246, 0.88);
+.success-banner,
+.error-banner {
+  padding: 1rem 1.1rem;
+}
+
+.success-banner {
+  color: var(--success);
+  border-color: rgba(32, 108, 77, 0.18);
+  background: rgba(236, 248, 242, 0.92);
 }
 
 .error-banner {
-  padding: 1rem 1.1rem;
   color: var(--danger);
-  border-color: rgba(146, 47, 47, 0.18);
-  background: rgba(252, 236, 236, 0.9);
+  border-color: rgba(143, 45, 45, 0.18);
+  background: rgba(252, 236, 236, 0.92);
 }
 
-@media (max-width: 1100px) {
-  .portal-grid,
+@media (max-width: 1120px) {
+  .hero-split,
+  .hero-dashboard,
+  .auth-grid,
+  .dashboard-grid,
   .form-grid,
   .upload-row {
     grid-template-columns: 1fr;
@@ -231,5 +316,9 @@ textarea {
 
   .status-form {
     grid-template-columns: 1fr;
+  }
+
+  .auth-tabs {
+    flex-direction: column;
   }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./lib/api";
 import type {
+  AgentWorkflowResponse,
   CaseItem,
   CaseStatus,
   ChatMessage,
@@ -72,8 +73,10 @@ export default function App() {
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
   const [selectedRecordingId, setSelectedRecordingId] = useState<number | null>(null);
   const [selectedDocumentAnalysis, setSelectedDocumentAnalysis] = useState<FullDocumentAnalysis | null>(null);
+  const [agentWorkflow, setAgentWorkflow] = useState<AgentWorkflowResponse | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([buildWelcomeMessage()]);
   const [activeSources, setActiveSources] = useState<SourceItem[]>([]);
+  const [workflowObjective, setWorkflowObjective] = useState("");
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authForm, setAuthForm] = useState({
     name: "",
@@ -102,6 +105,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [copilotLoading, setCopilotLoading] = useState(false);
+  const [workflowLoading, setWorkflowLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
@@ -183,6 +187,7 @@ export default function App() {
     setSelectedRecordingId(null);
     setConsultationRequests([]);
     setActiveSources([]);
+    setAgentWorkflow(null);
     setChatMessages([buildWelcomeMessage(targetCase?.title)]);
 
     const [docs, recordings, requests] = await Promise.all([
@@ -333,6 +338,49 @@ export default function App() {
       setError(caught instanceof Error ? caught.message : "Copilot request failed.");
     } finally {
       setCopilotLoading(false);
+    }
+  }
+
+  async function runAgentWorkflow() {
+    if (!token || !selectedCaseId) {
+      return;
+    }
+
+    try {
+      setWorkflowLoading(true);
+      setError(null);
+      const response = await api.runAgentWorkflow(
+        token,
+        selectedCaseId,
+        workflowObjective.trim() || undefined
+      );
+      setAgentWorkflow(response);
+      setActiveSources(response.sources);
+
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          timestamp: nowIso(),
+          content: response.verified_summary,
+          meta: {
+            parsedIntent: "agent_workflow",
+            confidence: "high",
+            fallbackReason: null,
+            sources: response.sources,
+          },
+        },
+      ]);
+
+      const topSource = response.sources[0];
+      if (topSource?.document_id) {
+        await selectDocument(token, topSource.document_id);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to run the agent workflow.");
+    } finally {
+      setWorkflowLoading(false);
     }
   }
 
@@ -739,7 +787,7 @@ export default function App() {
               <div className="panel-header">
                 <div>
                   <h3>Case command center</h3>
-                  <span>Summaries, grounded chat, and evidence review</span>
+                  <span>Summaries, grounded chat, evidence review, and orchestration</span>
                 </div>
               </div>
 
@@ -775,6 +823,22 @@ export default function App() {
                   type="button"
                 >
                   Compare docs
+                </button>
+              </div>
+
+              <div className="workflow-launcher">
+                <textarea
+                  placeholder="Workflow objective: prepare a grounded case brief, verify evidence, and draft a client update..."
+                  value={workflowObjective}
+                  onChange={(event) => setWorkflowObjective(event.target.value)}
+                />
+                <button
+                  className="primary-button"
+                  disabled={!selectedCaseId || workflowLoading}
+                  onClick={() => void runAgentWorkflow()}
+                  type="button"
+                >
+                  {workflowLoading ? "Running workflow..." : "Run agent workflow"}
                 </button>
               </div>
             </div>
@@ -816,6 +880,61 @@ export default function App() {
                   Send
                 </button>
               </form>
+            </div>
+
+            <div className="panel workflow-panel">
+              <div className="panel-header">
+                <div>
+                  <h3>Agent workflow</h3>
+                  <span>End-to-end orchestration across reasoning, verification, and drafting</span>
+                </div>
+              </div>
+
+              {agentWorkflow ? (
+                <div className="analysis-stack">
+                  <div className="analysis-block">
+                    <h4>Objective</h4>
+                    <p>{agentWorkflow.objective}</p>
+                  </div>
+
+                  <div className="analysis-block">
+                    <h4>Verified summary</h4>
+                    <p>{agentWorkflow.verified_summary}</p>
+                  </div>
+
+                  <div className="analysis-block">
+                    <h4>Client email draft</h4>
+                    <p>{agentWorkflow.client_email}</p>
+                  </div>
+
+                  <div className="analysis-block">
+                    <h4>Agent stages</h4>
+                    <div className="workflow-stage-list">
+                      {Object.entries(agentWorkflow.stages).map(([stageKey, stage]) => (
+                        <div key={stageKey} className="workflow-stage-card">
+                          <div className="workflow-stage-topline">
+                            <strong>{stage.agent_name}</strong>
+                            <span>{stage.success ? "ok" : "needs review"}</span>
+                          </div>
+                          {stage.warnings.length > 0 ? <p>Warnings: {stage.warnings.join(" | ")}</p> : null}
+                          {stage.error ? <p>Error: {stage.error}</p> : null}
+                          {stage.trace.length > 0 ? (
+                            <div className="workflow-trace">
+                              {stage.trace.map((item, index) => (
+                                <span key={`${stageKey}-${index}`}>{item}</span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  Run the agent workflow to generate a verified case brief, inspect stage traces, and draft a client update.
+                </div>
+              )}
             </div>
           </div>
 
