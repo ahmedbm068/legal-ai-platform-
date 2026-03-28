@@ -26,6 +26,8 @@ class ConsultationRequest(Base):
     intake_notes = Column(Text, nullable=True)
     status = Column(String, nullable=False, default="new")
     extraction_source = Column(String, nullable=True)
+    public_reference = Column(String, nullable=True, unique=True, index=True)
+    source_channel = Column(String, nullable=False, default="internal")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(

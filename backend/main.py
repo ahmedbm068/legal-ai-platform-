@@ -20,6 +20,7 @@ from backend.api import auth, users, clients, cases
 from backend.api.consultations import router as consultations_router
 from backend.api.document_router import router as document_router
 from backend.api.intelligence import router as intelligence_router
+from backend.api.public import router as public_router
 from backend.api.rag import router as rag_router
 from backend.api.search import router as search_router
 from backend.api.voice import router as voice_router
@@ -51,6 +52,7 @@ app.include_router(users.router)
 app.include_router(clients.router)
 app.include_router(cases.router)
 app.include_router(consultations_router)
+app.include_router(public_router)
 app.include_router(document_router)
 app.include_router(rag_router)
 app.include_router(intelligence_router)

@@ -58,3 +58,19 @@ npm run dev
 Default frontend URL:
 
 `http://127.0.0.1:5173`
+
+## Client Portal
+
+The separate client-facing intake portal lives in [client-portal/](/c:/Users/ahmed/Desktop/pfe.2/legal-ai-platform/client-portal).
+
+Install client portal dependencies after Node.js is available locally:
+
+```bash
+cd client-portal
+npm install
+npm run dev
+```
+
+Default client portal URL:
+
+`http://127.0.0.1:5174`

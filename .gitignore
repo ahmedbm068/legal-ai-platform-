@@ -18,6 +18,8 @@ Thumbs.db
 # Frontend
 frontend/node_modules/
 frontend/dist/
+client-portal/node_modules/
+client-portal/dist/
 
 # IDE
 .vscode/

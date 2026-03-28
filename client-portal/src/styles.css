@@ -1,0 +1,235 @@
+:root {
+  font-family: "Manrope", sans-serif;
+  line-height: 1.5;
+  font-weight: 500;
+  color: #1a1f24;
+  background:
+    radial-gradient(circle at top right, rgba(26, 82, 118, 0.18), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(215, 159, 64, 0.14), transparent 30%),
+    linear-gradient(180deg, #f5f8fb 0%, #eef2f5 100%);
+  --panel: rgba(255, 255, 255, 0.82);
+  --border: rgba(28, 54, 74, 0.12);
+  --text-soft: #5f6a72;
+  --accent: #144b6a;
+  --accent-2: #b67b14;
+  --danger: #922f2f;
+  --shadow: 0 24px 60px rgba(27, 38, 49, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+input,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.portal-shell {
+  padding: 2rem;
+  display: grid;
+  gap: 1.5rem;
+}
+
+.hero,
+.card,
+.error-banner {
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.hero {
+  padding: 2rem;
+  background: linear-gradient(135deg, rgba(20, 75, 106, 0.96), rgba(13, 45, 65, 0.92));
+  color: white;
+}
+
+.hero h1 {
+  margin: 0.35rem 0 0.8rem;
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  line-height: 1.02;
+}
+
+.hero p {
+  max-width: 60rem;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: #f8c768;
+}
+
+.portal-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 1.25rem;
+}
+
+.card {
+  padding: 1.25rem;
+}
+
+.stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.card-header h2 {
+  margin: 0;
+}
+
+.card-header span,
+.safe-list,
+.result-box p,
+.upload-box small,
+.record-box small {
+  color: var(--text-soft);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.form-grid label {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.full-span {
+  grid-column: 1 / -1;
+}
+
+.upload-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.upload-box,
+.record-box {
+  border: 1px dashed rgba(20, 75, 106, 0.25);
+  border-radius: 20px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.6rem;
+  background: rgba(244, 249, 252, 0.78);
+}
+
+.upload-box input {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.primary-button,
+.secondary-button {
+  border: none;
+  border-radius: 999px;
+  padding: 0.9rem 1.2rem;
+  cursor: pointer;
+}
+
+.primary-button {
+  background: linear-gradient(120deg, var(--accent), #206890);
+  color: white;
+}
+
+.secondary-button {
+  background: rgba(20, 75, 106, 0.1);
+  color: var(--accent);
+}
+
+.status-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+}
+
+.safe-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.result-box {
+  border-radius: 20px;
+  border: 1px solid rgba(20, 75, 106, 0.1);
+  background: rgba(255, 255, 255, 0.74);
+  padding: 1rem;
+}
+
+.result-box strong {
+  font-size: 1.1rem;
+}
+
+.success-card {
+  border-color: rgba(37, 123, 79, 0.18);
+  background: rgba(242, 251, 246, 0.88);
+}
+
+.error-banner {
+  padding: 1rem 1.1rem;
+  color: var(--danger);
+  border-color: rgba(146, 47, 47, 0.18);
+  background: rgba(252, 236, 236, 0.9);
+}
+
+@media (max-width: 1100px) {
+  .portal-grid,
+  .form-grid,
+  .upload-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .portal-shell {
+    padding: 1rem;
+  }
+
+  .status-form {
+    grid-template-columns: 1fr;
+  }
+}
