@@ -8,6 +8,7 @@ from openai import APIError, AuthenticationError, RateLimitError
 from sqlalchemy.orm import Session
 
 from backend.services.ai.agents.retrieval_agent import RetrievalAgent
+from backend.services.ai.agents.verifier_agent import verifier_agent
 from backend.services.ai.embedding_service import EmbeddingService
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.vector_store import VectorStore
@@ -205,11 +206,17 @@ Context:
 """
 
         if not self.client:
+            fallback_answer = self._extractive_fallback_answer(question, results)
+            verification = verifier_agent.verify_answer(
+                question=question,
+                answer=fallback_answer,
+                sources=formatted_sources,
+            )
             return {
-                "answer": self._extractive_fallback_answer(question, results),
+                "answer": verification.payload.get("supported_answer") or fallback_answer,
                 "used_fallback": True,
                 "fallback_reason": "OPENAI_API_KEY not configured",
-                "confidence": confidence,
+                "confidence": verification.payload.get("confidence") or confidence,
                 "scope": scope,
                 "sources": formatted_sources
             }
@@ -224,31 +231,59 @@ Context:
             if not answer_text:
                 answer_text = self._extractive_fallback_answer(question, results)
 
+            verification = verifier_agent.verify_answer(
+                question=question,
+                answer=answer_text,
+                sources=formatted_sources,
+            )
+
+            if not verification.success:
+                return {
+                    "answer": verification.payload.get("supported_answer") or self._extractive_fallback_answer(question, results),
+                    "used_fallback": True,
+                    "fallback_reason": "Verifier agent flagged the generated answer as insufficiently grounded",
+                    "confidence": verification.payload.get("confidence") or confidence,
+                    "scope": scope,
+                    "sources": formatted_sources
+                }
+
             return {
-                "answer": answer_text,
+                "answer": verification.payload.get("supported_answer") or answer_text,
                 "used_fallback": False,
                 "fallback_reason": None,
-                "confidence": confidence,
+                "confidence": verification.payload.get("confidence") or confidence,
                 "scope": scope,
                 "sources": formatted_sources
             }
 
         except (RateLimitError, APIError, AuthenticationError) as exc:
+            fallback_answer = self._extractive_fallback_answer(question, results)
+            verification = verifier_agent.verify_answer(
+                question=question,
+                answer=fallback_answer,
+                sources=formatted_sources,
+            )
             return {
-                "answer": self._extractive_fallback_answer(question, results),
+                "answer": verification.payload.get("supported_answer") or fallback_answer,
                 "used_fallback": True,
                 "fallback_reason": str(exc),
-                "confidence": confidence,
+                "confidence": verification.payload.get("confidence") or confidence,
                 "scope": scope,
                 "sources": formatted_sources
             }
 
         except Exception as exc:
+            fallback_answer = self._extractive_fallback_answer(question, results)
+            verification = verifier_agent.verify_answer(
+                question=question,
+                answer=fallback_answer,
+                sources=formatted_sources,
+            )
             return {
-                "answer": self._extractive_fallback_answer(question, results),
+                "answer": verification.payload.get("supported_answer") or fallback_answer,
                 "used_fallback": True,
                 "fallback_reason": f"Unexpected generation error: {exc}",
-                "confidence": confidence,
+                "confidence": verification.payload.get("confidence") or confidence,
                 "scope": scope,
                 "sources": formatted_sources
             }

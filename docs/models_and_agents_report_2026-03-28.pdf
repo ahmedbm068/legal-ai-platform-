@@ -1,0 +1,556 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 5 /Kids [3 0 R 5 0 R 7 0 R 9 0 R 11 0 R] >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 13 0 R >> >> /Contents 4 0 R >>
+endobj
+4 0 obj
+<< /Length 2044 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(# Models And Agents Report) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Date: 2026-03-28) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Scope) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(This report lists the database models, AI agents, and core service layers that were) Tj
+0 -14 Td
+(created or adjusted during the current build phase while moving the platform toward a) Tj
+0 -14 Td
+(case-centric multi-agent legal AI architecture.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Database Models Created) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 1. `VoiceRecording`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/models/voice_recording.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- stores uploaded or browser-recorded voice intake artifacts) Tj
+0 -14 Td
+(- links each recording to a case and tenant) Tj
+0 -14 Td
+(- preserves transcript status, transcript text, and transcript metadata) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key fields:) Tj
+0 -14 Td
+(- `filename`) Tj
+0 -14 Td
+(- `storage_path`) Tj
+0 -14 Td
+(- `mime_type`) Tj
+0 -14 Td
+(- `file_size`) Tj
+0 -14 Td
+(- `transcription_status`) Tj
+0 -14 Td
+(- `transcript_text`) Tj
+0 -14 Td
+(- `transcript_language`) Tj
+0 -14 Td
+(- `case_id`) Tj
+0 -14 Td
+(- `tenant_id`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Why it matters:) Tj
+0 -14 Td
+(- this model enables client call capture, transcription persistence, and later) Tj
+0 -14 Td
+(transcript reasoning) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 2. `ConsultationRequest`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/models/consultation_request.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- stores structured intake information extracted from client speech or form submission) Tj
+0 -14 Td
+(- supports consultation booking and case-description workflows) Tj
+0 -14 Td
+(- bridges public/client intake with internal legal operations) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key fields:) Tj
+0 -14 Td
+(- `client_name`) Tj
+0 -14 Td
+(- `client_email`) Tj
+0 -14 Td
+(- `client_phone`) Tj
+0 -14 Td
+(- `booking_intent`) Tj
+0 -14 Td
+(- `urgency_level`) Tj
+0 -14 Td
+(- `legal_area`) Tj
+0 -14 Td
+(- `preferred_schedule`) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 13 0 R >> >> /Contents 6 0 R >>
+endobj
+6 0 obj
+<< /Length 2066 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(- `issue_summary`) Tj
+0 -14 Td
+(- `extracted_case_description`) Tj
+0 -14 Td
+(- `public_reference`) Tj
+0 -14 Td
+(- `source_channel`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Why it matters:) Tj
+0 -14 Td
+(- this is the main workflow model for turning raw voice intake into actionable legal) Tj
+0 -14 Td
+(intake data) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Database Models Adjusted) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 3. `Case`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/models/case.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Adjustments:) Tj
+0 -14 Td
+(- added `voice_recordings` relationship) Tj
+0 -14 Td
+(- added `consultation_requests` relationship) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Why it matters:) Tj
+0 -14 Td
+(- the system is now truly case-centric across documents, voice, and intake workflows) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## AI Agent Layer Created) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 4. `BaseAgent` and `AgentResult`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/agents/base_agent.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- defines a shared contract for agent execution) Tj
+0 -14 Td
+(- standardizes `payload`, `warnings`, `error`, and `trace`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Why it matters:) Tj
+0 -14 Td
+(- this is the foundation for a consistent multi-agent architecture) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 5. `SummarizationAgent`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/agents/summarization_agent.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- improves document summaries using a provider-agnostic LLM gateway) Tj
+0 -14 Td
+(- keeps a structured JSON output for downstream intelligence) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Used by:) Tj
+0 -14 Td
+(- `backend/services/ai/summarization_service.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 6. `IntakeAgent`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/agents/intake_agent.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- converts transcripts into structured legal intake payloads) Tj
+0 -14 Td
+(- normalizes client identity, booking intent, urgency, and issue details) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 13 0 R >> >> /Contents 8 0 R >>
+endobj
+8 0 obj
+<< /Length 1975 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+() Tj
+0 -14 Td
+(Used by:) Tj
+0 -14 Td
+(- `backend/api/consultations.py`) Tj
+0 -14 Td
+(- `backend/api/public.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 7. `RetrievalAgent`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/agents/retrieval_agent.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- performs hybrid retrieval using lexical and semantic search) Tj
+0 -14 Td
+(- merges and ranks chunk results for grounded question answering) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Used by:) Tj
+0 -14 Td
+(- `backend/services/ai/rag_service.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 8. `CaseReasoningAgent`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/agents/case_reasoning_agent.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- synthesizes the full case picture using documents, consultation requests, and voice) Tj
+0 -14 Td
+(transcripts) Tj
+0 -14 Td
+(- produces structured outputs for:) Tj
+0 -14 Td
+(  - overview) Tj
+0 -14 Td
+(  - narrative summary) Tj
+0 -14 Td
+(  - main issues) Tj
+0 -14 Td
+(  - key dates) Tj
+0 -14 Td
+(  - legal risks) Tj
+0 -14 Td
+(  - recommended next steps) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Used by:) Tj
+0 -14 Td
+(- `backend/services/ai/copilot_service.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 9. `VerifierAgent`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/agents/verifier_agent.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- checks whether generated answers are adequately supported by retrieved evidence) Tj
+0 -14 Td
+(- can fall back to a more grounded supported answer when verification is weak) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Used by:) Tj
+0 -14 Td
+(- `backend/services/ai/rag_service.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Why it matters:) Tj
+0 -14 Td
+(- this is the start of the trust/proof-first layer in the architecture) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Core AI Services Adjusted) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 10. `LLMGateway`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/llm_gateway.py`) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 13 0 R >> >> /Contents 10 0 R >>
+endobj
+10 0 obj
+<< /Length 1987 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+(- centralizes provider configuration) Tj
+0 -14 Td
+(- supports OpenAI-compatible endpoints such as OpenRouter) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Configuration source:) Tj
+0 -14 Td
+(- `backend/core/config.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 11. `SummarizationService`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/summarization_service.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Adjustment:) Tj
+0 -14 Td
+(- now uses `SummarizationAgent` first, then falls back safely) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 12. `RagService`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/rag_service.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Adjustments:) Tj
+0 -14 Td
+(- now uses `RetrievalAgent`) Tj
+0 -14 Td
+(- now uses `VerifierAgent`) Tj
+0 -14 Td
+(- remains the grounded QA orchestration layer) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 13. `CopilotService`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(File: `backend/services/ai/copilot_service.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Adjustments:) Tj
+0 -14 Td
+(- now uses `CaseReasoningAgent` for case summarization and case risk analysis) Tj
+0 -14 Td
+(- now pulls from consultation requests and voice recordings, not just documents) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Architecture Status) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Current explicit agent stack:) Tj
+0 -14 Td
+(- `SummarizationAgent`) Tj
+0 -14 Td
+(- `IntakeAgent`) Tj
+0 -14 Td
+(- `RetrievalAgent`) Tj
+0 -14 Td
+(- `CaseReasoningAgent`) Tj
+0 -14 Td
+(- `VerifierAgent`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Current architectural shape:) Tj
+0 -14 Td
+(- voice intake and transcript persistence) Tj
+0 -14 Td
+(- consultation workflow extraction) Tj
+0 -14 Td
+(- hybrid retrieval and RAG) Tj
+0 -14 Td
+(- case-centric reasoning) Tj
+0 -14 Td
+(- grounded verification) Tj
+0 -14 Td
+(- separate internal app and client portal) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Provider Status) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The codebase supports OpenAI-compatible providers through:) Tj
+0 -14 Td
+(- `OPENAI_API_KEY`) Tj
+ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 13 0 R >> >> /Contents 12 0 R >>
+endobj
+12 0 obj
+<< /Length 1248 >>
+stream
+BT
+/F1 10 Tf
+1 0 0 1 50 792 Tm
+(- `LLM_BASE_URL`) Tj
+0 -14 Td
+(- `LLM_MODEL`) Tj
+0 -14 Td
+(- `SUMMARY_AGENT_MODEL`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Important current note:) Tj
+0 -14 Td
+(- the local environment currently has an API key present) Tj
+0 -14 Td
+(- but `LLM_BASE_URL` and `LLM_MODEL` were not yet configured in `.env` at the time of) Tj
+0 -14 Td
+(inspection) Tj
+0 -14 Td
+(- that means the OpenRouter-style provider path is supported by code, but not fully) Tj
+0 -14 Td
+(activated in the local runtime yet) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Recommended runtime values:) Tj
+0 -14 Td
+(- `LLM_BASE_URL=https://openrouter.ai/api/v1`) Tj
+0 -14 Td
+(- `LLM_MODEL=openai/gpt-4o-mini`) Tj
+0 -14 Td
+(- `SUMMARY_AGENT_MODEL=openai/gpt-4o-mini`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Summary) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The platform has moved from a backend prototype with AI features into an actual early) Tj
+0 -14 Td
+(multi-agent legal AI system. The most important structural changes were the creation of) Tj
+0 -14 Td
+(case-linked voice and consultation models, the standardization of the agent contract,) Tj
+0 -14 Td
+(and the addition of reasoning and verification agents that begin to reflect the) Tj
+0 -14 Td
+(architecture promised in the project vision.) Tj
+ET
+endstream
+endobj
+13 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000140 00000 n 
+0000000267 00000 n 
+0000002363 00000 n 
+0000002490 00000 n 
+0000004608 00000 n 
+0000004735 00000 n 
+0000006762 00000 n 
+0000006890 00000 n 
+0000008930 00000 n 
+0000009059 00000 n 
+0000010360 00000 n 
+trailer
+<< /Size 14 /Root 1 0 R >>
+startxref
+10431
+%%EOF
