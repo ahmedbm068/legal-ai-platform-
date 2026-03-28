@@ -10,6 +10,7 @@ from backend.core.config import settings
 from backend.models.case import Case
 from backend.models.client import Client
 from backend.models.client_portal_account import ClientPortalAccount
+from backend.models.client_portal_login_code import ClientPortalLoginCode
 from backend.models.document import Document
 from backend.models.document_chunk import DocumentChunk
 from backend.models.document_entity import DocumentEntity

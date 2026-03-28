@@ -2,13 +2,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchIntakeStatus,
   fetchPortalDashboard,
-  loginPortalAccount,
   registerPortalAccount,
+  requestPortalLoginCode,
   submitAuthenticatedPortalIntake,
+  verifyPortalLoginCode,
 } from "./lib/api";
 import type { ClientPortalConsultation, ClientPortalDashboard, PublicIntakeStatus } from "./types";
 
 const TOKEN_STORAGE_KEY = "legal-ai-client-portal-token";
+const PASSWORD_HINT =
+  "Password must be at least 10 characters and include one uppercase letter and one symbol.";
+const PASSWORD_POLICY_REGEX = /^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{10,}$/;
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -33,11 +37,14 @@ export default function App() {
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [loginCodeRequested, setLoginCodeRequested] = useState(false);
 
   const [authForm, setAuthForm] = useState({
     full_name: "",
     email: "",
     password: "",
+    confirm_password: "",
+    login_code: "",
     phone: "",
     address: "",
   });
@@ -90,20 +97,41 @@ export default function App() {
     setSuccess(null);
 
     try {
-      const authResponse =
-        authMode === "register"
-          ? await registerPortalAccount({
+      if (authMode === "register") {
+        if (authForm.password !== authForm.confirm_password) {
+          throw new Error("Please confirm the same password in both password fields.");
+        }
+
+        if (!PASSWORD_POLICY_REGEX.test(authForm.password)) {
+          throw new Error(PASSWORD_HINT);
+        }
+
+        const registerResponse = await registerPortalAccount({
               full_name: authForm.full_name,
               email: authForm.email,
               password: authForm.password,
               phone: authForm.phone || undefined,
               address: authForm.address || undefined,
-            })
-          : await loginPortalAccount(authForm.email, authForm.password);
+            });
 
-      localStorage.setItem(TOKEN_STORAGE_KEY, authResponse.access_token);
-      setToken(authResponse.access_token);
-      setSuccess(authMode === "register" ? "Account created. Your secure client portal is ready." : null);
+        setSuccess(registerResponse.message);
+        setAuthMode("login");
+        setLoginCodeRequested(false);
+        setAuthForm((current) => ({
+          ...current,
+          password: "",
+          confirm_password: "",
+          login_code: "",
+        }));
+      } else if (!loginCodeRequested) {
+        const loginResponse = await requestPortalLoginCode(authForm.email, authForm.password);
+        setSuccess(loginResponse.message);
+        setLoginCodeRequested(true);
+      } else {
+        const verifyResponse = await verifyPortalLoginCode(authForm.email, authForm.login_code);
+        localStorage.setItem(TOKEN_STORAGE_KEY, verifyResponse.access_token);
+        setToken(verifyResponse.access_token);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to authenticate.");
     } finally {
@@ -219,6 +247,7 @@ export default function App() {
     setDashboard(null);
     setStatusResult(null);
     setSuccess(null);
+    setLoginCodeRequested(false);
   }
 
   if (!token || !dashboard) {
@@ -254,14 +283,20 @@ export default function App() {
             <div className="auth-tabs">
               <button
                 className={authMode === "login" ? "active" : ""}
-                onClick={() => setAuthMode("login")}
+                onClick={() => {
+                  setAuthMode("login");
+                  setLoginCodeRequested(false);
+                }}
                 type="button"
               >
                 Sign in
               </button>
               <button
                 className={authMode === "register" ? "active" : ""}
-                onClick={() => setAuthMode("register")}
+                onClick={() => {
+                  setAuthMode("register");
+                  setLoginCodeRequested(false);
+                }}
                 type="button"
               >
                 Create account
@@ -293,6 +328,17 @@ export default function App() {
                       onChange={(event) => setAuthForm((current) => ({ ...current, address: event.target.value }))}
                     />
                   </label>
+                  <label>
+                    Confirm password
+                    <input
+                      required
+                      type="password"
+                      value={authForm.confirm_password}
+                      onChange={(event) =>
+                        setAuthForm((current) => ({ ...current, confirm_password: event.target.value }))
+                      }
+                    />
+                  </label>
                 </>
               ) : null}
 
@@ -302,7 +348,13 @@ export default function App() {
                   required
                   type="email"
                   value={authForm.email}
-                  onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
+                  onChange={(event) => {
+                    const nextEmail = event.target.value;
+                    setAuthForm((current) => ({ ...current, email: nextEmail, login_code: "" }));
+                    if (authMode === "login") {
+                      setLoginCodeRequested(false);
+                    }
+                  }}
                 />
               </label>
               <label>
@@ -311,12 +363,45 @@ export default function App() {
                   required
                   type="password"
                   value={authForm.password}
-                  onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+                  onChange={(event) => {
+                    const nextPassword = event.target.value;
+                    setAuthForm((current) => ({ ...current, password: nextPassword, login_code: "" }));
+                    if (authMode === "login") {
+                      setLoginCodeRequested(false);
+                    }
+                  }}
                 />
               </label>
 
+              {authMode === "register" ? <div className="password-hint full-span">{PASSWORD_HINT}</div> : null}
+
+              {authMode === "login" && loginCodeRequested ? (
+                <label className="full-span">
+                  Six-digit access code
+                  <input
+                    required
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="Enter the code sent to your email"
+                    value={authForm.login_code}
+                    onChange={(event) =>
+                      setAuthForm((current) => ({
+                        ...current,
+                        login_code: event.target.value.replace(/\D/g, "").slice(0, 6),
+                      }))
+                    }
+                  />
+                </label>
+              ) : null}
+
               <button className="primary-button full-span" disabled={authLoading} type="submit">
-                {authLoading ? "Working..." : authMode === "login" ? "Enter portal" : "Create secure account"}
+                {authLoading
+                  ? "Working..."
+                  : authMode === "login"
+                    ? loginCodeRequested
+                      ? "Verify code and enter portal"
+                      : "Send access code"
+                    : "Create secure account"}
               </button>
             </form>
           </div>

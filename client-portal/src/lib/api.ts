@@ -1,5 +1,6 @@
 import type {
   ClientPortalDashboard,
+  ClientPortalMessageResponse,
   ClientPortalToken,
   PublicIntakeResponse,
   PublicIntakeStatus,
@@ -37,21 +38,34 @@ export async function registerPortalAccount(payload: {
   password: string;
   phone?: string;
   address?: string;
-}): Promise<ClientPortalToken> {
+}): Promise<ClientPortalMessageResponse> {
   const response = await fetch(`${API_BASE_URL}/portal/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
-  return parseResponse<ClientPortalToken>(response);
+  return parseResponse<ClientPortalMessageResponse>(response);
 }
 
-export async function loginPortalAccount(email: string, password: string): Promise<ClientPortalToken> {
-  const response = await fetch(`${API_BASE_URL}/portal/auth/login`, {
+export async function requestPortalLoginCode(
+  email: string,
+  password: string
+): Promise<ClientPortalMessageResponse> {
+  const response = await fetch(`${API_BASE_URL}/portal/auth/login/request-code`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
+  });
+
+  return parseResponse<ClientPortalMessageResponse>(response);
+}
+
+export async function verifyPortalLoginCode(email: string, code: string): Promise<ClientPortalToken> {
+  const response = await fetch(`${API_BASE_URL}/portal/auth/login/verify-code`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, code }),
   });
 
   return parseResponse<ClientPortalToken>(response);

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
+from random import randint
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from jose import JWTError, jwt
@@ -12,16 +14,21 @@ from backend.api.client_portal_schema import (
     ClientPortalAccountOut,
     ClientPortalConsultationItem,
     ClientPortalDashboardResponse,
+    ClientPortalLoginCodeRequest,
+    ClientPortalLoginCodeVerifyRequest,
     ClientPortalLoginRequest,
+    ClientPortalMessageResponse,
     ClientPortalRegisterRequest,
     ClientPortalToken,
 )
 from backend.core.hashing import hash_password, verify_password
 from backend.core.jwt_handler import ALGORITHM, SECRET_KEY, create_access_token
+from backend.core.config import settings
 from backend.database.database import SessionLocal
 from backend.models.case import Case
 from backend.models.client import Client
 from backend.models.client_portal_account import ClientPortalAccount
+from backend.models.client_portal_login_code import ClientPortalLoginCode
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
 from backend.models.tenant import Tenant
@@ -30,6 +37,7 @@ from backend.models.voice_recording import VoiceRecording
 from backend.services.ai.agents.intake_agent import intake_agent
 from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
 from backend.services.ai.transcription_service import transcription_service
+from backend.services.client_portal_mail_service import client_portal_mail_service
 from backend.services.storage_service import download_file_to_temp, upload_file
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -38,6 +46,7 @@ router = APIRouter(prefix="/portal", tags=["Client Portal"])
 
 security = HTTPBearer()
 pipeline = DocumentAIPipeline()
+PASSWORD_POLICY_REGEX = re.compile(r"^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{10,}$")
 
 
 def normalize_case_title(client_name: str, issue_summary: str) -> str:
@@ -97,6 +106,30 @@ def get_default_tenant(db: Session) -> Tenant:
             detail="No tenant is configured for the platform yet.",
         )
     return tenant
+
+
+def validate_portal_password(password: str) -> None:
+    if not PASSWORD_POLICY_REGEX.match(password or ""):
+        raise HTTPException(
+            status_code=400,
+            detail="Password must be at least 10 characters and include one uppercase letter and one symbol.",
+        )
+
+
+def generate_login_code() -> str:
+    return f"{randint(0, 999999):06d}"
+
+
+def issue_portal_token(account: ClientPortalAccount) -> dict[str, str]:
+    access_token = create_access_token(
+        data={
+            "sub": str(account.id),
+            "tenant_id": account.tenant_id,
+            "client_id": account.client_id,
+            "account_type": "client_portal",
+        }
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 def get_or_create_client(
@@ -196,12 +229,13 @@ def build_consultation_items(db: Session, account: ClientPortalAccount) -> list[
     ]
 
 
-@router.post("/auth/register", response_model=ClientPortalToken, status_code=status.HTTP_201_CREATED)
+@router.post("/auth/register", response_model=ClientPortalMessageResponse, status_code=status.HTTP_201_CREATED)
 def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Depends(get_db)):
     existing = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == data.email).first()
     if existing:
         raise HTTPException(status_code=400, detail="A portal account already exists for this email.")
 
+    validate_portal_password(data.password)
     tenant = get_default_tenant(db)
 
     client = get_or_create_client(
@@ -224,32 +258,86 @@ def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Dep
     db.commit()
     db.refresh(account)
 
-    access_token = create_access_token(
-        data={
-            "sub": str(account.id),
-            "tenant_id": account.tenant_id,
-            "client_id": account.client_id,
-            "account_type": "client_portal",
-        }
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"message": "Account created successfully. Sign in to receive your six-digit access code."}
 
 
-@router.post("/auth/login", response_model=ClientPortalToken)
-def login_portal_account(data: ClientPortalLoginRequest, db: Session = Depends(get_db)):
+@router.post("/auth/login/request-code", response_model=ClientPortalMessageResponse)
+def request_login_code(data: ClientPortalLoginCodeRequest, db: Session = Depends(get_db)):
     account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == data.email).first()
     if not account or not verify_password(data.password, account.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
 
-    access_token = create_access_token(
-        data={
-            "sub": str(account.id),
-            "tenant_id": account.tenant_id,
-            "client_id": account.client_id,
-            "account_type": "client_portal",
-        }
+    code = generate_login_code()
+    login_code = ClientPortalLoginCode(
+        portal_account_id=account.id,
+        email=account.email,
+        code=code,
+        purpose="login",
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.PORTAL_LOGIN_CODE_EXPIRE_MINUTES),
+        delivery_status="pending",
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    db.add(login_code)
+    db.commit()
+    db.refresh(login_code)
+
+    try:
+        client_portal_mail_service.send_login_code(recipient_email=account.email, code=code)
+        login_code.delivery_status = "sent"
+        login_code.delivery_error = None
+        db.commit()
+    except Exception as exc:
+        login_code.delivery_status = "failed"
+        login_code.delivery_error = str(exc)
+        db.commit()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unable to send the access code email. {exc}",
+        )
+
+    return {"message": "A six-digit access code has been sent to your email address."}
+
+
+@router.post("/auth/login/verify-code", response_model=ClientPortalToken)
+def verify_login_code(data: ClientPortalLoginCodeVerifyRequest, db: Session = Depends(get_db)):
+    account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == data.email).first()
+    if not account:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid verification request.")
+
+    login_code = (
+        db.query(ClientPortalLoginCode)
+        .filter(
+            ClientPortalLoginCode.portal_account_id == account.id,
+            ClientPortalLoginCode.email == account.email,
+            ClientPortalLoginCode.purpose == "login",
+            ClientPortalLoginCode.consumed_at.is_(None),
+        )
+        .order_by(ClientPortalLoginCode.created_at.desc(), ClientPortalLoginCode.id.desc())
+        .first()
+    )
+
+    if not login_code:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No active access code was found.")
+
+    if login_code.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="This access code has expired.")
+
+    if login_code.code != data.code:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code.")
+
+    login_code.consumed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return issue_portal_token(account)
+
+
+@router.post("/auth/login", response_model=ClientPortalMessageResponse)
+def login_portal_account(data: ClientPortalLoginRequest, db: Session = Depends(get_db)):
+    _ = db
+    _ = data
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Portal login now requires the request-code and verify-code flow.",
+    )
 
 
 @router.get("/auth/me", response_model=ClientPortalAccountOut)

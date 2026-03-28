@@ -21,6 +21,10 @@ export interface ClientPortalToken {
   token_type: string;
 }
 
+export interface ClientPortalMessageResponse {
+  message: string;
+}
+
 export interface ClientPortalAccount {
   id: number;
   full_name: string;

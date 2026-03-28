@@ -173,7 +173,8 @@ textarea {
 .safe-list,
 .result-box p,
 .request-card p,
-.request-card small {
+.request-card small,
+.password-hint {
   color: var(--text-soft);
 }
 
@@ -284,6 +285,11 @@ textarea {
 .success-banner,
 .error-banner {
   padding: 1rem 1.1rem;
+}
+
+.password-hint {
+  font-size: 0.9rem;
+  margin-top: -0.35rem;
 }
 
 .success-banner {
