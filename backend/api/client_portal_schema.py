@@ -5,7 +5,6 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class ClientPortalRegisterRequest(BaseModel):
-    tenant_name: str = Field(..., min_length=1)
     full_name: str = Field(..., min_length=2)
     email: EmailStr
     password: str = Field(..., min_length=6)
@@ -21,6 +20,20 @@ class ClientPortalLoginRequest(BaseModel):
 class ClientPortalToken(BaseModel):
     access_token: str
     token_type: str
+
+
+class ClientPortalMessageResponse(BaseModel):
+    message: str
+
+
+class ClientPortalLoginCodeRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+
+
+class ClientPortalLoginCodeVerifyRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
 
 
 class ClientPortalAccountOut(BaseModel):

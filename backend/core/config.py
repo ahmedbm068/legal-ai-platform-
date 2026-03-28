@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     # Frontend
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Client portal email
+    CLIENT_PORTAL_FIRM_NAME: str = "Arbi Mostaissier"
+    PORTAL_EMAIL_FROM: str = "arbimostaisser@gmail.com"
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_USE_TLS: bool = True
+    PORTAL_LOGIN_CODE_EXPIRE_MINUTES: int = 10
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore"

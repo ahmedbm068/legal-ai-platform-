@@ -32,7 +32,6 @@ export async function fetchIntakeStatus(reference: string): Promise<PublicIntake
 }
 
 export async function registerPortalAccount(payload: {
-  tenant_name: string;
   full_name: string;
   email: string;
   password: string;

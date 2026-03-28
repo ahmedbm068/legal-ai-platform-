@@ -89,6 +89,16 @@ def find_tenant_lawyer(db: Session, tenant_id: int) -> User | None:
     )
 
 
+def get_default_tenant(db: Session) -> Tenant:
+    tenant = db.query(Tenant).order_by(Tenant.id.asc()).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=400,
+            detail="No tenant is configured for the platform yet.",
+        )
+    return tenant
+
+
 def get_or_create_client(
     db: Session,
     *,
@@ -192,9 +202,7 @@ def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Dep
     if existing:
         raise HTTPException(status_code=400, detail="A portal account already exists for this email.")
 
-    tenant = db.query(Tenant).filter(Tenant.name == data.tenant_name).first()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Target tenant not found.")
+    tenant = get_default_tenant(db)
 
     client = get_or_create_client(
         db,

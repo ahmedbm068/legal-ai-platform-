@@ -35,7 +35,6 @@ export default function App() {
   const [success, setSuccess] = useState<string | null>(null);
 
   const [authForm, setAuthForm] = useState({
-    tenant_name: "",
     full_name: "",
     email: "",
     password: "",
@@ -94,7 +93,6 @@ export default function App() {
       const authResponse =
         authMode === "register"
           ? await registerPortalAccount({
-              tenant_name: authForm.tenant_name,
               full_name: authForm.full_name,
               email: authForm.email,
               password: authForm.password,
@@ -231,9 +229,9 @@ export default function App() {
             <div className="eyebrow">Client Legal Portal</div>
             <h1>Secure client access for consultation requests, updates, and follow-up.</h1>
             <p>
-              This portal is separate from the internal legal workspace. Clients can securely sign in,
-              submit consultation requests, upload voice notes and supporting files, and track request status
-              without touching internal AI tools.
+              This portal is dedicated to your law firm. Clients can securely sign in, submit consultation
+              requests, upload voice notes and supporting files, and track request status without touching
+              internal AI tools.
             </p>
           </div>
           <div className="hero-points">
@@ -273,14 +271,6 @@ export default function App() {
             <form className="form-grid" onSubmit={handleAuthSubmit}>
               {authMode === "register" ? (
                 <>
-                  <label>
-                    Law firm / tenant name
-                    <input
-                      required
-                      value={authForm.tenant_name}
-                      onChange={(event) => setAuthForm((current) => ({ ...current, tenant_name: event.target.value }))}
-                    />
-                  </label>
                   <label>
                     Full name
                     <input
@@ -394,14 +384,10 @@ export default function App() {
           <h1>Welcome back, {dashboard.account.full_name}.</h1>
           <p>
             Submit new consultation requests, attach supporting materials, and track your recent requests in a
-            clean professional portal built separately from the internal legal AI workspace.
+            clean professional portal dedicated to your law firm and kept separate from the internal legal AI workspace.
           </p>
         </div>
         <div className="dashboard-summary">
-          <div className="summary-card">
-            <span>Law firm</span>
-            <strong>{dashboard.account.tenant_name || `Tenant #${dashboard.account.tenant_id}`}</strong>
-          </div>
           <div className="summary-card">
             <span>Requests</span>
             <strong>{dashboard.consultations.length}</strong>
