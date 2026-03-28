@@ -6,7 +6,9 @@ import type {
   FullDocumentAnalysis,
   TokenResponse,
   UploadedDocumentResponse,
+  UploadedVoiceRecordingResponse,
   User,
+  VoiceRecording,
 } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -113,6 +115,22 @@ export const api = {
     formData.append("file", file);
 
     return request<UploadedDocumentResponse>(`/documents/upload?case_id=${caseId}`, {
+      method: "POST",
+      token,
+      formData,
+    });
+  },
+
+  listVoiceRecordings: (token: string, caseId: number) =>
+    request<VoiceRecording[]>(`/voice/case/${caseId}`, {
+      token,
+    }),
+
+  uploadVoiceRecording: (token: string, caseId: number, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    return request<UploadedVoiceRecordingResponse>(`/voice/upload?case_id=${caseId}`, {
       method: "POST",
       token,
       formData,

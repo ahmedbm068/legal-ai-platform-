@@ -96,6 +96,24 @@ export interface FullDocumentAnalysis {
   insights: StructuredDocumentInsights | null;
 }
 
+export interface VoiceRecording {
+  id: number;
+  filename: string;
+  storage_path: string;
+  mime_type: string;
+  file_size: number;
+  transcription_status: string;
+  transcription_error: string | null;
+  transcript_text: string | null;
+  transcript_source: string | null;
+  transcript_language: string | null;
+  case_id: number;
+  tenant_id: number;
+  uploaded_by_user_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SourceItem {
   chunk_id: number | null;
   document_id: number;
@@ -131,6 +149,11 @@ export interface UploadedDocumentResponse {
     text_length?: number | null;
     error?: string | null;
   };
+}
+
+export interface UploadedVoiceRecordingResponse {
+  recording: VoiceRecording;
+  message: string;
 }
 
 export interface ChatMessage {

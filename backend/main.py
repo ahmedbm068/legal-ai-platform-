@@ -13,12 +13,14 @@ from backend.models.document_chunk import DocumentChunk
 from backend.models.document_entity import DocumentEntity
 from backend.models.tenant import Tenant
 from backend.models.user import User
+from backend.models.voice_recording import VoiceRecording
 
 from backend.api import auth, users, clients, cases
 from backend.api.document_router import router as document_router
 from backend.api.intelligence import router as intelligence_router
 from backend.api.rag import router as rag_router
 from backend.api.search import router as search_router
+from backend.api.voice import router as voice_router
 
 
 app = FastAPI(
@@ -50,6 +52,7 @@ app.include_router(document_router)
 app.include_router(rag_router)
 app.include_router(intelligence_router)
 app.include_router(search_router)
+app.include_router(voice_router)
 
 
 @app.get("/")

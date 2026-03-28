@@ -24,10 +24,10 @@ def ensure_bucket_exists() -> None:
         client.make_bucket(BUCKET_NAME)
 
 
-def upload_file(file_data, filename: str) -> str:
+def upload_file(file_data, filename: str, prefix: str = "documents") -> str:
     ensure_bucket_exists()
 
-    object_name = f"documents/{uuid.uuid4()}_{filename}"
+    object_name = f"{prefix}/{uuid.uuid4()}_{filename}"
 
     client.put_object(
         BUCKET_NAME,

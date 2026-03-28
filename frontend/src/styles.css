@@ -266,7 +266,8 @@ textarea {
 .case-list,
 .document-list,
 .source-list,
-.analysis-stack {
+.analysis-stack,
+.voice-recording-list {
   display: grid;
   gap: 0.75rem;
 }
@@ -318,6 +319,13 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+
+.voice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: flex-end;
 }
 
 .meta-card,

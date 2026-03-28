@@ -36,3 +36,9 @@ class Case(Base):
         back_populates="case",
         cascade="all, delete-orphan"
     )
+
+    voice_recordings = relationship(
+        "VoiceRecording",
+        back_populates="case",
+        cascade="all, delete-orphan"
+    )

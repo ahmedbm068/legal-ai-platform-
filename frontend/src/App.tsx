@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./lib/api";
 import type {
   CaseItem,
@@ -9,6 +9,7 @@ import type {
   FullDocumentAnalysis,
   SourceItem,
   User,
+  VoiceRecording,
 } from "./types";
 
 const TOKEN_STORAGE_KEY = "legal-ai-platform-token";
@@ -64,8 +65,10 @@ export default function App() {
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [voiceRecordings, setVoiceRecordings] = useState<VoiceRecording[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
+  const [selectedRecordingId, setSelectedRecordingId] = useState<number | null>(null);
   const [selectedDocumentAnalysis, setSelectedDocumentAnalysis] = useState<FullDocumentAnalysis | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([buildWelcomeMessage()]);
   const [activeSources, setActiveSources] = useState<SourceItem[]>([]);
@@ -91,10 +94,14 @@ export default function App() {
   });
   const [chatInput, setChatInput] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [voiceUploading, setVoiceUploading] = useState(false);
+  const [recordingAudio, setRecordingAudio] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [copilotLoading, setCopilotLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
 
   const selectedCase = useMemo(
     () => cases.find((item) => item.id === selectedCaseId) ?? null,
@@ -107,6 +114,11 @@ export default function App() {
     }
     return clients.find((item) => item.id === selectedCase.client_id) ?? null;
   }, [clients, selectedCase]);
+
+  const selectedRecording = useMemo(
+    () => voiceRecordings.find((item) => item.id === selectedRecordingId) ?? null,
+    [voiceRecordings, selectedRecordingId]
+  );
 
   useEffect(() => {
     if (!token) {
@@ -153,11 +165,21 @@ export default function App() {
     setSelectedCaseId(caseId);
     setSelectedDocumentAnalysis(null);
     setSelectedDocumentId(null);
+    setSelectedRecordingId(null);
     setActiveSources([]);
     setChatMessages([buildWelcomeMessage(targetCase?.title)]);
 
-    const docs = await api.listCaseDocuments(currentToken, caseId);
+    const [docs, recordings] = await Promise.all([
+      api.listCaseDocuments(currentToken, caseId),
+      api.listVoiceRecordings(currentToken, caseId),
+    ]);
+
     setDocuments(docs);
+    setVoiceRecordings(recordings);
+
+    if (recordings.length > 0) {
+      setSelectedRecordingId(recordings[0].id);
+    }
 
     if (docs.length > 0) {
       await selectDocument(currentToken, docs[0].id, docs);
@@ -322,6 +344,83 @@ export default function App() {
     }
   }
 
+  async function uploadVoiceFile(file: File) {
+    if (!token || !selectedCaseId) {
+      return;
+    }
+
+    setVoiceUploading(true);
+    setError(null);
+
+    try {
+      const uploadResult = await api.uploadVoiceRecording(token, selectedCaseId, file);
+      const nextRecordings = [uploadResult.recording, ...voiceRecordings];
+      setVoiceRecordings(nextRecordings);
+      setSelectedRecordingId(uploadResult.recording.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Voice upload failed.");
+    } finally {
+      setVoiceUploading(false);
+    }
+  }
+
+  async function handleVoiceUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    await uploadVoiceFile(file);
+    event.target.value = "";
+  }
+
+  async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("This browser does not support microphone recording.");
+      return;
+    }
+
+    try {
+      setError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      mediaChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          mediaChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        const blob = new Blob(mediaChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        const extension = blob.type.includes("wav") ? "wav" : blob.type.includes("ogg") ? "ogg" : "webm";
+        const file = new File([blob], `voice-note-${Date.now()}.${extension}`, {
+          type: blob.type || "audio/webm",
+        });
+
+        stream.getTracks().forEach((track) => track.stop());
+        mediaRecorderRef.current = null;
+        mediaChunksRef.current = [];
+        setRecordingAudio(false);
+
+        await uploadVoiceFile(file);
+      };
+
+      recorder.start();
+      setRecordingAudio(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to start recording.");
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+  }
+
   function logout() {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     setToken(null);
@@ -329,8 +428,10 @@ export default function App() {
     setCases([]);
     setClients([]);
     setDocuments([]);
+    setVoiceRecordings([]);
     setSelectedCaseId(null);
     setSelectedDocumentId(null);
+    setSelectedRecordingId(null);
     setSelectedDocumentAnalysis(null);
     setChatMessages([buildWelcomeMessage()]);
     setActiveSources([]);
@@ -583,6 +684,10 @@ export default function App() {
               <span>Documents</span>
               <strong>{documents.length}</strong>
             </div>
+            <div className="meta-card">
+              <span>Voice notes</span>
+              <strong>{voiceRecordings.length}</strong>
+            </div>
           </div>
         </section>
 
@@ -675,6 +780,67 @@ export default function App() {
           </div>
 
           <div className="column column-side">
+            <div className="panel">
+              <div className="panel-header">
+                <div>
+                  <h3>Voice intake</h3>
+                  <span>Case-linked recordings and transcripts</span>
+                </div>
+                <div className="voice-actions">
+                  <button
+                    className="secondary-button"
+                    onClick={() => void (recordingAudio ? stopRecording() : startRecording())}
+                    type="button"
+                  >
+                    {recordingAudio ? "Stop recording" : "Record"}
+                  </button>
+                  <label className="upload-button">
+                    {voiceUploading ? "Uploading..." : "Upload audio"}
+                    <input
+                      accept="audio/webm,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/mp3,audio/ogg"
+                      onChange={handleVoiceUpload}
+                      type="file"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="voice-recording-list">
+                {voiceRecordings.length > 0 ? (
+                  voiceRecordings.map((recording) => (
+                    <button
+                      key={recording.id}
+                      className={`document-card ${selectedRecordingId === recording.id ? "selected" : ""}`}
+                      onClick={() => setSelectedRecordingId(recording.id)}
+                      type="button"
+                    >
+                      <div className="document-topline">
+                        <strong>{recording.filename}</strong>
+                        <span>{formatBytes(recording.file_size)}</span>
+                      </div>
+                      <small>{recording.transcription_status}</small>
+                      <small>{formatDate(recording.created_at)}</small>
+                    </button>
+                  ))
+                ) : (
+                  <div className="empty-state">
+                    No voice intake yet. Record or upload audio to attach a transcript to this case.
+                  </div>
+                )}
+              </div>
+
+              {selectedRecording ? (
+                <div className="analysis-block">
+                  <h4>Transcript</h4>
+                  <p>
+                    {selectedRecording.transcript_text ||
+                      selectedRecording.transcription_error ||
+                      "Transcript not available yet."}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+
             <div className="panel">
               <div className="panel-header">
                 <div>
