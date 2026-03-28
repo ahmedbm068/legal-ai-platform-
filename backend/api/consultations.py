@@ -7,7 +7,7 @@ from backend.models.case import Case
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
-from backend.services.ai.transcript_intake_service import transcript_intake_service
+from backend.services.ai.agents.intake_agent import intake_agent
 
 
 router = APIRouter(prefix="/consultations", tags=["Consultations"])
@@ -76,7 +76,14 @@ def build_consultation_request_from_recording(
     if not recording.transcript_text or not recording.transcript_text.strip():
         raise HTTPException(status_code=400, detail="Recording has no transcript text available.")
 
-    payload = transcript_intake_service.build_intake(recording.transcript_text)
+    agent_result = intake_agent.process_transcript(
+        transcript_text=recording.transcript_text,
+    )
+
+    if not agent_result.success:
+        raise HTTPException(status_code=400, detail=agent_result.error or "Intake agent failed to process transcript.")
+
+    payload = agent_result.payload
 
     consultation = (
         db.query(ConsultationRequest)

@@ -16,8 +16,8 @@ from backend.models.document import Document
 from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
+from backend.services.ai.agents.intake_agent import intake_agent
 from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
-from backend.services.ai.transcript_intake_service import transcript_intake_service
 from backend.services.ai.transcription_service import transcription_service
 from backend.services.storage_service import download_file_to_temp, upload_file
 
@@ -205,25 +205,39 @@ def submit_public_intake(
                 recording.transcript_source = transcription["source"]
                 recording.transcript_language = transcription["language"]
 
-                extracted = transcript_intake_service.build_intake(recording.transcript_text)
+                agent_result = intake_agent.process_transcript(
+                    transcript_text=recording.transcript_text,
+                    preferred_schedule=consultation.preferred_schedule,
+                    fallback_client_name=consultation.client_name,
+                    fallback_client_email=consultation.client_email,
+                    fallback_client_phone=consultation.client_phone,
+                    fallback_issue_summary=consultation.issue_summary,
+                    fallback_case_description=consultation.extracted_case_description,
+                )
+
+                extracted = agent_result.payload if agent_result.success else {}
+
                 consultation.voice_recording_id = recording.id
-                consultation.client_name = extracted["client_name"] or consultation.client_name
-                consultation.client_email = extracted["client_email"] or consultation.client_email
-                consultation.client_phone = extracted["client_phone"] or consultation.client_phone
+                consultation.client_name = extracted.get("client_name") or consultation.client_name
+                consultation.client_email = extracted.get("client_email") or consultation.client_email
+                consultation.client_phone = extracted.get("client_phone") or consultation.client_phone
                 consultation.booking_intent = (
                     "requested"
-                    if consultation.booking_intent == "requested" or extracted["booking_intent"] == "requested"
-                    else extracted["booking_intent"]
+                    if consultation.booking_intent == "requested" or extracted.get("booking_intent") == "requested"
+                    else extracted.get("booking_intent", consultation.booking_intent)
                 )
-                consultation.urgency_level = extracted["urgency_level"]
-                consultation.legal_area = extracted["legal_area"]
-                consultation.preferred_schedule = consultation.preferred_schedule or extracted["preferred_schedule"]
-                consultation.intake_notes = extracted["intake_notes"]
-                consultation.issue_summary = extracted["issue_summary"] or consultation.issue_summary
+                consultation.urgency_level = extracted.get("urgency_level", consultation.urgency_level)
+                consultation.legal_area = extracted.get("legal_area") or consultation.legal_area
+                consultation.preferred_schedule = consultation.preferred_schedule or extracted.get("preferred_schedule")
+                consultation.intake_notes = extracted.get("intake_notes") or consultation.intake_notes
+                consultation.issue_summary = extracted.get("issue_summary") or consultation.issue_summary
                 consultation.extracted_case_description = (
-                    extracted["extracted_case_description"] or consultation.extracted_case_description
+                    extracted.get("extracted_case_description") or consultation.extracted_case_description
                 )
-                consultation.extraction_source = extracted["extraction_source"]
+                consultation.extraction_source = (
+                    extracted.get("extraction_source")
+                    or consultation.extraction_source
+                )
             else:
                 recording.transcription_status = "failed"
                 recording.transcription_error = transcription["error"]

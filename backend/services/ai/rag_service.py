@@ -7,10 +7,10 @@ from typing import Any, Dict, List, Optional
 from openai import APIError, AuthenticationError, RateLimitError
 from sqlalchemy.orm import Session
 
+from backend.services.ai.agents.retrieval_agent import RetrievalAgent
 from backend.services.ai.embedding_service import EmbeddingService
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.vector_store import VectorStore
-from backend.services.lexical_search_service import search_chunks_lexically
 
 
 SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+")
@@ -20,6 +20,7 @@ class RagService:
     def __init__(self, vector_store: VectorStore, embedding_service: EmbeddingService):
         self.vector_store = vector_store
         self.embedding_service = embedding_service
+        self.retrieval_agent = RetrievalAgent(vector_store=vector_store, embedding_service=embedding_service)
         self.client = llm_gateway.create_client()
         self.model = llm_gateway.default_model
 
@@ -31,34 +32,6 @@ class RagService:
             return "case"
         return "global"
 
-    def _normalize_scores(self, items: List[Dict[str, Any]], score_key: str) -> Dict[Any, float]:
-        positive_values = [
-            float(item.get(score_key, 0.0))
-            for item in items
-            if float(item.get(score_key, 0.0)) > 0
-        ]
-
-        if not positive_values:
-            return {}
-
-        min_score = min(positive_values)
-        max_score = max(positive_values)
-        normalized: Dict[Any, float] = {}
-
-        for item in items:
-            chunk_id = item.get("chunk_id")
-            raw_score = float(item.get(score_key, 0.0))
-
-            if chunk_id is None or raw_score <= 0:
-                continue
-
-            if max_score == min_score:
-                normalized[chunk_id] = 1.0
-            else:
-                normalized[chunk_id] = (raw_score - min_score) / (max_score - min_score)
-
-        return normalized
-
     def retrieve_context(
         self,
         db: Session,
@@ -68,85 +41,19 @@ class RagService:
         case_id: Optional[int] = None,
         document_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        lexical_results = search_chunks_lexically(
+        agent_result = self.retrieval_agent.retrieve(
             db=db,
             tenant_id=tenant_id,
-            query=question,
-            top_k=max(top_k * 3, 10),
-            case_id=case_id,
-            document_id=document_id
-        )
-
-        query_embedding = self.embedding_service.embed_query(question)
-        semantic_results = self.vector_store.search(
-            query_embedding=query_embedding,
+            question=question,
             top_k=max(top_k * 3, 10),
             case_id=case_id,
             document_id=document_id,
-            tenant_id=tenant_id
         )
 
-        lexical_norm = self._normalize_scores(lexical_results, "bm25_score")
-        semantic_norm = self._normalize_scores(semantic_results, "semantic_score")
+        if not agent_result.success:
+            return []
 
-        merged: Dict[Any, Dict[str, Any]] = {}
-
-        for item in semantic_results:
-            chunk_id = item.get("chunk_id")
-            if chunk_id is None:
-                continue
-
-            merged[chunk_id] = {
-                "chunk_id": chunk_id,
-                "document_id": item.get("document_id"),
-                "case_id": item.get("case_id"),
-                "filename": item.get("filename", "unknown"),
-                "chunk_index": item.get("chunk_index", -1),
-                "chunk_text": item.get("chunk_text", ""),
-                "bm25_score": 0.0,
-                "semantic_score": float(item.get("semantic_score", item.get("score", 0.0))),
-                "score": 0.0,
-                "retrieval_method": "semantic"
-            }
-
-        for item in lexical_results:
-            chunk_id = item.get("chunk_id")
-            if chunk_id is None:
-                continue
-
-            if chunk_id not in merged:
-                merged[chunk_id] = {
-                    "chunk_id": chunk_id,
-                    "document_id": item.get("document_id"),
-                    "case_id": item.get("case_id"),
-                    "filename": item.get("filename", "unknown"),
-                    "chunk_index": item.get("chunk_index", -1),
-                    "chunk_text": item.get("chunk_text", ""),
-                    "bm25_score": float(item.get("bm25_score", item.get("score", 0.0))),
-                    "semantic_score": 0.0,
-                    "score": 0.0,
-                    "retrieval_method": "lexical"
-                }
-            else:
-                merged[chunk_id]["bm25_score"] = float(item.get("bm25_score", item.get("score", 0.0)))
-                merged[chunk_id]["retrieval_method"] = "hybrid"
-
-        for chunk_id, item in merged.items():
-            bm25_component = lexical_norm.get(chunk_id, 0.0)
-            semantic_component = semantic_norm.get(chunk_id, 0.0)
-
-            final_score = (0.4 * bm25_component) + (0.6 * semantic_component)
-            item["score"] = float(final_score)
-
-            if item["bm25_score"] > 0 and item["semantic_score"] > 0:
-                item["retrieval_method"] = "hybrid"
-            elif item["bm25_score"] > 0:
-                item["retrieval_method"] = "lexical"
-            else:
-                item["retrieval_method"] = "semantic"
-
-        ranked_results = sorted(merged.values(), key=lambda x: x["score"], reverse=True)
-        return ranked_results[:top_k]
+        return (agent_result.payload.get("results") or [])[:top_k]
 
     def _build_context(self, results: List[Dict[str, Any]]) -> str:
         blocks = []

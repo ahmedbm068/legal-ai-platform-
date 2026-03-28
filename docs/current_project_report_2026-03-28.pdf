@@ -1,0 +1,840 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 1720 >>
+stream
+BT
+/F1 10 Tf
+48 738 Td
+(# Current Project Report) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Date: 2026-03-28) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Project: Legal AI Platform) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Executive Summary) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The project is no longer just a backend prototype.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(It now includes:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- a working backend for legal case and document management) Tj
+0 -14 Td
+(- an internal staff-facing legal workspace frontend) Tj
+0 -14 Td
+(- a separate client-facing intake portal) Tj
+0 -14 Td
+(- voice intake and transcription support) Tj
+0 -14 Td
+(- transcript-to-consultation extraction workflow) Tj
+0 -14 Td
+(- a first real AI agent for summarization) Tj
+0 -14 Td
+(- provider-agnostic LLM configuration for OpenAI-compatible APIs) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The platform is now split into two product surfaces:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 1. Internal Legal Workspace) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Used by:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- lawyers) Tj
+0 -14 Td
+(- admins) Tj
+0 -14 Td
+(- assistants) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Capabilities:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- authentication) Tj
+0 -14 Td
+(- case creation and management) Tj
+0 -14 Td
+(- client creation and management) Tj
+0 -14 Td
+(- document upload and AI processing) Tj
+0 -14 Td
+(- document intelligence review) Tj
+0 -14 Td
+(- grounded legal copilot) Tj
+0 -14 Td
+(- voice recording upload/review) Tj
+0 -14 Td
+(- transcript-to-intake conversion) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### 2. Client Intake Portal) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Used by:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- external clients) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Capabilities:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- submit consultation requests) Tj
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 18 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 2 0 R >>
+endobj
+4 0 obj
+<< /Length 1723 >>
+stream
+BT
+/F1 10 Tf
+48 738 Td
+(- upload voice notes) Tj
+0 -14 Td
+(- record voice notes in-browser) Tj
+0 -14 Td
+(- upload supporting documents) Tj
+0 -14 Td
+(- provide scheduling preferences) Tj
+0 -14 Td
+(- check request status via public reference) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Restricted from:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- internal models) Tj
+0 -14 Td
+(- agent controls) Tj
+0 -14 Td
+(- evidence panels) Tj
+0 -14 Td
+(- internal case workspace operations) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Current Architecture) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The repository currently contains:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `backend/` for API, business logic, AI services, and persistence) Tj
+0 -14 Td
+(- `frontend/` for the internal legal workspace) Tj
+0 -14 Td
+(- `client-portal/` for the public client-facing intake portal) Tj
+0 -14 Td
+(- `docs/` for architecture and sprint reporting) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Infrastructure currently expected by the backend:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- PostgreSQL) Tj
+0 -14 Td
+(- Redis) Tj
+0 -14 Td
+(- MinIO) Tj
+0 -14 Td
+(- Docker) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Backend Status) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Core Platform) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Implemented:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- user registration and login) Tj
+0 -14 Td
+(- multi-tenant structure) Tj
+0 -14 Td
+(- users, clients, cases, documents) Tj
+0 -14 Td
+(- role-aware backend logic) Tj
+0 -14 Td
+(- MinIO-based file storage) Tj
+0 -14 Td
+(- Redis environment support) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key files:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `backend/main.py`) Tj
+0 -14 Td
+(- `backend/api/auth.py`) Tj
+0 -14 Td
+(- `backend/api/cases.py`) Tj
+0 -14 Td
+(- `backend/api/clients.py`) Tj
+0 -14 Td
+(- `backend/core/config.py`) Tj
+0 -14 Td
+() Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 18 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 1793 >>
+stream
+BT
+/F1 10 Tf
+48 738 Td
+(### Document Intelligence) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Implemented:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- document upload) Tj
+0 -14 Td
+(- text extraction) Tj
+0 -14 Td
+(- normalization) Tj
+0 -14 Td
+(- PII redaction) Tj
+0 -14 Td
+(- chunking) Tj
+0 -14 Td
+(- entity extraction) Tj
+0 -14 Td
+(- FAISS indexing) Tj
+0 -14 Td
+(- lexical + semantic retrieval) Tj
+0 -14 Td
+(- full document analysis) Tj
+0 -14 Td
+(- document summarization) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key files:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `backend/services/ai/document_ai_pipeline.py`) Tj
+0 -14 Td
+(- `backend/services/ai/rag_service.py`) Tj
+0 -14 Td
+(- `backend/services/ai/summarization_service.py`) Tj
+0 -14 Td
+(- `backend/api/intelligence.py`) Tj
+0 -14 Td
+(- `backend/api/rag.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Voice and Intake Workflow) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Implemented:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- voice recording persistence) Tj
+0 -14 Td
+(- voice upload API) Tj
+0 -14 Td
+(- transcription service integration) Tj
+0 -14 Td
+(- transcript storage) Tj
+0 -14 Td
+(- transcript intake extraction) Tj
+0 -14 Td
+(- consultation request persistence) Tj
+0 -14 Td
+(- consultation request creation from transcript) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key files:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `backend/models/voice_recording.py`) Tj
+0 -14 Td
+(- `backend/models/consultation_request.py`) Tj
+0 -14 Td
+(- `backend/api/voice.py`) Tj
+0 -14 Td
+(- `backend/api/consultations.py`) Tj
+0 -14 Td
+(- `backend/services/ai/transcription_service.py`) Tj
+0 -14 Td
+(- `backend/services/ai/transcript_intake_service.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Public Client Intake) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Implemented:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- public consultation submission endpoint) Tj
+0 -14 Td
+(- public status lookup endpoint) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 18 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 1692 >>
+stream
+BT
+/F1 10 Tf
+48 738 Td
+(- automatic case + client + consultation creation from public intake) Tj
+0 -14 Td
+(- optional voice note processing) Tj
+0 -14 Td
+(- optional supporting document upload) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Key files:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `backend/api/public.py`) Tj
+0 -14 Td
+(- `backend/api/public_schema.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Frontend Status) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Internal Workspace) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Implemented in `frontend/`:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- login and registration) Tj
+0 -14 Td
+(- case list) Tj
+0 -14 Td
+(- case detail workspace) Tj
+0 -14 Td
+(- client creation) Tj
+0 -14 Td
+(- case creation) Tj
+0 -14 Td
+(- document upload) Tj
+0 -14 Td
+(- document intelligence panel) Tj
+0 -14 Td
+(- copilot chat panel) Tj
+0 -14 Td
+(- evidence panel) Tj
+0 -14 Td
+(- voice intake panel) Tj
+0 -14 Td
+(- consultation intake review panel) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Main files:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `frontend/src/App.tsx`) Tj
+0 -14 Td
+(- `frontend/src/lib/api.ts`) Tj
+0 -14 Td
+(- `frontend/src/types.ts`) Tj
+0 -14 Td
+(- `frontend/src/styles.css`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Client Portal) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Implemented in `client-portal/`:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- consultation submission form) Tj
+0 -14 Td
+(- voice upload) Tj
+0 -14 Td
+(- browser audio recording) Tj
+0 -14 Td
+(- supporting document upload) Tj
+0 -14 Td
+(- public status lookup by reference) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Main files:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `client-portal/src/App.tsx`) Tj
+0 -14 Td
+(- `client-portal/src/lib/api.ts`) Tj
+0 -14 Td
+(- `client-portal/src/types.ts`) Tj
+0 -14 Td
+(- `client-portal/src/styles.css`) Tj
+ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 18 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 1681 >>
+stream
+BT
+/F1 10 Tf
+48 738 Td
+() Tj
+0 -14 Td
+(## AI / Agent Status) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Current AI Features) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Implemented:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- heuristic document intelligence) Tj
+0 -14 Td
+(- grounded RAG responses) Tj
+0 -14 Td
+(- case-aware copilot behaviors) Tj
+0 -14 Td
+(- transcript intake extraction) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### First Agent Implemented) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The first explicit agent is now:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Summarization Agent) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Purpose:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- improve document summaries using an LLM while keeping the deterministic heuristic pipeline) Tj
+0 -14 Td
+(as fallback) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Implemented files:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `backend/services/ai/agents/summarization_agent.py`) Tj
+0 -14 Td
+(- `backend/services/ai/llm_gateway.py`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Provider-Agnostic LLM Layer) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The project can now use an OpenAI-compatible provider instead of direct OpenAI-only) Tj
+0 -14 Td
+(assumptions.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Config added:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `OPENAI_API_KEY`) Tj
+0 -14 Td
+(- `LLM_BASE_URL`) Tj
+0 -14 Td
+(- `LLM_MODEL`) Tj
+0 -14 Td
+(- `SUMMARY_AGENT_MODEL`) Tj
+0 -14 Td
+(- `OPENROUTER_SITE_URL`) Tj
+0 -14 Td
+(- `OPENROUTER_APP_NAME`) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(This means the project is ready to use providers such as OpenRouter through the same OpenAI-) Tj
+0 -14 Td
+(compatible SDK path.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Sprint Status) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Effectively Completed) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- Sprint 1: Backend Stabilization) Tj
+ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 18 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 10 0 R >>
+endobj
+12 0 obj
+<< /Length 2023 >>
+stream
+BT
+/F1 10 Tf
+48 738 Td
+(- Sprint 2: Internal Case Workspace v1) Tj
+0 -14 Td
+(- Sprint 3: Voice Intake & Interaction v1) Tj
+0 -14 Td
+(- Sprint 4: Transcript Intelligence / Intake Workflow) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Partially Started) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- Multi-Agent Legal AI) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Evidence:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- first explicit agent created) Tj
+0 -14 Td
+(- LLM provider abstraction added) Tj
+0 -14 Td
+(- improved summarization path integrated) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Not Yet Completed) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- full multi-agent orchestration) Tj
+0 -14 Td
+(- verifier agent / proof-first validation layer) Tj
+0 -14 Td
+(- trainable ML models) Tj
+0 -14 Td
+(- full case-level reasoning across documents and transcripts) Tj
+0 -14 Td
+(- calendar/session booking integration) Tj
+0 -14 Td
+(- production monitoring and test coverage maturity) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## What Works Right Now) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(A realistic current flow is:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(1. staff user logs into the internal workspace) Tj
+0 -14 Td
+(2. creates clients and cases) Tj
+0 -14 Td
+(3. uploads legal documents) Tj
+0 -14 Td
+(4. gets document intelligence and grounded copilot support) Tj
+0 -14 Td
+(5. uploads or records client voice notes) Tj
+0 -14 Td
+(6. transcribes those notes) Tj
+0 -14 Td
+(7. converts transcript into consultation/intake data) Tj
+0 -14 Td
+(8. reviews extracted booking and issue information) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Separately:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(1. a client uses the public portal) Tj
+0 -14 Td
+(2. submits a consultation request) Tj
+0 -14 Td
+(3. optionally records/uploads a voice note) Tj
+0 -14 Td
+(4. optionally uploads a supporting file) Tj
+0 -14 Td
+(5. receives a public reference) Tj
+0 -14 Td
+(6. checks intake status later with that reference) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Verification Status) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Verified:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- backend compilation succeeded after the latest changes) Tj
+ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 18 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 12 0 R >>
+endobj
+14 0 obj
+<< /Length 1978 >>
+stream
+BT
+/F1 10 Tf
+48 738 Td
+(- frontend source trees exist for both apps) Tj
+0 -14 Td
+(- report artifacts and sprint documents exist) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Not verified in this environment:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- `npm` frontend build/runtime, because Node.js is not installed in the current environment) Tj
+0 -14 Td
+(- live provider-backed LLM calls, because they depend on local runtime/API access) Tj
+0 -14 Td
+(- live browser recording flow end-to-end outside code inspection) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Main Remaining Gaps) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The biggest remaining gaps are:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- real multi-agent orchestration between specialized agents) Tj
+0 -14 Td
+(- proof-first verifier layer) Tj
+0 -14 Td
+(- stronger case-level reasoning over documents + transcripts together) Tj
+0 -14 Td
+(- structured session/appointment scheduling integration) Tj
+0 -14 Td
+(- stronger testing and production hardening) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Recommended Next Step) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The strongest next step is:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(### Build the next agent layer) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Recommended order:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- Intake Agent) Tj
+0 -14 Td
+(- Retrieval Agent) Tj
+0 -14 Td
+(- Case Reasoning Agent) Tj
+0 -14 Td
+(- Drafting Agent) Tj
+0 -14 Td
+(- Verifier Agent) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(Why:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- the business workflows already exist) Tj
+0 -14 Td
+(- the client/internal separation is already in place) Tj
+0 -14 Td
+(- the first summarization agent and provider abstraction are already done) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(## Final Assessment) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(The project is now at a meaningful product stage.) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(It already demonstrates:) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(- platform thinking) Tj
+0 -14 Td
+(- role separation) Tj
+0 -14 Td
+(- client/staff boundary design) Tj
+0 -14 Td
+(- voice intake) Tj
+0 -14 Td
+(- consultation extraction) Tj
+ET
+endstream
+endobj
+15 0 obj
+<< /Type /Page /Parent 18 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 14 0 R >>
+endobj
+16 0 obj
+<< /Length 363 >>
+stream
+BT
+/F1 10 Tf
+48 738 Td
+(- grounded legal AI) Tj
+0 -14 Td
+(- first-step agent architecture) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(It is no longer just ?an API with AI utilities.?) Tj
+0 -14 Td
+() Tj
+0 -14 Td
+(It is now a multi-surface legal AI platform with internal operations, public intake, and the) Tj
+0 -14 Td
+(first step toward explicit agent-based architecture.) Tj
+ET
+endstream
+endobj
+17 0 obj
+<< /Type /Page /Parent 18 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 1 0 R >> >> /Contents 16 0 R >>
+endobj
+18 0 obj
+<< /Type /Pages /Count 8 /Kids [ 3 0 R 5 0 R 7 0 R 9 0 R 11 0 R 13 0 R 15 0 R 17 0 R ] >>
+endobj
+19 0 obj
+<< /Type /Catalog /Pages 18 0 R >>
+endobj
+xref
+0 20
+0000000000 65535 f 
+0000000015 00000 n 
+0000000085 00000 n 
+0000001857 00000 n 
+0000001984 00000 n 
+0000003759 00000 n 
+0000003886 00000 n 
+0000005731 00000 n 
+0000005858 00000 n 
+0000007602 00000 n 
+0000007729 00000 n 
+0000009463 00000 n 
+0000009592 00000 n 
+0000011668 00000 n 
+0000011797 00000 n 
+0000013828 00000 n 
+0000013957 00000 n 
+0000014372 00000 n 
+0000014501 00000 n 
+0000014607 00000 n 
+trailer
+<< /Size 20 /Root 19 0 R >>
+startxref
+14658
+%%EOF
