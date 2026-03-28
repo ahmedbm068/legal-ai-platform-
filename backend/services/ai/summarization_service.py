@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from backend.models.document import Document
+from backend.services.ai.agents.summarization_agent import summarization_agent
 from backend.services.ai.document_insight_service import document_insight_service
 from backend.services.ai.legal_text_formatter import LegalTextFormatter
 
@@ -65,8 +66,32 @@ class SummarizationService:
             )
 
             insights = document_insight_service.build_insights(temp_document)
-            long_summary = self._build_final_summary(insights=insights)
-            short_summary = self._build_short_summary(insights=insights, long_summary=long_summary)
+            agent_result = summarization_agent.summarize_document(
+                filename=document.filename,
+                document_text=text,
+                heuristic_insights=insights,
+            )
+
+            if agent_result and agent_result.get("summary"):
+                long_summary = self._clean_summary_output(agent_result["summary"])
+                short_summary = self._clean_summary_output(
+                    agent_result.get("summary_short")
+                    or self._build_short_summary(insights=agent_result, long_summary=long_summary)
+                )
+
+                insights["document_type"] = agent_result.get("document_type") or insights.get("document_type")
+                insights["key_points"] = agent_result.get("key_points") or insights.get("key_points", [])
+                insights["important_dates"] = agent_result.get("important_dates") or insights.get("important_dates", [])
+                insights["parties_detected"] = agent_result.get("parties_detected") or insights.get("parties_detected", [])
+                insights["legal_risks"] = agent_result.get("legal_risks") or insights.get("legal_risks", [])
+                insights["recommended_actions"] = (
+                    agent_result.get("recommended_actions") or insights.get("recommended_actions", [])
+                )
+                insights["summary_source"] = agent_result.get("summary_source") or "llm_summary_agent"
+                insights["summary_version"] = agent_result.get("summary_version") or "v1"
+            else:
+                long_summary = self._build_final_summary(insights=insights)
+                short_summary = self._build_short_summary(insights=insights, long_summary=long_summary)
 
             now = datetime.now(timezone.utc)
 

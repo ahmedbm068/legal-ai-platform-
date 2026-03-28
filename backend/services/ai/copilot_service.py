@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from backend.models.case import Case
 from backend.models.document import Document
 from backend.services.ai.command_parsing_service import command_parsing_service
+from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
 
@@ -16,6 +17,7 @@ from backend.services.ai.summarization_service import summarization_service
 class CopilotService:
     def __init__(self, rag_service: RagService):
         self.rag_service = rag_service
+        self.model = llm_gateway.default_model
 
     def handle_message(
         self,
@@ -414,7 +416,7 @@ Case intelligence:
 
             try:
                 response = self.rag_service.client.responses.create(
-                    model="gpt-4o-mini",
+                    model=self.model,
                     input=prompt
                 )
                 answer_text = (response.output_text or "").strip()
@@ -654,7 +656,7 @@ Return only the email body.
 """
             try:
                 response = self.rag_service.client.responses.create(
-                    model="gpt-4o-mini",
+                    model=self.model,
                     input=prompt
                 )
                 email_body = (response.output_text or "").strip()

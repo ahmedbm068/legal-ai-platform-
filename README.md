@@ -39,6 +39,15 @@ Run the API:
 uvicorn backend.main:app --reload
 ```
 
+If you use an OpenAI-compatible provider such as OpenRouter, configure these env vars:
+
+```bash
+OPENAI_API_KEY=your-provider-key
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=openai/gpt-4o-mini
+SUMMARY_AGENT_MODEL=openai/gpt-4o-mini
+```
+
 Swagger:
 
 `http://127.0.0.1:8000/docs`

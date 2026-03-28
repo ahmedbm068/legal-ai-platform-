@@ -22,6 +22,11 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
+    LLM_BASE_URL: Optional[str] = None
+    LLM_MODEL: str = "openai/gpt-4o-mini"
+    SUMMARY_AGENT_MODEL: Optional[str] = None
+    OPENROUTER_SITE_URL: Optional[str] = None
+    OPENROUTER_APP_NAME: str = "legal-ai-platform"
 
     # Frontend
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"

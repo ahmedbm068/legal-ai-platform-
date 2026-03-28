@@ -3,13 +3,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from openai import APIError, AuthenticationError, OpenAI, RateLimitError
+from openai import APIError, AuthenticationError, RateLimitError
+
+from backend.services.ai.llm_gateway import llm_gateway
 
 
 class TranscriptionService:
     def __init__(self) -> None:
-        api_key = os.getenv("OPENAI_API_KEY")
-        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.client = llm_gateway.create_client()
 
     def transcribe_file(self, file_path: str, filename: str) -> dict[str, Any]:
         if not self.client:

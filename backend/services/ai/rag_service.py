@@ -4,10 +4,11 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
-from openai import APIError, AuthenticationError, OpenAI, RateLimitError
+from openai import APIError, AuthenticationError, RateLimitError
 from sqlalchemy.orm import Session
 
 from backend.services.ai.embedding_service import EmbeddingService
+from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.vector_store import VectorStore
 from backend.services.lexical_search_service import search_chunks_lexically
 
@@ -19,9 +20,8 @@ class RagService:
     def __init__(self, vector_store: VectorStore, embedding_service: EmbeddingService):
         self.vector_store = vector_store
         self.embedding_service = embedding_service
-
-        api_key = os.getenv("OPENAI_API_KEY")
-        self.client = OpenAI(api_key=api_key) if api_key else None
+        self.client = llm_gateway.create_client()
+        self.model = llm_gateway.default_model
 
     @staticmethod
     def _get_scope(case_id: Optional[int], document_id: Optional[int]) -> str:
@@ -309,7 +309,7 @@ Context:
 
         try:
             response = self.client.responses.create(
-                model="gpt-4o-mini",
+                model=self.model,
                 input=prompt
             )
 
