@@ -1,0 +1,1 @@
+Create a professional system architecture flowchart for a Legal AI platform with two frontends (lawyer workspace and client portal), a FastAPI backend, AI services (copilot, RAG, agents), LLM providers, transcription providers, external research providers, and storage layers.

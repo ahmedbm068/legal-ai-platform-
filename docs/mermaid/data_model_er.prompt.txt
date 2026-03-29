@@ -1,0 +1,1 @@
+Create an ER-style diagram for the legal platform data model including tenant, users, clients, cases, documents, chunks, entities, voice recordings, consultation requests, and client portal auth tables.

@@ -1,0 +1,123 @@
+erDiagram
+  Case {
+    string id
+    string title
+    string description
+    string status
+    string tenant_id
+    string lawyer_id
+    string client_id
+    string created_at
+  }
+  Client {
+    string id
+    string name
+    string email
+    string phone
+    string address
+    string tenant_id
+    string created_at
+    string updated_at
+  }
+  ClientPortalAccount {
+    string id
+    string full_name
+    string email
+    string hashed_password
+    string tenant_id
+    string client_id
+    string created_at
+    string updated_at
+  }
+  ClientPortalLoginCode {
+    string id
+    string portal_account_id
+    string email
+    string code
+    string purpose
+    string expires_at
+    string consumed_at
+    string delivery_status
+  }
+  ConsultationRequest {
+    string id
+    string case_id
+    string tenant_id
+    string voice_recording_id
+    string client_name
+    string client_email
+    string client_phone
+    string booking_intent
+  }
+  Document {
+    string id
+    string filename
+    string storage_path
+    string processing_status
+    string processing_error
+    string file_size
+    string file_type
+    string upload_timestamp
+  }
+  DocumentChunk {
+    string id
+    string document_id
+    string case_id
+    string tenant_id
+    string chunk_index
+    string content
+  }
+  DocumentEntity {
+    string id
+    string document_id
+    string label
+    string value
+    string start_char
+    string end_char
+    string created_at
+  }
+  Tenant {
+    string id
+    string name
+    string created_at
+  }
+  User {
+    string id
+    string name
+    string email
+    string hashed_password
+    string role
+    string tenant_id
+    string created_at
+    string updated_at
+  }
+  VoiceRecording {
+    string id
+    string filename
+    string storage_path
+    string mime_type
+    string file_size
+    string transcription_status
+    string transcription_error
+    string transcript_text
+  }
+  Case ||--o{ Tenant : references
+  Case ||--o{ User : references
+  Case ||--o{ Client : references
+  Client ||--o{ Tenant : references
+  ClientPortalAccount ||--o{ Tenant : references
+  ClientPortalAccount ||--o{ Client : references
+  ClientPortalLoginCode ||--o{ ClientPortalAccount : references
+  ConsultationRequest ||--o{ Case : references
+  ConsultationRequest ||--o{ Tenant : references
+  ConsultationRequest ||--o{ VoiceRecording : references
+  Document ||--o{ Case : references
+  Document ||--o{ Tenant : references
+  DocumentChunk ||--o{ Document : references
+  DocumentChunk ||--o{ Case : references
+  DocumentChunk ||--o{ Tenant : references
+  DocumentEntity ||--o{ Document : references
+  Tenant ||--o{ User : references
+  VoiceRecording ||--o{ Case : references
+  VoiceRecording ||--o{ Tenant : references
+  VoiceRecording ||--o{ User : references

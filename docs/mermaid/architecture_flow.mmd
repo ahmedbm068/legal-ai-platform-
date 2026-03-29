@@ -1,0 +1,36 @@
+flowchart LR
+    LawyerUI[Lawyer Frontend\nReact + TypeScript]
+    PortalUI[Client Portal\nReact + TypeScript]
+    API[FastAPI Backend\nAuth + Routers + Tenant Scope]
+
+    Copilot[Copilot Service\nIntent Routing]
+    RAG[RAG Service\nHybrid Retrieval]
+    Agents[Specialized Agents\nReasoning/Timeline/Drafting/Verifier]
+    Pipeline[Document AI Pipeline\nExtract -> NER -> Redact -> Chunk -> Embed]
+    Voice[Voice Processing\nTranscription + Intake]
+
+    LLM[LLM Gateway\nGroq/OpenAI/OpenRouter]
+    Research[External Research\nTavily/SerpAPI]
+    ASR[Speechmatics + Local Whisper]
+    Vector[FAISS Vector Index]
+    DB[(PostgreSQL)]
+    Minio[(MinIO Object Storage)]
+
+    LawyerUI --> API
+    PortalUI --> API
+    API --> Copilot
+    API --> RAG
+    API --> Agents
+    API --> Pipeline
+    API --> Voice
+
+    Copilot --> LLM
+    Copilot --> Research
+    RAG --> Vector
+    Pipeline --> Vector
+    Pipeline --> DB
+    Pipeline --> Minio
+    Voice --> ASR
+    Voice --> DB
+    API --> DB
+    API --> Minio

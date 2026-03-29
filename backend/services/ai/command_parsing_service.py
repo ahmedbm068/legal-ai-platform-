@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any, Dict, Optional
 
 
@@ -9,10 +10,11 @@ class CommandParsingService:
     DOCUMENT_PATTERN = re.compile(r"\bdocument\s*#?\s*(\d+)\b", re.IGNORECASE)
     RISK_COUNT_PATTERN = re.compile(r"\b(?:top\s+)?(\d{1,2})\s+risks?\b", re.IGNORECASE)
     DEADLINE_COUNT_PATTERN = re.compile(r"\b(?:top\s+)?(\d{1,2})\s+deadlines?\b", re.IGNORECASE)
+    SUMMARY_KEYWORDS = ["summarize", "summary", "recap", "overview", "brief", "synopsis", "tldr", "tl;dr"]
 
     def parse(self, message: str) -> Dict[str, Any]:
         original_message = (message or "").strip()
-        lowered = original_message.lower()
+        lowered = self._normalize_for_intent(original_message)
 
         case_match = self.CASE_PATTERN.search(original_message)
         document_match = self.DOCUMENT_PATTERN.search(original_message)
@@ -82,7 +84,7 @@ class CommandParsingService:
                 return "ask_document", "medium"
             return "ask_global", "medium"
 
-        if self._contains_any(lowered, ["summarize", "summary", "recap", "overview", "brief"]):
+        if self._looks_like_summary_request(lowered=lowered, target_type=target_type):
             if target_type == "case":
                 return "summarize_case", "high"
             if target_type == "document":
@@ -119,6 +121,12 @@ class CommandParsingService:
             cleaned,
             flags=re.IGNORECASE
         )
+        cleaned = re.sub(
+            r"\b(?:yo|hey|pls|plz|make me|gimme|give me)\b",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
 
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,:;!?-")
         cleaned = re.sub(
@@ -132,6 +140,28 @@ class CommandParsingService:
     @staticmethod
     def _contains_any(text: str, keywords: list[str]) -> bool:
         return any(keyword in text for keyword in keywords)
+
+    @staticmethod
+    def _normalize_for_intent(value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", value or "")
+        normalized = normalized.encode("ascii", "ignore").decode("ascii")
+        normalized = normalized.lower()
+        normalized = normalized.replace("/", " ")
+        normalized = re.sub(r"\s+", " ", normalized).strip()
+        return normalized
+
+    def _looks_like_summary_request(self, *, lowered: str, target_type: Optional[str]) -> bool:
+        if self._contains_any(lowered, self.SUMMARY_KEYWORDS):
+            return True
+
+        # In this product context, users often say "resume" meaning "summary/resume of the case".
+        if "resume" not in lowered:
+            return False
+
+        if target_type in {"case", "document"}:
+            return True
+
+        return self._contains_any(lowered, ["case", "document", "file", "matter"])
 
     def _extract_requested_count(
         self,

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import argparse
+import json
 import re
 import textwrap
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
@@ -17,6 +21,9 @@ FRONTEND_DIR = ROOT / "frontend" / "src"
 PORTAL_DIR = ROOT / "client-portal" / "src"
 OUTPUT_DIR = ROOT / "docs"
 OUTPUT_FILE = OUTPUT_DIR / "legal_ai_platform_full_technical_report_2026-03-29.pdf"
+MERMAID_DIR = OUTPUT_DIR / "mermaid"
+MERMAID_IMAGE_DIR = MERMAID_DIR / "images"
+DEFAULT_MERMAID_RENDER_TIMEOUT_SECONDS = 12
 
 
 def read_text(path: Path) -> str:
@@ -197,6 +204,288 @@ def draw_box(ax, x: float, y: float, w: float, h: float, text: str, color: str =
 
 def draw_arrow(ax, x1: float, y1: float, x2: float, y2: float) -> None:
     ax.add_patch(FancyArrowPatch((x1, y1), (x2, y2), arrowstyle="->", mutation_scale=12, color="#244564", lw=1.2))
+
+
+def _build_model_er_diagram(models: list[dict]) -> str:
+    model_names = {model["class_name"] for model in models}
+    lines = ["erDiagram"]
+
+    for model in models:
+        lines.append(f"  {model['class_name']} {{")
+        for field in model["fields"][:8]:
+            lines.append(f"    string {field}")
+        lines.append("  }")
+
+    seen_pairs: set[tuple[str, str]] = set()
+    for model in models:
+        src = model["class_name"]
+        for _, target in model["relationships"]:
+            if target not in model_names or src == target:
+                continue
+            pair = tuple(sorted((src, target)))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            lines.append(f"  {src} ||--o{{ {target} : references")
+
+    return "\n".join(lines)
+
+
+def build_mermaid_diagrams(*, intents: list[str], models: list[dict]) -> list[dict]:
+    intent_preview = ", ".join(intents[:10]) if intents else "summarize_case, ask_case, ask_document"
+
+    architecture_prompt = (
+        "Create a professional system architecture flowchart for a Legal AI platform with two frontends "
+        "(lawyer workspace and client portal), a FastAPI backend, AI services (copilot, RAG, agents), "
+        "LLM providers, transcription providers, external research providers, and storage layers."
+    )
+    architecture_code = """
+flowchart LR
+    LawyerUI[Lawyer Frontend\\nReact + TypeScript]
+    PortalUI[Client Portal\\nReact + TypeScript]
+    API[FastAPI Backend\\nAuth + Routers + Tenant Scope]
+
+    Copilot[Copilot Service\\nIntent Routing]
+    RAG[RAG Service\\nHybrid Retrieval]
+    Agents[Specialized Agents\\nReasoning/Timeline/Drafting/Verifier]
+    Pipeline[Document AI Pipeline\\nExtract -> NER -> Redact -> Chunk -> Embed]
+    Voice[Voice Processing\\nTranscription + Intake]
+
+    LLM[LLM Gateway\\nGroq/OpenAI/OpenRouter]
+    Research[External Research\\nTavily/SerpAPI]
+    ASR[Speechmatics + Local Whisper]
+    Vector[FAISS Vector Index]
+    DB[(PostgreSQL)]
+    Minio[(MinIO Object Storage)]
+
+    LawyerUI --> API
+    PortalUI --> API
+    API --> Copilot
+    API --> RAG
+    API --> Agents
+    API --> Pipeline
+    API --> Voice
+
+    Copilot --> LLM
+    Copilot --> Research
+    RAG --> Vector
+    Pipeline --> Vector
+    Pipeline --> DB
+    Pipeline --> Minio
+    Voice --> ASR
+    Voice --> DB
+    API --> DB
+    API --> Minio
+""".strip()
+
+    ai_prompt = (
+        "Create an AI orchestration flowchart for a legal copilot pipeline: user prompt -> command parser -> "
+        "intent routing -> either specialized agent handlers or RAG retrieval with verifier -> optional external research "
+        "synthesis -> response with evidence. Include deep workflow orchestration and voice/document intelligence branches."
+    )
+    ai_code = f"""
+flowchart TD
+    U[User Prompt] --> P[Command Parsing Service\\nintent/target/count]
+    P --> C[Copilot Service\\nHandler Dispatch]
+    C -->|ask_* / summarize_*| RAG[RAG Path\\nRetrievalAgent + VerifierAgent]
+    C -->|specialized intents| SA[Specialized Agents]
+    C -->|deep workflow| WF[Agent Workflow Service]
+
+    SA --> CR[CaseReasoningAgent]
+    SA --> TL[TimelineAgent]
+    SA --> DC[DocumentComparisonAgent]
+    SA --> DR[DraftingAgent]
+    SA --> BK[BookingAgent]
+    SA --> PO[PromptOptimizerAgent]
+
+    RAG --> XR[Optional External Research\\nTavily/SerpAPI]
+    XR --> SYN[Synthesis with Internal Evidence]
+    SYN --> OUT[Answer + Confidence + Sources]
+    SA --> OUT
+
+    WF --> I1[Intake]
+    WF --> I2[Retrieval]
+    WF --> I3[Reasoning]
+    WF --> I4[Timeline]
+    WF --> I5[Booking]
+    WF --> I6[Verifier]
+    WF --> I7[Drafting]
+    I7 --> OUT
+
+    DOC[Document Intelligence Pipeline] --> OUT
+    VOICE[Voice + Transcription Pipeline] --> OUT
+
+    NOTE[Intents detected in code: {intent_preview}]:::note
+    NOTE -.-> C
+    classDef note fill:#f9f5e9,stroke:#9d7b3e,color:#3e2f16;
+""".strip()
+
+    er_prompt = (
+        "Create an ER-style diagram for the legal platform data model including tenant, users, clients, cases, "
+        "documents, chunks, entities, voice recordings, consultation requests, and client portal auth tables."
+    )
+    er_code = _build_model_er_diagram(models)
+
+    return [
+        {
+            "slug": "architecture_flow",
+            "title": "Mermaid Diagram: System Architecture",
+            "subtitle": "Generated from architecture prompt + rendered from Mermaid source",
+            "prompt": architecture_prompt,
+            "code": architecture_code,
+        },
+        {
+            "slug": "ai_orchestration_flow",
+            "title": "Mermaid Diagram: AI Orchestration",
+            "subtitle": "Intent routing, agent execution, grounding, and workflow paths",
+            "prompt": ai_prompt,
+            "code": ai_code,
+        },
+        {
+            "slug": "data_model_er",
+            "title": "Mermaid Diagram: Data Model ER",
+            "subtitle": "Entity relationships derived from SQLAlchemy model inventory",
+            "prompt": er_prompt,
+            "code": er_code,
+        },
+    ]
+
+
+def _render_mermaid_to_png(*, mermaid_code: str, output_path: Path, timeout_seconds: int = DEFAULT_MERMAID_RENDER_TIMEOUT_SECONDS) -> str | None:
+    request = Request(
+        "https://kroki.io/mermaid/png",
+        data=mermaid_code.encode("utf-8"),
+        headers={
+            "Content-Type": "text/plain",
+            "Accept": "image/png",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=timeout_seconds) as response:
+            image_bytes = response.read()
+        if not image_bytes:
+            return "Mermaid renderer returned empty image bytes."
+        output_path.write_bytes(image_bytes)
+        return None
+    except KeyboardInterrupt:
+        return "Mermaid rendering interrupted by user."
+    except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Unexpected Mermaid rendering error: {exc}"
+
+
+def materialize_mermaid_assets(
+    diagrams: list[dict],
+    *,
+    render_enabled: bool = True,
+    timeout_seconds: int = DEFAULT_MERMAID_RENDER_TIMEOUT_SECONDS,
+) -> list[dict]:
+    MERMAID_DIR.mkdir(parents=True, exist_ok=True)
+    MERMAID_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+    index_rows: list[dict] = []
+    rendered: list[dict] = []
+
+    for diagram in diagrams:
+        slug = diagram["slug"]
+        prompt_path = MERMAID_DIR / f"{slug}.prompt.txt"
+        mmd_path = MERMAID_DIR / f"{slug}.mmd"
+        png_path = MERMAID_IMAGE_DIR / f"{slug}.png"
+
+        prompt_path.write_text(diagram["prompt"] + "\n", encoding="utf-8")
+        mmd_path.write_text(diagram["code"] + "\n", encoding="utf-8")
+
+        if render_enabled:
+            render_error = _render_mermaid_to_png(
+                mermaid_code=diagram["code"],
+                output_path=png_path,
+                timeout_seconds=timeout_seconds,
+            )
+            if render_error and png_path.exists():
+                png_path.unlink(missing_ok=True)
+        else:
+            render_error = "Skipped Mermaid image rendering (--skip-mermaid-render)."
+            if png_path.exists():
+                png_path.unlink(missing_ok=True)
+
+        row = {
+            **diagram,
+            "prompt_path": prompt_path,
+            "mmd_path": mmd_path,
+            "png_path": png_path,
+            "render_error": render_error,
+            "rendered": png_path.exists(),
+        }
+        rendered.append(row)
+        index_rows.append(
+            {
+                "slug": slug,
+                "rendered": row["rendered"],
+                "prompt_file": prompt_path.name,
+                "diagram_file": mmd_path.name,
+                "image_file": png_path.name if row["rendered"] else "n/a",
+                "error": render_error or "",
+            }
+        )
+
+    index_path = MERMAID_DIR / "index.json"
+    index_path.write_text(json.dumps(index_rows, indent=2), encoding="utf-8")
+
+    readme_lines = [
+        "# Mermaid Diagram Assets",
+        "",
+        "These files are generated by `scripts/generate_project_report_pdf.py`.",
+        "",
+    ]
+    for row in index_rows:
+        readme_lines.append(f"## {row['slug']}")
+        readme_lines.append(f"- rendered: {row['rendered']}")
+        readme_lines.append(f"- prompt: `{row['prompt_file']}`")
+        readme_lines.append(f"- mermaid: `{row['diagram_file']}`")
+        readme_lines.append(f"- image: `{row['image_file']}`")
+        if row["error"]:
+            readme_lines.append(f"- render_error: `{row['error']}`")
+        readme_lines.append("")
+
+    (MERMAID_DIR / "README.md").write_text("\n".join(readme_lines), encoding="utf-8")
+    return rendered
+
+
+def add_mermaid_diagram_pages(pdf: PdfPages, rendered_diagrams: list[dict]) -> None:
+    for diagram in rendered_diagrams:
+        fig = plt.figure(figsize=(11.69, 8.27))
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.axis("off")
+        draw_title(ax, diagram["title"], diagram["subtitle"])
+
+        prompt_preview = textwrap.shorten(diagram["prompt"], width=165, placeholder="...")
+        ax.text(0.05, 0.85, f"Prompt sent to Mermaid: {prompt_preview}", fontsize=9.5, color="#345773")
+        ax.text(0.05, 0.82, f"Source: {diagram['mmd_path'].relative_to(ROOT)}", fontsize=9, color="#5f7891")
+
+        if diagram["rendered"]:
+            try:
+                img = plt.imread(str(diagram["png_path"]))
+                image_ax = fig.add_axes([0.04, 0.08, 0.92, 0.70])
+                image_ax.axis("off")
+                image_ax.imshow(img)
+                image_ax.set_aspect("auto")
+            except Exception as exc:
+                ax.text(0.05, 0.76, f"Image load failed: {exc}", fontsize=10, color="#8c2f2f")
+        else:
+            error_text = diagram["render_error"] or "Unknown Mermaid render error."
+            ax.text(0.05, 0.76, f"Mermaid render unavailable: {error_text}", fontsize=10, color="#8c2f2f")
+            ax.text(0.05, 0.72, "Fallback source (.mmd):", fontsize=10, color="#2e4d6b")
+            code_lines = diagram["code"].splitlines()[:24]
+            y = 0.69
+            for line in code_lines:
+                ax.text(0.05, y, line[:130], fontsize=8.6, family="monospace", color="#1d3552")
+                y -= 0.022
+
+        pdf.savefig(fig)
+        plt.close(fig)
 
 
 def add_cover_page(pdf: PdfPages) -> None:
@@ -585,7 +874,11 @@ def add_model_schema_appendix(pdf: PdfPages, models: list[dict], schemas: list[d
     plt.close(fig)
 
 
-def generate_report() -> Path:
+def generate_report(
+    *,
+    render_mermaid_images: bool = True,
+    mermaid_timeout_seconds: int = DEFAULT_MERMAID_RENDER_TIMEOUT_SECONDS,
+) -> Path:
     endpoints, _ = collect_api_endpoints()
     models = collect_sqlalchemy_models()
     schemas = collect_pydantic_schemas()
@@ -595,15 +888,19 @@ def generate_report() -> Path:
     frontend_calls = collect_frontend_api_calls()
     portal_calls = collect_portal_api_calls()
     env = read_env_summary()
+    mermaid_diagrams = build_mermaid_diagrams(intents=intents, models=models)
+    rendered_mermaid_diagrams = materialize_mermaid_assets(
+        mermaid_diagrams,
+        render_enabled=render_mermaid_images,
+        timeout_seconds=max(3, int(mermaid_timeout_seconds)),
+    )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     with PdfPages(OUTPUT_FILE) as pdf:
         add_cover_page(pdf)
         add_inventory_page(pdf, endpoints, models, schemas, ai_agents, ai_modules, frontend_calls)
-        add_architecture_diagram_page(pdf)
-        add_ai_flow_diagram_page(pdf, intents, ai_agents)
-        add_data_model_page(pdf, models)
+        add_mermaid_diagram_pages(pdf, rendered_mermaid_diagrams)
         add_backend_ai_page(pdf, ai_modules, ai_agents, intents, env)
         add_frontend_page(pdf, frontend_calls, portal_calls)
         add_security_ops_page(pdf, env)
@@ -622,5 +919,22 @@ def generate_report() -> Path:
 
 
 if __name__ == "__main__":
-    report_path = generate_report()
+    parser = argparse.ArgumentParser(description="Generate full technical PDF report for Legal AI Platform.")
+    parser.add_argument(
+        "--skip-mermaid-render",
+        action="store_true",
+        help="Do not call remote Mermaid renderer. Still generates .mmd files and PDF with fallback blocks.",
+    )
+    parser.add_argument(
+        "--mermaid-timeout-seconds",
+        type=int,
+        default=DEFAULT_MERMAID_RENDER_TIMEOUT_SECONDS,
+        help=f"Per-diagram Mermaid render timeout in seconds (default: {DEFAULT_MERMAID_RENDER_TIMEOUT_SECONDS}).",
+    )
+    args = parser.parse_args()
+
+    report_path = generate_report(
+        render_mermaid_images=not args.skip_mermaid_render,
+        mermaid_timeout_seconds=args.mermaid_timeout_seconds,
+    )
     print(f"Report generated: {report_path}")

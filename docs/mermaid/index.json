@@ -1,0 +1,26 @@
+[
+  {
+    "slug": "architecture_flow",
+    "rendered": true,
+    "prompt_file": "architecture_flow.prompt.txt",
+    "diagram_file": "architecture_flow.mmd",
+    "image_file": "architecture_flow.png",
+    "error": ""
+  },
+  {
+    "slug": "ai_orchestration_flow",
+    "rendered": true,
+    "prompt_file": "ai_orchestration_flow.prompt.txt",
+    "diagram_file": "ai_orchestration_flow.mmd",
+    "image_file": "ai_orchestration_flow.png",
+    "error": ""
+  },
+  {
+    "slug": "data_model_er",
+    "rendered": true,
+    "prompt_file": "data_model_er.prompt.txt",
+    "diagram_file": "data_model_er.mmd",
+    "image_file": "data_model_er.png",
+    "error": ""
+  }
+]

@@ -1,0 +1,1 @@
+Create an AI orchestration flowchart for a legal copilot pipeline: user prompt -> command parser -> intent routing -> either specialized agent handlers or RAG retrieval with verifier -> optional external research synthesis -> response with evidence. Include deep workflow orchestration and voice/document intelligence branches.
