@@ -48,6 +48,19 @@ LLM_MODEL=openai/gpt-4o-mini
 SUMMARY_AGENT_MODEL=openai/gpt-4o-mini
 ```
 
+For speech transcription reliability, you can keep LLM reasoning on OpenRouter and use local Whisper fallback:
+
+```bash
+TRANSCRIPTION_REMOTE_ENABLED=true
+LOCAL_TRANSCRIPTION_MODEL=openai/whisper-base
+```
+
+If SMTP delivery is unstable in development, keep portal code fallback enabled so login codes are written to server logs:
+
+```bash
+PORTAL_ALLOW_CONSOLE_CODE_FALLBACK=true
+```
+
 Swagger:
 
 `http://127.0.0.1:8000/docs`
@@ -83,3 +96,11 @@ npm run dev
 Default client portal URL:
 
 `http://127.0.0.1:5174`
+
+## Full Smoke Test
+
+Run an end-to-end API smoke test (auth, clients, cases, documents, voice, copilot, workflow, and portal auth):
+
+```bash
+.\venv\Scripts\python.exe scripts\full_smoke_test.py --port 8021
+```

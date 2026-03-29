@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.api.voice_schema import VoiceRecordingOut, VoiceUploadResponse
@@ -11,8 +10,8 @@ from backend.core.deps import get_current_user, get_db
 from backend.models.case import Case
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
-from backend.services.ai.transcription_service import transcription_service
-from backend.services.storage_service import download_file_to_temp, upload_file
+from backend.services.storage_service import upload_file
+from backend.services.voice_processing_service import process_voice_recording
 
 
 router = APIRouter(prefix="/voice", tags=["Voice"])
@@ -154,6 +153,7 @@ def get_recording(
 
 @router.post("/upload", response_model=VoiceUploadResponse, status_code=status.HTTP_201_CREATED)
 def upload_voice_recording(
+    background_tasks: BackgroundTasks,
     case_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -208,36 +208,8 @@ def upload_voice_recording(
     db.commit()
     db.refresh(recording)
 
-    local_file_path = download_file_to_temp(storage_path)
-
-    try:
-        transcription = transcription_service.transcribe_file(local_file_path, filename=filename)
-    finally:
-        if os.path.exists(local_file_path):
-            try:
-                os.remove(local_file_path)
-            except OSError:
-                pass
-
-    if transcription["success"]:
-        recording.transcription_status = "completed"
-        recording.transcription_error = None
-        recording.transcript_text = transcription["text"]
-        recording.transcript_source = transcription["source"]
-        recording.transcript_language = transcription["language"]
-        message = "Voice recording uploaded and transcribed successfully."
-    else:
-        recording.transcription_status = "failed"
-        recording.transcription_error = transcription["error"]
-        recording.transcript_text = None
-        recording.transcript_source = transcription["source"]
-        recording.transcript_language = transcription["language"]
-        message = "Voice recording uploaded, but transcription failed."
-
-    sanitize_recording(recording)
-
-    db.commit()
-    db.refresh(recording)
+    background_tasks.add_task(process_voice_recording, recording.id, None)
+    message = "Voice recording uploaded. Transcription is running in the background."
 
     return {
         "recording": recording,

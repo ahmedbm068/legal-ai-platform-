@@ -20,6 +20,11 @@ frontend/node_modules/
 frontend/dist/
 client-portal/node_modules/
 client-portal/dist/
+*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+client-portal/vite.config.js
+client-portal/vite.config.d.ts
 
 # IDE
 .vscode/

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import smtplib
+from email.utils import parseaddr
 from email.message import EmailMessage
 
 from backend.core.config import settings
@@ -20,9 +21,12 @@ class ClientPortalMailService:
     def configured(self) -> bool:
         return bool(self.smtp_host and self.smtp_port and self.smtp_username and self.smtp_password and self.sender)
 
-    def send_login_code(self, *, recipient_email: str, code: str) -> None:
+    def send_login_code(self, *, recipient_email: str, code: str) -> str:
         if not self.configured:
             raise RuntimeError("Client portal email delivery is not configured. Add SMTP credentials to .env.")
+
+        if not parseaddr(recipient_email)[1]:
+            raise RuntimeError("Invalid recipient email address.")
 
         message = EmailMessage()
         message["Subject"] = f"{self.firm_name} client portal access code"
@@ -46,6 +50,8 @@ Regards,
                 server.starttls()
             server.login(self.smtp_username, self.smtp_password)
             server.send_message(message)
+
+        return "smtp"
 
 
 client_portal_mail_service = ClientPortalMailService()

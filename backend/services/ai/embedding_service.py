@@ -6,9 +6,19 @@ from sentence_transformers import SentenceTransformer
 
 
 class EmbeddingService:
+    MODEL_DIMENSIONS = {
+        "all-MiniLM-L6-v2": 384,
+        "sentence-transformers/all-MiniLM-L6-v2": 384,
+    }
+
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
+        self.model: SentenceTransformer | None = None
+
+    def _get_model(self) -> SentenceTransformer:
+        if self.model is None:
+            self.model = SentenceTransformer(self.model_name)
+        return self.model
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         if not texts:
@@ -18,7 +28,7 @@ class EmbeddingService:
         if not cleaned:
             return []
 
-        embeddings = self.model.encode(
+        embeddings = self._get_model().encode(
             cleaned,
             convert_to_numpy=True,
             normalize_embeddings=True
@@ -29,7 +39,7 @@ class EmbeddingService:
         if not query or not query.strip():
             return []
 
-        embedding = self.model.encode(
+        embedding = self._get_model().encode(
             [query.strip()],
             convert_to_numpy=True,
             normalize_embeddings=True
@@ -38,7 +48,14 @@ class EmbeddingService:
 
     @property
     def dimension(self) -> int:
-        return int(self.model.get_sentence_embedding_dimension())
+        if self.model is not None:
+            return int(self.model.get_sentence_embedding_dimension())
+
+        known_dimension = self.MODEL_DIMENSIONS.get(self.model_name)
+        if known_dimension:
+            return known_dimension
+
+        return int(self._get_model().get_sentence_embedding_dimension())
 
 
 embedding_service = EmbeddingService()

@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import re
 import uuid
+import logging
 from datetime import datetime, timedelta, timezone
 from random import randint
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -34,15 +35,15 @@ from backend.models.document import Document
 from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
-from backend.services.ai.agents.intake_agent import intake_agent
 from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
-from backend.services.ai.transcription_service import transcription_service
 from backend.services.client_portal_mail_service import client_portal_mail_service
-from backend.services.storage_service import download_file_to_temp, upload_file
+from backend.services.storage_service import upload_file
+from backend.services.voice_processing_service import process_voice_recording
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 
 router = APIRouter(prefix="/portal", tags=["Client Portal"])
+logger = logging.getLogger(__name__)
 
 security = HTTPBearer()
 pipeline = DocumentAIPipeline()
@@ -281,20 +282,28 @@ def request_login_code(data: ClientPortalLoginCodeRequest, db: Session = Depends
     db.refresh(login_code)
 
     try:
-        client_portal_mail_service.send_login_code(recipient_email=account.email, code=code)
+        delivery_channel = client_portal_mail_service.send_login_code(recipient_email=account.email, code=code)
         login_code.delivery_status = "sent"
         login_code.delivery_error = None
         db.commit()
+        return {"message": f"A six-digit access code has been sent via {delivery_channel}."}
     except Exception as exc:
         login_code.delivery_status = "failed"
         login_code.delivery_error = str(exc)
         db.commit()
+
+        if settings.PORTAL_ALLOW_CONSOLE_CODE_FALLBACK:
+            logger.warning(
+                "Portal SMTP delivery failed for %s. Falling back to console login code delivery.",
+                account.email,
+            )
+            logger.warning("PORTAL LOGIN CODE [%s]: %s", account.email, code)
+            return {"message": "SMTP delivery failed. Your access code was generated and logged on the server console."}
+
         raise HTTPException(
             status_code=500,
-            detail=f"Unable to send the access code email. {exc}",
+            detail="Unable to send the access code email. Check SMTP settings and try again.",
         )
-
-    return {"message": "A six-digit access code has been sent to your email address."}
 
 
 @router.post("/auth/login/verify-code", response_model=ClientPortalToken)
@@ -359,6 +368,7 @@ def dashboard(
 
 @router.post("/intake/submit", response_model=ClientPortalDashboardResponse, status_code=status.HTTP_201_CREATED)
 def submit_authenticated_intake(
+    background_tasks: BackgroundTasks,
     issue_summary: str = Form(...),
     case_description: str | None = Form(None),
     preferred_schedule: str | None = Form(None),
@@ -441,56 +451,9 @@ def submit_authenticated_intake(
         db.commit()
         db.refresh(recording)
 
-        local_voice_path = download_file_to_temp(voice_storage_path)
-        try:
-            transcription = transcription_service.transcribe_file(local_voice_path, filename=recording.filename)
-        finally:
-            if os.path.exists(local_voice_path):
-                try:
-                    os.remove(local_voice_path)
-                except OSError:
-                    pass
-
-        if transcription["success"]:
-            recording.transcription_status = "completed"
-            recording.transcription_error = None
-            recording.transcript_text = transcription["text"]
-            recording.transcript_source = transcription["source"]
-            recording.transcript_language = transcription["language"]
-
-            agent_result = intake_agent.process_transcript(
-                transcript_text=recording.transcript_text,
-                preferred_schedule=consultation.preferred_schedule,
-                fallback_client_name=consultation.client_name,
-                fallback_client_email=consultation.client_email,
-                fallback_client_phone=consultation.client_phone,
-                fallback_issue_summary=consultation.issue_summary,
-                fallback_case_description=consultation.extracted_case_description,
-            )
-
-            extracted = agent_result.payload if agent_result.success else {}
-            consultation.voice_recording_id = recording.id
-            consultation.booking_intent = (
-                "requested"
-                if consultation.booking_intent == "requested" or extracted.get("booking_intent") == "requested"
-                else extracted.get("booking_intent", consultation.booking_intent)
-            )
-            consultation.urgency_level = extracted.get("urgency_level", consultation.urgency_level)
-            consultation.legal_area = extracted.get("legal_area") or consultation.legal_area
-            consultation.preferred_schedule = consultation.preferred_schedule or extracted.get("preferred_schedule")
-            consultation.intake_notes = extracted.get("intake_notes") or consultation.intake_notes
-            consultation.issue_summary = extracted.get("issue_summary") or consultation.issue_summary
-            consultation.extracted_case_description = (
-                extracted.get("extracted_case_description") or consultation.extracted_case_description
-            )
-            consultation.extraction_source = extracted.get("extraction_source") or consultation.extraction_source
-        else:
-            recording.transcription_status = "failed"
-            recording.transcription_error = transcription["error"]
-            recording.transcript_source = transcription["source"]
-            recording.transcript_language = transcription["language"]
-
+        consultation.voice_recording_id = recording.id
         db.commit()
+        background_tasks.add_task(process_voice_recording, recording.id, consultation.id)
 
     if supporting_document and supporting_document.filename:
         supporting_document.file.seek(0, 2)

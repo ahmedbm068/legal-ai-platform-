@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import wave
 from typing import Any
 
@@ -21,6 +20,9 @@ class TranscriptionService:
         self._local_pipeline = None
 
     def _get_client(self) -> OpenAI | None:
+        if not settings.TRANSCRIPTION_REMOTE_ENABLED:
+            return None
+
         api_key = settings.TRANSCRIPTION_API_KEY or settings.OPENAI_API_KEY
         if not api_key:
             return None
@@ -31,6 +33,10 @@ class TranscriptionService:
             kwargs["base_url"] = base_url
 
         return OpenAI(**kwargs)
+
+    def _should_skip_remote_transcription(self) -> bool:
+        base_url = (settings.TRANSCRIPTION_BASE_URL or settings.LLM_BASE_URL or "").lower().strip()
+        return "openrouter.ai" in base_url and not settings.TRANSCRIPTION_BASE_URL
 
     def _get_local_pipeline(self):
         if self._local_pipeline is not None:
@@ -131,14 +137,12 @@ class TranscriptionService:
         client = self._get_client()
         model = settings.TRANSCRIPTION_MODEL
 
+        if self._should_skip_remote_transcription():
+            # OpenRouter model routes are great for text LLM tasks but often unreliable for speech endpoints.
+            return self._local_transcribe_file(file_path)
+
         if not client:
-            return {
-                "success": False,
-                "text": None,
-                "language": None,
-                "source": None,
-                "error": "No transcription provider configured. Set TRANSCRIPTION_* or OPENAI_API_KEY settings.",
-            }
+            return self._local_transcribe_file(file_path)
 
         try:
             with open(file_path, "rb") as audio_file:
@@ -151,7 +155,7 @@ class TranscriptionService:
             language = getattr(response, "language", None)
 
             if looks_like_html_error_page(transcript_text):
-                return {
+                failure_result = {
                     "success": False,
                     "text": None,
                     "language": language,

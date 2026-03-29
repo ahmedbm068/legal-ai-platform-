@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     TRANSCRIPTION_API_KEY: Optional[str] = None
     TRANSCRIPTION_BASE_URL: Optional[str] = None
     TRANSCRIPTION_MODEL: str = "gpt-4o-mini-transcribe"
-    LOCAL_TRANSCRIPTION_MODEL: str = "openai/whisper-small"
+    LOCAL_TRANSCRIPTION_MODEL: str = "openai/whisper-tiny"
+    TRANSCRIPTION_REMOTE_ENABLED: bool = True
     OPENROUTER_SITE_URL: Optional[str] = None
     OPENROUTER_APP_NAME: str = "legal-ai-platform"
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -46,6 +47,7 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: Optional[str] = None
     SMTP_USE_TLS: bool = True
     PORTAL_LOGIN_CODE_EXPIRE_MINUTES: int = 10
+    PORTAL_ALLOW_CONSOLE_CODE_FALLBACK: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",
