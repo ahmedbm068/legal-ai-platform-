@@ -94,7 +94,8 @@ def copilot(
         db=db,
         tenant_id=current_user.tenant_id,
         message=data.message,
-        top_k=data.top_k
+        top_k=data.top_k,
+        use_external_research=data.use_external_research,
     )
 
 
@@ -118,15 +119,13 @@ def provider_status(
     current_user: User = Depends(get_current_user)
 ):
     _ = current_user
-    base_url = llm_gateway.base_url
-    provider_name = "openrouter" if base_url and "openrouter.ai" in base_url else "custom/openai-compatible"
     return {
         "provider_available": llm_gateway.available,
-        "base_url": base_url,
+        "base_url": llm_gateway.base_url,
         "model": llm_gateway.default_model,
         "summary_model": llm_gateway.summary_model,
         "key_present": bool(llm_gateway.api_key),
-        "provider_name": provider_name,
+        "provider_name": llm_gateway.provider_name,
     }
 
 
@@ -137,8 +136,7 @@ def test_llm(
 ):
     _ = current_user
     client = llm_gateway.create_client()
-    base_url = llm_gateway.base_url
-    provider_name = "openrouter" if base_url and "openrouter.ai" in base_url else "custom/openai-compatible"
+    provider_name = llm_gateway.provider_name
 
     if not client:
         return {
@@ -158,7 +156,7 @@ def test_llm(
             "ok": True,
             "provider_name": provider_name,
             "model": llm_gateway.default_model,
-            "output": (response.output_text or "").strip(),
+            "output": llm_gateway.extract_output_text(response),
             "error": None,
         }
     except Exception as exc:

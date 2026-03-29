@@ -43,6 +43,9 @@ class CommandParsingService:
         }
 
     def _detect_intent(self, lowered: str, target_type: Optional[str]) -> tuple[str, str]:
+        if self._contains_any(lowered, ["optimize prompt", "improve prompt", "rewrite prompt", "better prompt", "prompt optimizer"]):
+            return "optimize_prompt", "high"
+
         if self._contains_any(lowered, ["draft", "write", "prepare"]) and self._contains_any(lowered, ["email", "mail", "client update"]):
             if target_type == "case":
                 return "draft_client_email_case", "high"

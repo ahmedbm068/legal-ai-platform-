@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import os
 import re
 import uuid
 import logging
+from hmac import compare_digest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from random import randint
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -35,6 +36,7 @@ from backend.models.document import Document
 from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
+from backend.services.auth_rate_limiter import RateLimitConfig, auth_rate_limiter
 from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
 from backend.services.client_portal_mail_service import client_portal_mail_service
 from backend.services.storage_service import upload_file
@@ -48,6 +50,16 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=False)
 pipeline = DocumentAIPipeline()
 PASSWORD_POLICY_REGEX = re.compile(r"^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{10,}$")
+portal_login_code_limit = RateLimitConfig.safe(
+    max_attempts=settings.PORTAL_LOGIN_MAX_ATTEMPTS,
+    window_seconds=settings.PORTAL_LOGIN_WINDOW_SECONDS,
+    block_seconds=settings.PORTAL_LOGIN_BLOCK_SECONDS,
+)
+portal_verify_code_limit = RateLimitConfig.safe(
+    max_attempts=settings.PORTAL_VERIFY_MAX_ATTEMPTS,
+    window_seconds=settings.PORTAL_VERIFY_WINDOW_SECONDS,
+    block_seconds=settings.PORTAL_VERIFY_BLOCK_SECONDS,
+)
 
 
 def normalize_case_title(client_name: str, issue_summary: str) -> str:
@@ -122,6 +134,14 @@ def validate_portal_password(password: str) -> None:
 
 def generate_login_code() -> str:
     return f"{randint(0, 999999):06d}"
+
+
+def get_client_ip(request: Request) -> str | None:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    return request.client.host if request.client else None
 
 
 def issue_portal_token(account: ClientPortalAccount) -> dict[str, str]:
@@ -269,11 +289,45 @@ def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Dep
 
 
 @router.post("/auth/login/request-code", response_model=ClientPortalMessageResponse)
-def request_login_code(data: ClientPortalLoginCodeRequest, db: Session = Depends(get_db)):
+def request_login_code(data: ClientPortalLoginCodeRequest, request: Request, db: Session = Depends(get_db)):
     normalized_email = data.email.lower().strip()
+    client_ip = get_client_ip(request)
+
+    auth_rate_limiter.assert_allowed(
+        scope="portal-login-code",
+        identifier=normalized_email,
+        client_ip=client_ip,
+        config=portal_login_code_limit,
+    )
+
     account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == normalized_email).first()
     if not account or not verify_password(data.password, account.hashed_password):
+        auth_rate_limiter.record_failure(
+            scope="portal-login-code",
+            identifier=normalized_email,
+            client_ip=client_ip,
+            config=portal_login_code_limit,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+
+    auth_rate_limiter.record_success(
+        scope="portal-login-code",
+        identifier=normalized_email,
+        client_ip=client_ip,
+    )
+
+    now = datetime.now(timezone.utc)
+    active_codes = (
+        db.query(ClientPortalLoginCode)
+        .filter(
+            ClientPortalLoginCode.portal_account_id == account.id,
+            ClientPortalLoginCode.purpose == "login",
+            ClientPortalLoginCode.consumed_at.is_(None),
+        )
+        .all()
+    )
+    for active_code in active_codes:
+        active_code.consumed_at = now
 
     code = generate_login_code()
     login_code = ClientPortalLoginCode(
@@ -281,7 +335,7 @@ def request_login_code(data: ClientPortalLoginCodeRequest, db: Session = Depends
         email=account.email,
         code=code,
         purpose="login",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.PORTAL_LOGIN_CODE_EXPIRE_MINUTES),
+        expires_at=now + timedelta(minutes=settings.PORTAL_LOGIN_CODE_EXPIRE_MINUTES),
         delivery_status="pending",
     )
     db.add(login_code)
@@ -314,10 +368,25 @@ def request_login_code(data: ClientPortalLoginCodeRequest, db: Session = Depends
 
 
 @router.post("/auth/login/verify-code", response_model=ClientPortalToken)
-def verify_login_code(data: ClientPortalLoginCodeVerifyRequest, db: Session = Depends(get_db)):
+def verify_login_code(data: ClientPortalLoginCodeVerifyRequest, request: Request, db: Session = Depends(get_db)):
     normalized_email = data.email.lower().strip()
+    client_ip = get_client_ip(request)
+
+    auth_rate_limiter.assert_allowed(
+        scope="portal-verify-code",
+        identifier=normalized_email,
+        client_ip=client_ip,
+        config=portal_verify_code_limit,
+    )
+
     account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == normalized_email).first()
     if not account:
+        auth_rate_limiter.record_failure(
+            scope="portal-verify-code",
+            identifier=normalized_email,
+            client_ip=client_ip,
+            config=portal_verify_code_limit,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid verification request.")
 
     login_code = (
@@ -333,13 +402,37 @@ def verify_login_code(data: ClientPortalLoginCodeVerifyRequest, db: Session = De
     )
 
     if not login_code:
+        auth_rate_limiter.record_failure(
+            scope="portal-verify-code",
+            identifier=normalized_email,
+            client_ip=client_ip,
+            config=portal_verify_code_limit,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No active access code was found.")
 
     if login_code.expires_at < datetime.now(timezone.utc):
+        auth_rate_limiter.record_failure(
+            scope="portal-verify-code",
+            identifier=normalized_email,
+            client_ip=client_ip,
+            config=portal_verify_code_limit,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="This access code has expired.")
 
-    if login_code.code != data.code:
+    if not compare_digest(login_code.code, data.code):
+        auth_rate_limiter.record_failure(
+            scope="portal-verify-code",
+            identifier=normalized_email,
+            client_ip=client_ip,
+            config=portal_verify_code_limit,
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid access code.")
+
+    auth_rate_limiter.record_success(
+        scope="portal-verify-code",
+        identifier=normalized_email,
+        client_ip=client_ip,
+    )
 
     login_code.consumed_at = datetime.now(timezone.utc)
     db.commit()
@@ -443,6 +536,12 @@ def submit_authenticated_intake(
         voice_note.file.seek(0, 2)
         voice_size = voice_note.file.tell()
         voice_note.file.seek(0)
+        max_voice_bytes = max(1, int(settings.VOICE_UPLOAD_MAX_MB)) * 1024 * 1024
+        if voice_size > max_voice_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice note too large. Maximum allowed size is {settings.VOICE_UPLOAD_MAX_MB} MB.",
+            )
         voice_storage_path = upload_file(voice_note.file, voice_note.filename.strip(), prefix="voice")
 
         recording = VoiceRecording(
@@ -464,9 +563,20 @@ def submit_authenticated_intake(
         background_tasks.add_task(process_voice_recording, recording.id, consultation.id)
 
     if supporting_document and supporting_document.filename:
+        normalized_content_type = (supporting_document.content_type or "").split(";")[0].strip().lower()
+        extension = Path(supporting_document.filename).suffix.lower()
+        if normalized_content_type != "application/pdf" and extension != ".pdf":
+            raise HTTPException(status_code=400, detail="Only PDF files are accepted as supporting documents.")
+
         supporting_document.file.seek(0, 2)
         document_size = supporting_document.file.tell()
         supporting_document.file.seek(0)
+        max_document_bytes = max(1, int(settings.DOCUMENT_UPLOAD_MAX_MB)) * 1024 * 1024
+        if document_size > max_document_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Supporting document too large. Maximum allowed size is {settings.DOCUMENT_UPLOAD_MAX_MB} MB.",
+            )
         document_storage_path = upload_file(
             supporting_document.file,
             supporting_document.filename.strip(),
@@ -477,7 +587,7 @@ def submit_authenticated_intake(
             filename=supporting_document.filename.strip(),
             storage_path=document_storage_path,
             file_size=document_size,
-            file_type=supporting_document.content_type or "application/octet-stream",
+            file_type=normalized_content_type or "application/pdf",
             case_id=case.id,
             tenant_id=account.tenant_id,
             processing_status="pending",

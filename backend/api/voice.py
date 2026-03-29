@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from backend.core.config import settings
 from backend.api.voice_schema import VoiceRecordingOut, VoiceUploadResponse
 from backend.core.deps import get_current_user, get_db
 from backend.models.case import Case
@@ -187,9 +188,12 @@ def upload_voice_recording(
     file_size = file.file.tell()
     file.file.seek(0)
 
-    max_file_size = 25 * 1024 * 1024
+    max_file_size = max(1, int(settings.VOICE_UPLOAD_MAX_MB)) * 1024 * 1024
     if file_size > max_file_size:
-        raise HTTPException(status_code=400, detail="Audio file too large. Maximum allowed size is 25 MB.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Audio file too large. Maximum allowed size is {settings.VOICE_UPLOAD_MAX_MB} MB."
+        )
 
     storage_path = upload_file(file.file, filename, prefix="voice")
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy.orm import Session
 
 from backend.models.document_chunk import DocumentChunk
@@ -10,32 +12,48 @@ from backend.services.storage_service import download_file_to_temp
 
 
 def process_document_text(document, db: Session) -> str:
-    temp_file_path = download_file_to_temp(document.file_path)
+    temp_file_path: str | None = None
 
-    extracted_text = extract_text_from_file(temp_file_path)
-    cleaned_text = normalize_text(extracted_text)
+    try:
+        storage_path = getattr(document, "storage_path", None)
+        if not storage_path:
+            raise ValueError("Document does not have a valid storage_path.")
 
-    if not cleaned_text:
-        return ""
+        temp_file_path = download_file_to_temp(storage_path)
 
-    document.extracted_text = cleaned_text
+        extracted_text = extract_text_from_file(temp_file_path)
+        cleaned_text = normalize_text(extracted_text)
 
-    db.query(DocumentChunk).filter(
-        DocumentChunk.document_id == document.id
-    ).delete()
+        if not cleaned_text:
+            return ""
 
-    chunks = chunk_text(cleaned_text)
+        document.extracted_text = cleaned_text
 
-    for idx, chunk in enumerate(chunks):
-        db.add(
-            DocumentChunk(
-                document_id=document.id,
-                chunk_index=idx,
-                content=chunk
+        db.query(DocumentChunk).filter(
+            DocumentChunk.document_id == document.id
+        ).delete(synchronize_session=False)
+
+        chunks = chunk_text(cleaned_text)
+
+        for idx, chunk in enumerate(chunks):
+            db.add(
+                DocumentChunk(
+                    document_id=document.id,
+                    chunk_index=idx,
+                    content=chunk
+                )
             )
-        )
 
-    db.commit()
-    db.refresh(document)
+        db.commit()
+        db.refresh(document)
 
-    return cleaned_text
+        return cleaned_text
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass

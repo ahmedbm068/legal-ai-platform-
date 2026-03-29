@@ -1,6 +1,9 @@
+from pathlib import Path
+
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from backend.core.config import settings
 from backend.core.deps import get_db, get_current_user
 from backend.models.case import Case
 from backend.models.document import Document
@@ -91,11 +94,10 @@ def upload_document(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
-    allowed_content_types = {
-        "application/pdf",
-    }
+    normalized_content_type = (file.content_type or "").split(";")[0].strip().lower()
+    extension = Path(file.filename).suffix.lower()
 
-    if file.content_type not in allowed_content_types:
+    if normalized_content_type != "application/pdf" and extension != ".pdf":
         raise HTTPException(
             status_code=400,
             detail="Only PDF files are supported for this endpoint"
@@ -107,12 +109,12 @@ def upload_document(
     file_size = file.file.tell()
     file.file.seek(0)
 
-    max_file_size = 20 * 1024 * 1024  # 20 MB
+    max_file_size = max(1, int(settings.DOCUMENT_UPLOAD_MAX_MB)) * 1024 * 1024
 
     if file_size > max_file_size:
         raise HTTPException(
             status_code=400,
-            detail="File too large. Maximum allowed size is 20 MB for this prototype."
+            detail=f"File too large. Maximum allowed size is {settings.DOCUMENT_UPLOAD_MAX_MB} MB."
         )
 
     storage_path = upload_file(file.file, filename)
@@ -121,7 +123,7 @@ def upload_document(
         filename=filename,
         storage_path=storage_path,
         file_size=file_size,
-        file_type=file.content_type,
+        file_type=normalized_content_type or "application/pdf",
         case_id=case_id,
         tenant_id=current_user.tenant_id,
         processing_status="pending"

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 import faiss
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 class VectorStore:
@@ -43,16 +47,45 @@ class VectorStore:
 
     def save(self) -> None:
         with self._lock:
-            faiss.write_index(self.index, self.index_path)
+            index_dir = os.path.dirname(os.path.abspath(self.index_path)) or "."
             metadata_dir = os.path.dirname(os.path.abspath(self.metadata_path)) or "."
-            fd, temp_path = tempfile.mkstemp(prefix="faiss_metadata_", suffix=".json", dir=metadata_dir)
+            fd_index, temp_index_path = tempfile.mkstemp(prefix="faiss_index_", suffix=".bin", dir=index_dir)
+            fd_metadata, temp_metadata_path = tempfile.mkstemp(
+                prefix="faiss_metadata_", suffix=".json", dir=metadata_dir
+            )
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                os.close(fd_index)
+                faiss.write_index(self.index, temp_index_path)
+
+                with os.fdopen(fd_metadata, "w", encoding="utf-8") as f:
                     json.dump(self.metadata, f, ensure_ascii=False, indent=2)
-                os.replace(temp_path, self.metadata_path)
+
+                self._atomic_replace_with_retry(temp_index_path, self.index_path)
+                self._atomic_replace_with_retry(temp_metadata_path, self.metadata_path)
             finally:
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+                if os.path.exists(temp_index_path):
+                    os.remove(temp_index_path)
+                if os.path.exists(temp_metadata_path):
+                    os.remove(temp_metadata_path)
+
+    def _atomic_replace_with_retry(self, source_path: str, destination_path: str) -> None:
+        attempts = 5
+        base_delay_seconds = 0.05
+
+        for attempt in range(attempts):
+            try:
+                os.replace(source_path, destination_path)
+                return
+            except PermissionError:
+                if attempt == attempts - 1:
+                    raise
+                delay = base_delay_seconds * (2 ** attempt)
+                logger.warning(
+                    "Atomic replace was temporarily blocked for '%s'. Retrying in %.2fs.",
+                    destination_path,
+                    delay,
+                )
+                time.sleep(delay)
 
     def _rebuild_index_from_metadata_embeddings(self) -> None:
         # Caller must hold self._lock when mutating index/metadata.

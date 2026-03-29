@@ -3,10 +3,12 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from backend.core.config import settings
 from backend.api.public_schema import PublicIntakeStatusResponse, PublicIntakeSubmitResponse
 from backend.database.database import SessionLocal
 from backend.models.case import Case
@@ -115,7 +117,11 @@ def submit_public_intake(
     db = SessionLocal()
 
     try:
-        tenant = db.query(Tenant).filter(Tenant.name == tenant_name).first()
+        normalized_tenant_name = tenant_name.strip()
+        normalized_client_name = client_name.strip()
+        normalized_client_email = client_email.lower().strip() if client_email else None
+
+        tenant = db.query(Tenant).filter(Tenant.name == normalized_tenant_name).first()
         if not tenant:
             raise HTTPException(status_code=404, detail="Target tenant not found.")
 
@@ -129,14 +135,14 @@ def submit_public_intake(
         client = get_or_create_client(
             db,
             tenant_id=tenant.id,
-            client_name=client_name,
-            client_email=client_email,
+            client_name=normalized_client_name,
+            client_email=normalized_client_email,
             client_phone=client_phone,
             client_address=client_address,
         )
 
         case = Case(
-            title=normalize_case_title(client_name, issue_summary),
+            title=normalize_case_title(normalized_client_name, issue_summary),
             description=case_description or issue_summary,
             status="open",
             tenant_id=tenant.id,
@@ -150,8 +156,8 @@ def submit_public_intake(
         consultation = ConsultationRequest(
             case_id=case.id,
             tenant_id=tenant.id,
-            client_name=client_name,
-            client_email=client_email,
+            client_name=normalized_client_name,
+            client_email=normalized_client_email,
             client_phone=client_phone,
             booking_intent="requested" if preferred_schedule else "not_detected",
             urgency_level="normal",
@@ -172,6 +178,12 @@ def submit_public_intake(
             voice_note.file.seek(0, 2)
             voice_size = voice_note.file.tell()
             voice_note.file.seek(0)
+            max_voice_bytes = max(1, int(settings.VOICE_UPLOAD_MAX_MB)) * 1024 * 1024
+            if voice_size > max_voice_bytes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Voice note too large. Maximum allowed size is {settings.VOICE_UPLOAD_MAX_MB} MB.",
+                )
             voice_storage_path = upload_file(voice_note.file, voice_note.filename.strip(), prefix="voice")
 
             recording = VoiceRecording(
@@ -248,9 +260,20 @@ def submit_public_intake(
             db.refresh(consultation)
 
         if supporting_document and supporting_document.filename:
+            normalized_content_type = (supporting_document.content_type or "").split(";")[0].strip().lower()
+            extension = Path(supporting_document.filename).suffix.lower()
+            if normalized_content_type != "application/pdf" and extension != ".pdf":
+                raise HTTPException(status_code=400, detail="Only PDF files are accepted as supporting documents.")
+
             supporting_document.file.seek(0, 2)
             document_size = supporting_document.file.tell()
             supporting_document.file.seek(0)
+            max_document_bytes = max(1, int(settings.DOCUMENT_UPLOAD_MAX_MB)) * 1024 * 1024
+            if document_size > max_document_bytes:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Supporting document too large. Maximum allowed size is {settings.DOCUMENT_UPLOAD_MAX_MB} MB.",
+                )
             document_storage_path = upload_file(
                 supporting_document.file,
                 supporting_document.filename.strip(),
@@ -261,7 +284,7 @@ def submit_public_intake(
                 filename=supporting_document.filename.strip(),
                 storage_path=document_storage_path,
                 file_size=document_size,
-                file_type=supporting_document.content_type or "application/octet-stream",
+                file_type=normalized_content_type or "application/pdf",
                 case_id=case.id,
                 tenant_id=tenant.id,
                 processing_status="pending",
@@ -281,7 +304,7 @@ def submit_public_intake(
             "public_reference": consultation.public_reference,
             "consultation_request_id": consultation.id,
             "case_id": case.id,
-            "client_name": consultation.client_name or client_name,
+            "client_name": consultation.client_name or normalized_client_name,
             "status": consultation.status,
         }
     finally:

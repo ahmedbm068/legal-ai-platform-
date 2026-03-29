@@ -232,7 +232,7 @@ Context:
             return {
                 "answer": verification.payload.get("supported_answer") or fallback_answer,
                 "used_fallback": True,
-                "fallback_reason": "OPENAI_API_KEY not configured",
+                "fallback_reason": "No LLM provider API key is configured",
                 "confidence": verification.payload.get("confidence") or confidence,
                 "scope": scope,
                 "sources": formatted_sources

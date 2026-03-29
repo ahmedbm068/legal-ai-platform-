@@ -25,6 +25,7 @@ class CopilotRequest(BaseModel):
 
     message: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
+    use_external_research: bool = True
 
 
 class AgentWorkflowRequest(BaseModel):
@@ -63,7 +64,7 @@ class SearchResponse(BaseModel):
 
 class SourceItem(BaseModel):
     chunk_id: Optional[int] = None
-    document_id: int
+    document_id: Optional[int] = None
     case_id: Optional[int] = None
     filename: str
     chunk_index: Optional[int] = None

@@ -19,15 +19,32 @@ class Settings(BaseSettings):
     MINIO_ACCESS_KEY: str
     MINIO_SECRET_KEY: str
     MINIO_BUCKET: str
+    MINIO_SECURE: bool = False
 
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_BASE_URL: Optional[str] = None
     LLM_MODEL: str = "openai/gpt-4o-mini"
     SUMMARY_AGENT_MODEL: Optional[str] = None
+    LLM_TIMEOUT_SECONDS: int = 45
+    LLM_MAX_RETRIES: int = 2
+    EXTERNAL_RESEARCH_ENABLED: bool = True
+    EXTERNAL_RESEARCH_PROVIDER: str = "tavily"
+    EXTERNAL_RESEARCH_MAX_RESULTS: int = 5
+    EXTERNAL_RESEARCH_TIMEOUT_SECONDS: int = 20
+    TAVILY_API_KEY: Optional[str] = None
+    SERPAPI_API_KEY: Optional[str] = None
     TRANSCRIPTION_API_KEY: Optional[str] = None
     TRANSCRIPTION_BASE_URL: Optional[str] = None
     TRANSCRIPTION_MODEL: str = "gpt-4o-mini-transcribe"
+    SPEECHMATICS_API_KEY: Optional[str] = None
+    SPEECHMATICS_BASE_URL: str = "https://asr.api.speechmatics.com/v2"
+    SPEECHMATICS_LANGUAGE: str = "en"
+    SPEECHMATICS_ENABLE_AUTODETECT: bool = True
+    SPEECHMATICS_POLL_INTERVAL_SECONDS: int = 2
+    SPEECHMATICS_MAX_WAIT_SECONDS: int = 240
     LOCAL_TRANSCRIPTION_MODEL: str = "openai/whisper-tiny"
     TRANSCRIPTION_DEVICE: str = "auto"
     LOCAL_TRANSCRIPTION_PREFER_LOCAL_FILES: bool = True
@@ -49,8 +66,24 @@ class Settings(BaseSettings):
     SMTP_USERNAME: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
     SMTP_USE_TLS: bool = True
+    SMTP_TIMEOUT_SECONDS: int = 20
     PORTAL_LOGIN_CODE_EXPIRE_MINUTES: int = 10
     PORTAL_ALLOW_CONSOLE_CODE_FALLBACK: bool = True
+
+    # Auth hardening
+    AUTH_LOGIN_MAX_ATTEMPTS: int = 6
+    AUTH_LOGIN_WINDOW_SECONDS: int = 300
+    AUTH_LOGIN_BLOCK_SECONDS: int = 900
+    PORTAL_LOGIN_MAX_ATTEMPTS: int = 6
+    PORTAL_LOGIN_WINDOW_SECONDS: int = 300
+    PORTAL_LOGIN_BLOCK_SECONDS: int = 900
+    PORTAL_VERIFY_MAX_ATTEMPTS: int = 8
+    PORTAL_VERIFY_WINDOW_SECONDS: int = 300
+    PORTAL_VERIFY_BLOCK_SECONDS: int = 900
+
+    # Upload controls
+    DOCUMENT_UPLOAD_MAX_MB: int = 20
+    VOICE_UPLOAD_MAX_MB: int = 25
 
     model_config = SettingsConfigDict(
         env_file=".env",

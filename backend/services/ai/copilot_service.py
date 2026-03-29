@@ -14,8 +14,10 @@ from backend.services.ai.agents.booking_agent import booking_agent
 from backend.services.ai.agents.case_reasoning_agent import case_reasoning_agent
 from backend.services.ai.agents.drafting_agent import drafting_agent
 from backend.services.ai.agents.document_comparison_agent import document_comparison_agent
+from backend.services.ai.agents.prompt_optimizer_agent import prompt_optimizer_agent
 from backend.services.ai.agents.timeline_agent import timeline_agent
 from backend.services.ai.command_parsing_service import command_parsing_service
+from backend.services.ai.external_research_service import external_research_service
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
@@ -24,6 +26,7 @@ from backend.services.ai.summarization_service import summarization_service
 class CopilotService:
     def __init__(self, rag_service: RagService):
         self.rag_service = rag_service
+        self.client = llm_gateway.create_client()
         self.model = llm_gateway.default_model
 
     def handle_message(
@@ -31,12 +34,19 @@ class CopilotService:
         db: Session,
         tenant_id: int,
         message: str,
-        top_k: int = 5
+        top_k: int = 5,
+        use_external_research: bool = True,
     ) -> Dict[str, Any]:
         parsed = command_parsing_service.parse(message)
         intent = parsed["intent"]
 
         handlers = {
+            "optimize_prompt": lambda: self._optimize_prompt_intent(
+                raw_prompt=parsed["clean_query"] or parsed["raw_message"],
+                intent=parsed["intent"],
+                target_type=parsed["target_type"],
+                target_id=parsed["target_id"],
+            ),
             "summarize_case": lambda: self._summarize_case(
                 db=db,
                 tenant_id=tenant_id,
@@ -77,37 +87,53 @@ class CopilotService:
                 tenant_id=tenant_id,
                 case_id=parsed["case_id"]
             ),
-            "ask_case": lambda: self.rag_service.answer_question(
+            "ask_document": lambda: self._answer_with_optional_external_research(
+                db=db,
+                tenant_id=tenant_id,
+                question=parsed["clean_query"],
+                top_k=top_k,
+                case_id=None,
+                document_id=parsed["document_id"],
+                use_external_research=use_external_research,
+                intent="ask_document",
+                target_type="document",
+                target_id=parsed["document_id"],
+            ),
+            "ask_case": lambda: self._answer_with_optional_external_research(
                 db=db,
                 tenant_id=tenant_id,
                 question=parsed["clean_query"],
                 top_k=top_k,
                 case_id=parsed["case_id"],
-                document_id=None
+                document_id=None,
+                use_external_research=use_external_research,
+                intent="ask_case",
+                target_type="case",
+                target_id=parsed["case_id"],
             ),
-            "ask_document": lambda: self.rag_service.answer_question(
+            "ask_global": lambda: self._answer_with_optional_external_research(
                 db=db,
                 tenant_id=tenant_id,
                 question=parsed["clean_query"],
                 top_k=top_k,
                 case_id=None,
-                document_id=parsed["document_id"]
+                document_id=None,
+                use_external_research=use_external_research,
+                intent="ask_global",
+                target_type="global",
+                target_id=None,
             ),
-            "ask_global": lambda: self.rag_service.answer_question(
+            "summarize_global": lambda: self._answer_with_optional_external_research(
                 db=db,
                 tenant_id=tenant_id,
                 question=parsed["clean_query"],
                 top_k=top_k,
                 case_id=None,
-                document_id=None
-            ),
-            "summarize_global": lambda: self.rag_service.answer_question(
-                db=db,
-                tenant_id=tenant_id,
-                question=parsed["clean_query"],
-                top_k=top_k,
-                case_id=None,
-                document_id=None
+                document_id=None,
+                use_external_research=use_external_research,
+                intent="summarize_global",
+                target_type="global",
+                target_id=None,
             ),
         }
 
@@ -130,6 +156,219 @@ class CopilotService:
             "scope": "global",
             "sources": []
         }
+
+    def _optimize_prompt_intent(
+        self,
+        *,
+        raw_prompt: str,
+        intent: str | None,
+        target_type: str | None,
+        target_id: int | None,
+    ) -> Dict[str, Any]:
+        optimized = prompt_optimizer_agent.optimize_query(
+            raw_query=raw_prompt,
+            intent=intent,
+            target_type=target_type,
+            target_id=target_id,
+        )
+
+        optimized_query = (
+            optimized.payload.get("optimized_query")
+            if optimized.success
+            else raw_prompt
+        )
+        notes = optimized.payload.get("notes") if optimized.success else None
+
+        answer_lines = [optimized_query or raw_prompt]
+        if notes:
+            answer_lines.append("")
+            answer_lines.append(f"Notes: {notes}")
+
+        return {
+            "answer": "\n".join(answer_lines).strip(),
+            "used_fallback": not bool(optimized.payload.get("used_llm")) if optimized.success else True,
+            "fallback_reason": None if optimized.success else (optimized.error or "Prompt optimization failed"),
+            "confidence": "high" if optimized.success and optimized.payload.get("used_llm") else "medium" if optimized.success else "low",
+            "scope": "global",
+            "sources": [],
+        }
+
+    @staticmethod
+    def _optimize_prompt_for_query(
+        *,
+        question: str,
+        intent: str | None,
+        target_type: str | None,
+        target_id: int | None,
+    ) -> str:
+        optimized = prompt_optimizer_agent.optimize_query(
+            raw_query=question,
+            intent=intent,
+            target_type=target_type,
+            target_id=target_id,
+        )
+        candidate = optimized.payload.get("optimized_query") if optimized.success else ""
+        return str(candidate or question).strip()
+
+    def _answer_with_optional_external_research(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        question: str,
+        top_k: int,
+        case_id: Optional[int],
+        document_id: Optional[int],
+        use_external_research: bool,
+        intent: str | None,
+        target_type: str | None,
+        target_id: int | None,
+    ) -> Dict[str, Any]:
+        optimized_question = self._optimize_prompt_for_query(
+            question=question,
+            intent=intent,
+            target_type=target_type,
+            target_id=target_id,
+        )
+
+        base_result = self.rag_service.answer_question(
+            db=db,
+            tenant_id=tenant_id,
+            question=optimized_question,
+            top_k=top_k,
+            case_id=case_id,
+            document_id=document_id,
+        )
+
+        if not use_external_research:
+            return base_result
+
+        research = external_research_service.search(
+            query=optimized_question,
+            max_results=max(3, min(top_k, 8)),
+        )
+        if not research.get("used_external"):
+            return base_result
+
+        external_results = research.get("results") or []
+        if not external_results:
+            return base_result
+
+        synthesized_answer = self._synthesize_answer_with_external_research(
+            question=question,
+            internal_answer=base_result.get("answer", ""),
+            internal_sources=base_result.get("sources") or [],
+            external_results=external_results,
+        )
+
+        merged_sources = list(base_result.get("sources") or [])
+        merged_sources.extend(self._external_results_to_sources(external_results))
+
+        return {
+            "answer": synthesized_answer or base_result.get("answer", ""),
+            "used_fallback": bool(base_result.get("used_fallback")),
+            "fallback_reason": base_result.get("fallback_reason"),
+            "confidence": base_result.get("confidence", "medium"),
+            "scope": base_result.get("scope", "global"),
+            "sources": merged_sources[:20],
+        }
+
+    def _synthesize_answer_with_external_research(
+        self,
+        *,
+        question: str,
+        internal_answer: str,
+        internal_sources: List[Dict[str, Any]],
+        external_results: List[Dict[str, Any]],
+    ) -> str:
+        if not self.client:
+            return self._build_fallback_external_answer(
+                internal_answer=internal_answer,
+                external_results=external_results,
+            )
+
+        compact_internal_sources = internal_sources[:6]
+        compact_external = external_results[:6]
+
+        prompt = f"""
+You are a legal AI copilot.
+Synthesize one practical answer to the user's question using:
+1) internal case/document evidence
+2) external web research snippets
+
+Rules:
+- Prioritize internal evidence when there is conflict.
+- Do not invent facts.
+- Keep the answer concise and professional.
+- End with a short "Web references" line listing up to 3 URLs.
+
+Question:
+{question}
+
+Internal grounded answer:
+{internal_answer}
+
+Internal sources (JSON):
+{json.dumps(compact_internal_sources, ensure_ascii=False)}
+
+External research snippets (JSON):
+{json.dumps(compact_external, ensure_ascii=False)}
+"""
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                input=prompt,
+            )
+            output = llm_gateway.extract_output_text(response).strip()
+            if output:
+                return output
+        except Exception:
+            pass
+
+        return self._build_fallback_external_answer(
+            internal_answer=internal_answer,
+            external_results=external_results,
+        )
+
+    @staticmethod
+    def _external_results_to_sources(external_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        sources: List[Dict[str, Any]] = []
+        for item in external_results:
+            title = str(item.get("title") or item.get("domain") or "Web Research").strip()
+            url = str(item.get("url") or "").strip()
+            snippet = str(item.get("snippet") or "").strip()
+
+            source_text = snippet
+            if url:
+                source_text = f"{source_text} (source: {url})".strip()
+
+            sources.append(
+                {
+                    "chunk_id": None,
+                    "document_id": None,
+                    "case_id": None,
+                    "filename": title[:120] or "Web Research",
+                    "chunk_index": None,
+                    "score": 0.35,
+                    "snippet": source_text[:300],
+                }
+            )
+        return sources
+
+    @staticmethod
+    def _build_fallback_external_answer(*, internal_answer: str, external_results: List[Dict[str, Any]]) -> str:
+        lines = [internal_answer.strip() or "No internal answer was generated."]
+        lines.append("")
+        lines.append("External web findings:")
+        for item in external_results[:5]:
+            title = str(item.get("title") or item.get("domain") or "Web Result").strip()
+            snippet = str(item.get("snippet") or "").strip()
+            url = str(item.get("url") or "").strip()
+            combined = f"- {title}: {snippet}"
+            if url:
+                combined += f" ({url})"
+            lines.append(combined[:360])
+        return "\n".join(lines).strip()
 
     def _get_case_or_404(self, db: Session, tenant_id: int, case_id: Optional[int]) -> Case:
         if case_id is None:
