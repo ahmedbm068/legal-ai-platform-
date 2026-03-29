@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
 from backend.services.ai.embedding_service import EmbeddingService
+from backend.services.ai.reranker_service import reranker_service
 from backend.services.ai.vector_store import VectorStore
 from backend.services.lexical_search_service import search_chunks_lexically
 
@@ -117,8 +118,17 @@ class RetrievalAgent(BaseAgent):
             else:
                 item["retrieval_method"] = "semantic"
 
-        ranked_results = sorted(merged.values(), key=lambda x: x["score"], reverse=True)[:top_k]
-        trace.append(f"Hybrid ranking returned {len(ranked_results)} final chunks.")
+        preliminary_results = sorted(merged.values(), key=lambda x: x["score"], reverse=True)
+        rerank_pool = preliminary_results[: max(top_k * 4, 12)]
+        trace.append(f"Hybrid ranking produced {len(preliminary_results)} merged chunks before reranking.")
+
+        ranked_results, rerank_trace = reranker_service.rerank(
+            normalized_question,
+            rerank_pool,
+            top_k,
+        )
+        trace.extend(rerank_trace)
+        trace.append(f"Final retrieval returned {len(ranked_results)} chunks.")
 
         return self.result(
             success=True,

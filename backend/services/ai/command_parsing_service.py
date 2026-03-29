@@ -55,6 +55,16 @@ class CommandParsingService:
                 return "ask_document", "medium"
             return "ask_global", "medium"
 
+        if self._contains_any(lowered, ["timeline", "chronology", "chronological", "sequence of events", "case events"]):
+            if target_type == "case":
+                return "build_timeline_case", "high"
+            return "ask_global", "medium"
+
+        if self._contains_any(lowered, ["booking", "book", "consultation", "appointment", "session request", "schedule session"]):
+            if target_type == "case":
+                return "review_booking_case", "high"
+            return "ask_global", "medium"
+
         if self._contains_any(lowered, ["risk", "risks", "missing evidence", "unresolved", "weakness", "exposure", "issue", "issues"]):
             if target_type == "case":
                 return "analyze_risks_case", "high"

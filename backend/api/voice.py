@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -15,6 +16,62 @@ from backend.services.storage_service import download_file_to_temp, upload_file
 
 
 router = APIRouter(prefix="/voice", tags=["Voice"])
+
+ALLOWED_AUDIO_CONTENT_TYPES = {
+    "audio/webm",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp4",
+    "audio/mp3",
+    "audio/ogg",
+    "audio/x-m4a",
+    "audio/m4a",
+}
+
+ALLOWED_AUDIO_EXTENSIONS = {
+    ".webm",
+    ".wav",
+    ".mp3",
+    ".mp4",
+    ".ogg",
+    ".m4a",
+}
+
+
+def is_supported_audio_upload(filename: str, content_type: str | None) -> bool:
+    normalized_type = (content_type or "").split(";")[0].strip().lower()
+    extension = Path(filename).suffix.lower()
+    return normalized_type in ALLOWED_AUDIO_CONTENT_TYPES or extension in ALLOWED_AUDIO_EXTENSIONS
+
+
+def looks_like_html_error_page(value: str | None) -> bool:
+    if not value:
+        return False
+
+    normalized = value.lstrip().lower()
+    return normalized.startswith("<!doctype html") or normalized.startswith("<html")
+
+
+def sanitize_recording(recording: VoiceRecording) -> bool:
+    transcript_text = recording.transcript_text
+    transcription_error = recording.transcription_error
+    changed = False
+
+    if looks_like_html_error_page(transcript_text):
+        recording.transcript_text = None
+        recording.transcription_status = "failed"
+        recording.transcription_error = (
+            "Transcription failed because the provider returned an HTML error page instead of text."
+        )
+        changed = True
+    elif looks_like_html_error_page(transcription_error):
+        recording.transcription_error = (
+            "Transcription failed because the provider returned an HTML error page instead of text."
+        )
+        changed = True
+
+    return changed
 
 
 def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Case:
@@ -58,7 +115,7 @@ def list_case_recordings(
 ):
     get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
-    return (
+    recordings = (
         db.query(VoiceRecording)
         .filter(
             VoiceRecording.case_id == case_id,
@@ -68,6 +125,17 @@ def list_case_recordings(
         .all()
     )
 
+    changed = False
+    for recording in recordings:
+        changed = sanitize_recording(recording) or changed
+
+    if changed:
+        db.commit()
+        for recording in recordings:
+            db.refresh(recording)
+
+    return recordings
+
 
 @router.get("/{recording_id}", response_model=VoiceRecordingOut)
 def get_recording(
@@ -75,7 +143,13 @@ def get_recording(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return get_tenant_recording_or_404(db=db, recording_id=recording_id, current_user=current_user)
+    recording = get_tenant_recording_or_404(db=db, recording_id=recording_id, current_user=current_user)
+
+    if sanitize_recording(recording):
+        db.commit()
+        db.refresh(recording)
+
+    return recording
 
 
 @router.post("/upload", response_model=VoiceUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -90,23 +164,24 @@ def upload_voice_recording(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
 
-    allowed_content_types = {
-        "audio/webm",
-        "audio/wav",
-        "audio/x-wav",
-        "audio/mpeg",
-        "audio/mp4",
-        "audio/mp3",
-        "audio/ogg",
-    }
-
-    if file.content_type not in allowed_content_types:
+    if not is_supported_audio_upload(file.filename, file.content_type):
         raise HTTPException(
             status_code=400,
             detail="Unsupported audio format. Use webm, wav, mp3, mp4, or ogg."
         )
 
     filename = file.filename.strip()
+    normalized_content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if not normalized_content_type:
+        extension = Path(filename).suffix.lower()
+        normalized_content_type = {
+            ".webm": "audio/webm",
+            ".wav": "audio/wav",
+            ".mp3": "audio/mpeg",
+            ".mp4": "audio/mp4",
+            ".ogg": "audio/ogg",
+            ".m4a": "audio/x-m4a",
+        }.get(extension, "application/octet-stream")
 
     file.file.seek(0, 2)
     file_size = file.file.tell()
@@ -121,7 +196,7 @@ def upload_voice_recording(
     recording = VoiceRecording(
         filename=filename,
         storage_path=storage_path,
-        mime_type=file.content_type,
+        mime_type=normalized_content_type,
         file_size=file_size,
         transcription_status="processing",
         case_id=case_id,
@@ -158,6 +233,8 @@ def upload_voice_recording(
         recording.transcript_source = transcription["source"]
         recording.transcript_language = transcription["language"]
         message = "Voice recording uploaded, but transcription failed."
+
+    sanitize_recording(recording)
 
     db.commit()
     db.refresh(recording)

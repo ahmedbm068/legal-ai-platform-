@@ -10,8 +10,11 @@ from backend.models.case import Case
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
+from backend.services.ai.agents.booking_agent import booking_agent
 from backend.services.ai.agents.case_reasoning_agent import case_reasoning_agent
 from backend.services.ai.agents.drafting_agent import drafting_agent
+from backend.services.ai.agents.document_comparison_agent import document_comparison_agent
+from backend.services.ai.agents.timeline_agent import timeline_agent
 from backend.services.ai.command_parsing_service import command_parsing_service
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.rag_service import RagService
@@ -49,7 +52,17 @@ class CopilotService:
                 tenant_id=tenant_id,
                 case_id=parsed["case_id"]
             ),
+            "build_timeline_case": lambda: self._build_case_timeline(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed["case_id"]
+            ),
             "analyze_risks_case": lambda: self._analyze_case_risks(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed["case_id"]
+            ),
+            "review_booking_case": lambda: self._review_case_booking(
                 db=db,
                 tenant_id=tenant_id,
                 case_id=parsed["case_id"]
@@ -545,6 +558,51 @@ class CopilotService:
         rag_result["scope"] = "case"
         return rag_result
 
+    def _build_case_timeline(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int]
+    ) -> Dict[str, Any]:
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+        consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        timeline_result = timeline_agent.build_case_timeline(
+            case_id=case.id,
+            case_title=case.title,
+            documents=documents,
+            consultations=consultations,
+        )
+
+        if timeline_result.success:
+            sources: List[Dict[str, Any]] = []
+            for document in documents:
+                insights = self._safe_load_insights(document)
+                for item in insights.get("important_dates", []):
+                    label = self._normalize_text(item.get("label"))
+                    value = self._normalize_text(item.get("value"))
+                    if label and value:
+                        sources.append(self._build_source(document=document, snippet=f"{label}: {value}"))
+
+            return {
+                "answer": timeline_result.payload.get("timeline_text") or "No timeline could be generated.",
+                "used_fallback": not bool(timeline_result.payload.get("used_llm")),
+                "fallback_reason": None if timeline_result.payload.get("used_llm") else "Used timeline agent heuristic synthesis",
+                "confidence": "high" if timeline_result.payload.get("events") else "medium",
+                "scope": "case",
+                "sources": sources[:10],
+            }
+
+        return {
+            "answer": "I could not build a timeline for this case yet.",
+            "used_fallback": True,
+            "fallback_reason": timeline_result.error or "Timeline agent failed",
+            "confidence": "low",
+            "scope": "case",
+            "sources": [],
+        }
+
     def _analyze_case_risks(
         self,
         db: Session,
@@ -613,6 +671,49 @@ class CopilotService:
             "sources": case_summary["sources"]
         }
 
+    def _review_case_booking(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int]
+    ) -> Dict[str, Any]:
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        booking_result = booking_agent.analyze_consultations(
+            case_id=case.id,
+            case_title=case.title,
+            consultations=consultations,
+        )
+
+        if booking_result.success:
+            payload = booking_result.payload
+            answer_lines = [
+                payload.get("narrative_summary") or f"Booking overview for case {case.id}.",
+                "",
+                f"Booking intent: {payload.get('booking_intent') or 'not_detected'}",
+                f"Urgency: {payload.get('urgency_level') or 'normal'}",
+                f"Preferred schedule: {payload.get('preferred_schedule') or 'Not provided'}",
+                f"Recommended action: {payload.get('recommended_action') or 'Follow up with the client to confirm scheduling.'}",
+            ]
+            return {
+                "answer": "\n".join(answer_lines).strip(),
+                "used_fallback": not bool(payload.get("used_llm")),
+                "fallback_reason": None if payload.get("used_llm") else "Used booking agent heuristic synthesis",
+                "confidence": "high" if payload.get("booking_intent") == "requested" else "medium",
+                "scope": "case",
+                "sources": [],
+            }
+
+        return {
+            "answer": "No consultation booking details are available for this case yet.",
+            "used_fallback": True,
+            "fallback_reason": booking_result.error or "Booking agent failed",
+            "confidence": "low",
+            "scope": "case",
+            "sources": [],
+        }
+
     def _compare_case_documents(
         self,
         db: Session,
@@ -632,42 +733,28 @@ class CopilotService:
                 "sources": []
             }
 
-        lines = [f"Comparison overview for case {case.id}:"]
         sources: List[Dict[str, Any]] = []
 
         for document in documents[:10]:
             document = self._ensure_document_summary(db=db, document=document)
-            insights = self._safe_load_insights(document)
-
             summary = self._normalize_text(
                 document.summary_short
                 or document.summary
                 or (document.redacted_text or document.extracted_text or "")[:250]
             )
-            document_type = self._normalize_text(
-                insights.get("document_type") or document.document_type or "unknown"
-            )
-            date_count = len(insights.get("important_dates", []))
-            risk_count = len(insights.get("legal_risks", []))
-
-            lines.append(
-                f"- {document.filename}: type={document_type}, "
-                f"dates_detected={date_count}, risks_detected={risk_count}, summary={summary}"
-            )
-
             if summary:
                 sources.append(self._build_source(document=document, snippet=summary))
 
-        lines.append("")
-        lines.append(
-            "Manual follow-up: review differences in detected dates, risks, parties, and obligations across these documents."
+        comparison_result = document_comparison_agent.compare_case_documents(
+            case_id=case.id,
+            documents=documents,
         )
 
         return {
-            "answer": "\n".join(lines),
-            "used_fallback": False,
-            "fallback_reason": None,
-            "confidence": "medium",
+            "answer": comparison_result.payload.get("comparison_text") or f"Comparison overview for case {case.id} is not available.",
+            "used_fallback": not bool(comparison_result.payload.get("used_llm")),
+            "fallback_reason": None if comparison_result.payload.get("used_llm") else "Used document comparison agent heuristic synthesis",
+            "confidence": "high" if comparison_result.success else "low",
             "scope": "case",
             "sources": sources[:10]
         }

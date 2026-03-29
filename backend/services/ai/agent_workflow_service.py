@@ -9,9 +9,11 @@ from backend.models.case import Case
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
+from backend.services.ai.agents.booking_agent import booking_agent
 from backend.services.ai.agents.case_reasoning_agent import case_reasoning_agent
 from backend.services.ai.agents.drafting_agent import drafting_agent
 from backend.services.ai.agents.intake_agent import intake_agent
+from backend.services.ai.agents.timeline_agent import timeline_agent
 from backend.services.ai.agents.verifier_agent import verifier_agent
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
@@ -84,6 +86,23 @@ class AgentWorkflowService:
         )
         stages["case_reasoning"] = self._serialize_stage(case_reasoning_stage)
         stage_outputs["case_reasoning"] = case_reasoning_stage.payload
+
+        timeline_stage = timeline_agent.build_case_timeline(
+            case_id=case.id,
+            case_title=case.title,
+            documents=documents,
+            consultations=consultation_requests,
+        )
+        stages["timeline"] = self._serialize_stage(timeline_stage)
+        stage_outputs["timeline"] = timeline_stage.payload
+
+        booking_stage = booking_agent.analyze_consultations(
+            case_id=case.id,
+            case_title=case.title,
+            consultations=consultation_requests,
+        )
+        stages["booking"] = self._serialize_stage(booking_stage)
+        stage_outputs["booking"] = booking_stage.payload
 
         summary_text = self._format_reasoning_summary(case_reasoning_stage.payload)
         formatted_sources = self._format_sources(retrieval_stage.payload.get("results") or [])

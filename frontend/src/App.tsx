@@ -50,6 +50,136 @@ function formatBytes(size: number) {
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[index]}`;
 }
 
+function looksLikeHtml(value?: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized.startsWith("<!doctype html") || normalized.startsWith("<html");
+}
+
+function getRecordingTranscriptDisplay(recording: VoiceRecording) {
+  if (recording.transcription_status === "failed") {
+    return (
+      recording.transcription_error ||
+      (looksLikeHtml(recording.transcript_text)
+        ? "Transcription failed because the provider returned an HTML error page instead of text."
+        : "Transcription failed.")
+    );
+  }
+
+  if (recording.transcript_text && !looksLikeHtml(recording.transcript_text)) {
+    return recording.transcript_text;
+  }
+
+  if (recording.transcription_error) {
+    return recording.transcription_error;
+  }
+
+  return "Transcript not available yet.";
+}
+
+function getPreferredRecordingMimeType() {
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg",
+    "audio/mp4",
+  ];
+
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+
+  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+}
+
+function getAudioExtension(mimeType: string) {
+  const normalized = mimeType.split(";")[0].trim().toLowerCase();
+
+  if (normalized.includes("wav")) {
+    return "wav";
+  }
+  if (normalized.includes("ogg")) {
+    return "ogg";
+  }
+  if (normalized.includes("mp4") || normalized.includes("m4a")) {
+    return "mp4";
+  }
+  if (normalized.includes("mpeg") || normalized.includes("mp3")) {
+    return "mp3";
+  }
+
+  return "webm";
+}
+
+function encodeWavFromAudioBuffer(audioBuffer: AudioBuffer) {
+  const channelCount = Math.min(audioBuffer.numberOfChannels, 2);
+  const length = audioBuffer.length;
+  const interleaved = new Float32Array(length * channelCount);
+
+  for (let sampleIndex = 0; sampleIndex < length; sampleIndex += 1) {
+    for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
+      interleaved[sampleIndex * channelCount + channelIndex] =
+        audioBuffer.getChannelData(channelIndex)[sampleIndex];
+    }
+  }
+
+  const bytesPerSample = 2;
+  const blockAlign = channelCount * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + interleaved.length * bytesPerSample);
+  const view = new DataView(buffer);
+
+  function writeString(offset: number, value: string) {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  }
+
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + interleaved.length * bytesPerSample, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channelCount, true);
+  view.setUint32(24, audioBuffer.sampleRate, true);
+  view.setUint32(28, audioBuffer.sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeString(36, "data");
+  view.setUint32(40, interleaved.length * bytesPerSample, true);
+
+  let offset = 44;
+  for (let index = 0; index < interleaved.length; index += 1) {
+    const sample = Math.max(-1, Math.min(1, interleaved[index]));
+    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+    offset += 2;
+  }
+
+  return new Blob([buffer], { type: "audio/wav" });
+}
+
+async function normalizeAudioFileToWav(file: File) {
+  const context = new AudioContext();
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const audioBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+    const wavBlob = encodeWavFromAudioBuffer(audioBuffer);
+    const normalizedName = file.name.replace(/\.[^.]+$/, "") || `voice-note-${Date.now()}`;
+
+    return new File([wavBlob], `${normalizedName}.wav`, {
+      type: "audio/wav",
+      lastModified: Date.now(),
+    });
+  } finally {
+    await context.close();
+  }
+}
+
 function buildWelcomeMessage(caseTitle?: string): ChatMessage {
   return {
     id: crypto.randomUUID(),
@@ -138,6 +268,11 @@ export default function App() {
       null
     );
   }, [consultationRequests, selectedRecordingId]);
+
+  const selectedDocument = useMemo(
+    () => documents.find((item) => item.id === selectedDocumentId) ?? null,
+    [documents, selectedDocumentId]
+  );
 
   useEffect(() => {
     if (!token) {
@@ -290,8 +425,7 @@ export default function App() {
     }
   }
 
-  async function handleChatSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitCopilotPrompt() {
     if (!token || !chatInput.trim()) {
       return;
     }
@@ -339,6 +473,11 @@ export default function App() {
     } finally {
       setCopilotLoading(false);
     }
+  }
+
+  async function handleChatSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitCopilotPrompt();
   }
 
   async function runAgentWorkflow() {
@@ -419,7 +558,8 @@ export default function App() {
     setError(null);
 
     try {
-      const uploadResult = await api.uploadVoiceRecording(token, selectedCaseId, file);
+      const normalizedFile = await normalizeAudioFileToWav(file);
+      const uploadResult = await api.uploadVoiceRecording(token, selectedCaseId, normalizedFile);
       const nextRecordings = [uploadResult.recording, ...voiceRecordings];
       setVoiceRecordings(nextRecordings);
       setSelectedRecordingId(uploadResult.recording.id);
@@ -470,7 +610,8 @@ export default function App() {
     try {
       setError(null);
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const mimeType = getPreferredRecordingMimeType();
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       mediaRecorderRef.current = recorder;
       mediaChunksRef.current = [];
 
@@ -481,10 +622,11 @@ export default function App() {
       };
 
       recorder.onstop = async () => {
-        const blob = new Blob(mediaChunksRef.current, { type: recorder.mimeType || "audio/webm" });
-        const extension = blob.type.includes("wav") ? "wav" : blob.type.includes("ogg") ? "ogg" : "webm";
+        const resolvedMimeType = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(mediaChunksRef.current, { type: resolvedMimeType });
+        const extension = getAudioExtension(blob.type || resolvedMimeType);
         const file = new File([blob], `voice-note-${Date.now()}.${extension}`, {
-          type: blob.type || "audio/webm",
+          type: blob.type || resolvedMimeType,
         });
 
         stream.getTracks().forEach((track) => track.stop());
@@ -625,8 +767,8 @@ export default function App() {
         <div className="brand-block">
           <div className="brand-mark">LA</div>
           <div>
-            <div className="eyebrow">Legal AI Workspace</div>
-            <h2>Case-centric copilot</h2>
+            <div className="eyebrow">Arbi Mostaissier</div>
+            <h2>Case intelligence desk</h2>
           </div>
         </div>
 
@@ -635,7 +777,7 @@ export default function App() {
             <div>
               <h3>{user.name}</h3>
               <span>
-                {user.role} | tenant #{user.tenant_id}
+                {user.role} | internal legal workspace
               </span>
             </div>
             <button className="ghost-button" onClick={logout} type="button">
@@ -755,9 +897,12 @@ export default function App() {
       <main className="workspace">
         <section className="workspace-header">
           <div>
-            <div className="eyebrow">Case workspace</div>
+            <div className="eyebrow">Choose a matter and work from one command surface</div>
             <h1>{selectedCase?.title || "Select a case"}</h1>
-            <p>{selectedCase?.description || "Use the left panel to open a case and start grounded legal work."}</p>
+            <p>
+              {selectedCase?.description ||
+                "Open a matter, then ask for summaries, risks, comparisons, timelines, or a client-ready draft."}
+            </p>
           </div>
           <div className="workspace-meta">
             <div className="meta-card">
@@ -776,6 +921,10 @@ export default function App() {
               <span>Voice notes</span>
               <strong>{voiceRecordings.length}</strong>
             </div>
+            <div className="meta-card">
+              <span>Focus file</span>
+              <strong>{selectedDocument?.filename || "No document selected"}</strong>
+            </div>
           </div>
         </section>
 
@@ -784,11 +933,38 @@ export default function App() {
         <section className="workspace-grid">
           <div className="column column-main">
             <div className="panel hero-panel">
+              <div className="command-topline">
+                <button className="context-link" type="button">
+                  Choose case
+                </button>
+                <button className="context-link" type="button">
+                  Set client matter
+                </button>
+              </div>
+
               <div className="panel-header">
                 <div>
-                  <h3>Case command center</h3>
-                  <span>Summaries, grounded chat, evidence review, and orchestration</span>
+                  <h3>Ask your legal workspace anything</h3>
+                  <span>Grounded answers, agent workflows, and evidence-ready drafting in one place</span>
                 </div>
+              </div>
+
+              <div className="hero-actions context-chip-row">
+                <button className="context-pill active" type="button">
+                  {selectedCase ? selectedCase.title : "No case selected"}
+                </button>
+                <button className="context-pill" type="button">
+                  {selectedClient ? selectedClient.name : "Client matter pending"}
+                </button>
+                <button className="context-pill" type="button">
+                  {documents.length} documents
+                </button>
+                <button className="context-pill" type="button">
+                  {voiceRecordings.length} voice notes
+                </button>
+                <button className="context-pill" type="button">
+                  {activeSources.length} cited sources
+                </button>
               </div>
 
               <div className="hero-actions">
@@ -828,18 +1004,36 @@ export default function App() {
 
               <div className="workflow-launcher">
                 <textarea
-                  placeholder="Workflow objective: prepare a grounded case brief, verify evidence, and draft a client update..."
-                  value={workflowObjective}
-                  onChange={(event) => setWorkflowObjective(event.target.value)}
+                  placeholder="Ask for a legal summary, compare filings, analyze risk, build a timeline, or draft a client update..."
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
                 />
-                <button
-                  className="primary-button"
-                  disabled={!selectedCaseId || workflowLoading}
-                  onClick={() => void runAgentWorkflow()}
-                  type="button"
-                >
-                  {workflowLoading ? "Running workflow..." : "Run agent workflow"}
-                </button>
+                <div className="command-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={!selectedCaseId || workflowLoading}
+                    onClick={() => void runAgentWorkflow()}
+                    type="button"
+                  >
+                    {workflowLoading ? "Running workflow..." : "Deep workflow"}
+                  </button>
+                  <button
+                    className="primary-button"
+                    disabled={copilotLoading || !selectedCaseId}
+                    onClick={() => void submitCopilotPrompt()}
+                    type="button"
+                  >
+                    Ask copilot
+                  </button>
+                </div>
+              </div>
+
+              <div className="source-chip-row">
+                <button className="source-chip" type="button">Voice intake</button>
+                <button className="source-chip" type="button">Case reasoning</button>
+                <button className="source-chip" type="button">Document intelligence</button>
+                <button className="source-chip" type="button">Verified citations</button>
+                <button className="source-chip" type="button">Draft-ready output</button>
               </div>
             </div>
 
@@ -991,11 +1185,7 @@ export default function App() {
               {selectedRecording ? (
                 <div className="analysis-block">
                   <h4>Transcript</h4>
-                  <p>
-                    {selectedRecording.transcript_text ||
-                      selectedRecording.transcription_error ||
-                      "Transcript not available yet."}
-                  </p>
+                  <p>{getRecordingTranscriptDisplay(selectedRecording)}</p>
                   <div className="voice-actions inline-actions">
                     <button
                       className="secondary-button"

@@ -25,11 +25,17 @@ class Settings(BaseSettings):
     LLM_BASE_URL: Optional[str] = None
     LLM_MODEL: str = "openai/gpt-4o-mini"
     SUMMARY_AGENT_MODEL: Optional[str] = None
+    TRANSCRIPTION_API_KEY: Optional[str] = None
+    TRANSCRIPTION_BASE_URL: Optional[str] = None
+    TRANSCRIPTION_MODEL: str = "gpt-4o-mini-transcribe"
+    LOCAL_TRANSCRIPTION_MODEL: str = "openai/whisper-small"
     OPENROUTER_SITE_URL: Optional[str] = None
     OPENROUTER_APP_NAME: str = "legal-ai-platform"
+    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_ENABLED: bool = True
 
     # Frontend
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
 
     # Client portal email
     CLIENT_PORTAL_FIRM_NAME: str = "Arbi Mostaissier"
