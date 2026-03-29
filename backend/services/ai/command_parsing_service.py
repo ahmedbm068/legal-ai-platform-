@@ -7,6 +7,8 @@ from typing import Any, Dict, Optional
 class CommandParsingService:
     CASE_PATTERN = re.compile(r"\bcase\s*#?\s*(\d+)\b", re.IGNORECASE)
     DOCUMENT_PATTERN = re.compile(r"\bdocument\s*#?\s*(\d+)\b", re.IGNORECASE)
+    RISK_COUNT_PATTERN = re.compile(r"\b(?:top\s+)?(\d{1,2})\s+risks?\b", re.IGNORECASE)
+    DEADLINE_COUNT_PATTERN = re.compile(r"\b(?:top\s+)?(\d{1,2})\s+deadlines?\b", re.IGNORECASE)
 
     def parse(self, message: str) -> Dict[str, Any]:
         original_message = (message or "").strip()
@@ -30,6 +32,10 @@ class CommandParsingService:
 
         intent, confidence = self._detect_intent(lowered=lowered, target_type=target_type)
         clean_query = self._clean_query(original_message)
+        requested_count = self._extract_requested_count(
+            lowered=lowered,
+            intent=intent,
+        )
 
         return {
             "raw_message": original_message,
@@ -39,6 +45,7 @@ class CommandParsingService:
             "case_id": case_id,
             "document_id": document_id,
             "clean_query": clean_query,
+            "requested_count": requested_count,
             "confidence": confidence
         }
 
@@ -100,6 +107,13 @@ class CommandParsingService:
         cleaned = self.DOCUMENT_PATTERN.sub("", cleaned)
 
         cleaned = re.sub(
+            r"^\s*(?:optimi[sz]e\s+prompt|improve\s+prompt|rewrite\s+prompt|better\s+prompt)\s*[:\-]\s*",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+        cleaned = re.sub(
             r"\b(?:please|can you|could you|would you|for me|about|regarding)\b",
             "",
             cleaned,
@@ -107,11 +121,47 @@ class CommandParsingService:
         )
 
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" .,:;!?-")
+        cleaned = re.sub(
+            r"\b(?:for|to|in|on|at|with|of|from|about|regarding)\s*$",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip(" .,:;!?-")
         return cleaned or message.strip()
 
     @staticmethod
     def _contains_any(text: str, keywords: list[str]) -> bool:
         return any(keyword in text for keyword in keywords)
+
+    def _extract_requested_count(
+        self,
+        *,
+        lowered: str,
+        intent: str,
+    ) -> Optional[int]:
+        if intent not in {"analyze_risks_case", "list_deadlines_case"}:
+            return None
+
+        if intent == "analyze_risks_case" and "risk" not in lowered:
+            return None
+        if intent == "list_deadlines_case" and not self._contains_any(lowered, ["deadline", "due date", "notice"]):
+            return None
+
+        if intent == "analyze_risks_case":
+            match = self.RISK_COUNT_PATTERN.search(lowered)
+        elif intent == "list_deadlines_case":
+            match = self.DEADLINE_COUNT_PATTERN.search(lowered)
+        else:
+            match = None
+
+        if not match:
+            return None
+
+        count = int(match.group(1))
+        if count <= 0:
+            return None
+
+        return min(count, 12)
 
 
 command_parsing_service = CommandParsingService()

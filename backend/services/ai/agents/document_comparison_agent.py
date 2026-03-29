@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from backend.models.document import Document
@@ -55,6 +56,10 @@ class DocumentComparisonAgent(BaseAgent):
         all_types: set[str] = set()
         all_dates: set[str] = set()
         all_risks: set[str] = set()
+        metric_mentions: dict[str, list[tuple[str, str]]] = {
+            "on_time_delivery": [],
+            "invoice_total": [],
+        }
 
         for document in documents[:10]:
             insights = self._safe_load_json(document.insights_json)
@@ -72,6 +77,16 @@ class DocumentComparisonAgent(BaseAgent):
                 for item in insights.get("legal_risks", [])
                 if self._normalize_text(item)
             ]
+            text_for_metrics = " ".join(
+                [
+                    self._normalize_text(document.summary),
+                    self._normalize_text(document.summary_short),
+                    self._normalize_text(document.redacted_text),
+                    self._normalize_text(document.extracted_text),
+                ]
+            )
+            for metric, value in self._extract_metric_mentions(text_for_metrics):
+                metric_mentions.setdefault(metric, []).append((document.filename, value))
 
             all_types.add(document_type)
             all_dates.update(important_dates)
@@ -105,6 +120,12 @@ class DocumentComparisonAgent(BaseAgent):
             comparison_lines.append("")
             comparison_lines.append("Risk markers found across documents:")
             comparison_lines.extend(f"- {item}" for item in sorted(all_risks)[:12])
+
+        detected_conflicts = self._detect_metric_conflicts(metric_mentions)
+        if detected_conflicts:
+            comparison_lines.append("")
+            comparison_lines.append("Potential cross-document inconsistencies:")
+            comparison_lines.extend(f"- {item}" for item in detected_conflicts[:8])
 
         comparison_lines.append("")
         comparison_lines.append("Manual follow-up: review contradictions, date mismatches, and coverage gaps across these documents.")
@@ -179,6 +200,33 @@ Document comparison context:
     @staticmethod
     def _normalize_text(value: Any) -> str:
         return str(value or "").strip()
+
+    @staticmethod
+    def _extract_metric_mentions(text: str) -> list[tuple[str, str]]:
+        normalized = text.lower()
+        mentions: list[tuple[str, str]] = []
+
+        for match in re.finditer(r"on[-\s]?time delivery[^0-9]{0,20}(\d{1,2}(?:\.\d+)?)\s*%", normalized):
+            mentions.append(("on_time_delivery", f"{match.group(1)}%"))
+
+        for match in re.finditer(r"(?:invoice|amount)[^0-9]{0,20}(\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?)\s*tnd", normalized):
+            cleaned = match.group(1).replace(" ", "").replace(",", "")
+            mentions.append(("invoice_total", f"{cleaned} TND"))
+
+        return mentions
+
+    @staticmethod
+    def _detect_metric_conflicts(metric_mentions: dict[str, list[tuple[str, str]]]) -> list[str]:
+        conflicts: list[str] = []
+        for metric, mentions in metric_mentions.items():
+            unique_values = sorted({value for _, value in mentions})
+            if len(unique_values) <= 1:
+                continue
+
+            metric_label = "On-time delivery" if metric == "on_time_delivery" else "Invoice amount"
+            preview = ", ".join(unique_values[:4])
+            conflicts.append(f"{metric_label} appears with multiple values across documents: {preview}.")
+        return conflicts
 
 
 document_comparison_agent = DocumentComparisonAgent()

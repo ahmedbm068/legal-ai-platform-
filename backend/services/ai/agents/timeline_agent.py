@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from datetime import datetime
 from typing import Any
 
 from backend.models.consultation_request import ConsultationRequest
@@ -98,6 +100,8 @@ class TimelineAgent(BaseAgent):
                 if event not in events:
                     events.append(event)
 
+        events = sorted(events, key=self._event_sort_key)
+
         timeline_text = [f"Case timeline for case {case_id} - {case_title}:"]
         if events:
             for event in events[:20]:
@@ -176,6 +180,39 @@ Timeline context:
     @staticmethod
     def _normalize_text(value: Any) -> str:
         return str(value or "").strip()
+
+    @staticmethod
+    def _event_sort_key(event: dict[str, str]) -> tuple[int, datetime]:
+        value = (event.get("date") or "").strip()
+        parsed = TimelineAgent._try_parse_date(value)
+        if parsed is None:
+            return (1, datetime.max)
+        return (0, parsed)
+
+    @staticmethod
+    def _try_parse_date(value: str) -> datetime | None:
+        normalized = value.strip()
+        if not normalized:
+            return None
+
+        patterns = [
+            "%Y-%m-%d",
+            "%B %d, %Y",
+            "%b %d, %Y",
+        ]
+        for fmt in patterns:
+            try:
+                return datetime.strptime(normalized, fmt)
+            except ValueError:
+                continue
+
+        inline = re.search(r"\d{4}-\d{2}-\d{2}", normalized)
+        if inline:
+            try:
+                return datetime.strptime(inline.group(0), "%Y-%m-%d")
+            except ValueError:
+                return None
+        return None
 
 
 timeline_agent = TimelineAgent()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
@@ -9,6 +10,13 @@ from backend.services.ai.llm_gateway import llm_gateway
 
 class PromptOptimizerAgent(BaseAgent):
     agent_name = "prompt_optimizer_agent"
+    SPELLING_FIXES = {
+        "eksternal": "external",
+        "externel": "external",
+        "trasncript": "transcript",
+        "comparision": "comparison",
+        "sumarize": "summarize",
+    }
 
     def __init__(self) -> None:
         self.client = llm_gateway.create_client()
@@ -79,26 +87,30 @@ class PromptOptimizerAgent(BaseAgent):
         target_id: int | None,
     ) -> dict[str, Any]:
         normalized = self._normalize_text(raw_query)
+        for wrong, fixed in self.SPELLING_FIXES.items():
+            normalized = re.sub(rf"\b{re.escape(wrong)}\b", fixed, normalized, flags=re.IGNORECASE)
         normalized = normalized.replace("\n", " ").strip()
         normalized = " ".join(normalized.split())
-
-        context_bits: list[str] = []
-        if intent:
-            context_bits.append(f"intent={intent}")
-        if target_type:
-            if target_id is not None:
-                context_bits.append(f"target={target_type}#{target_id}")
-            else:
-                context_bits.append(f"target={target_type}")
+        normalized = normalized.rstrip(" .,:;!?-")
 
         optimized_query = normalized
-        if context_bits:
-            optimized_query = f"[{', '.join(context_bits)}] {normalized}"
+        if target_type == "case" and target_id is not None:
+            optimized_query = f"For case #{target_id}, {normalized}"
+        elif target_type == "document" and target_id is not None:
+            optimized_query = f"For document #{target_id}, {normalized}"
+
+        if intent == "optimize_prompt":
+            optimized_query = (
+                f"{optimized_query}. "
+                "Use concise legal language, cite evidence where available, and provide practical next steps."
+            )
+        elif intent and intent.startswith("ask_"):
+            optimized_query = f"{optimized_query}. Include a short evidence-grounded conclusion."
 
         return {
             "optimized_query": optimized_query,
             "strategy": "heuristic",
-            "notes": "Added explicit intent/target context and normalized whitespace.",
+            "notes": "Normalized wording, corrected common typos, and added explicit legal task framing.",
         }
 
     def _generate_llm_optimization(

@@ -63,6 +63,22 @@ class CaseReasoningAgent(BaseAgent):
             heuristic_payload["used_llm"] = False
             trace.append("No LLM client configured; kept heuristic case reasoning payload.")
 
+        has_governing_law_signal = bool(heuristic_payload.get("_has_governing_law_signal"))
+        has_payment_terms_signal = bool(heuristic_payload.get("_has_payment_terms_signal"))
+        heuristic_payload["legal_risks"] = self._reconcile_risks_with_contract_signals(
+            risks=self._normalize_string_list(heuristic_payload.get("legal_risks")),
+            has_governing_law_signal=has_governing_law_signal,
+            has_payment_terms_signal=has_payment_terms_signal,
+        )
+        heuristic_payload["main_issues"] = self._clean_main_issues(
+            issues=self._normalize_string_list(heuristic_payload.get("main_issues")),
+            has_governing_law_signal=has_governing_law_signal,
+            has_payment_terms_signal=has_payment_terms_signal,
+        )
+
+        heuristic_payload.pop("_has_governing_law_signal", None)
+        heuristic_payload.pop("_has_payment_terms_signal", None)
+
         heuristic_payload["case_id"] = case.id
         heuristic_payload["case_title"] = case.title
         heuristic_payload["document_count"] = len(documents)
@@ -90,6 +106,8 @@ class CaseReasoningAgent(BaseAgent):
         document_types: list[str] = []
         sources: list[dict[str, Any]] = []
         main_issues: list[str] = []
+        has_governing_law_signal = False
+        has_payment_terms_signal = False
 
         for document in documents:
             insights = self._safe_load_json(document.insights_json)
@@ -134,7 +152,7 @@ class CaseReasoningAgent(BaseAgent):
                 if cleaned and cleaned not in risks:
                     risks.append(cleaned)
 
-            for action in insights.get("recommended_actions", []):
+            for action in (insights.get("recommended_next_actions", []) or insights.get("recommended_actions", [])):
                 cleaned = self._normalize_text(action)
                 if cleaned and cleaned not in actions:
                     actions.append(cleaned)
@@ -143,6 +161,47 @@ class CaseReasoningAgent(BaseAgent):
                 cleaned = self._normalize_text(point)
                 if cleaned and cleaned not in main_issues:
                     main_issues.append(cleaned)
+
+            signal_text = " ".join(
+                [
+                    self._normalize_text(document.extracted_text),
+                    self._normalize_text(document.redacted_text),
+                    self._normalize_text(document.summary),
+                    self._normalize_text(document.summary_short),
+                ]
+            ).lower()
+
+            if (
+                "governing law" in signal_text
+                or "applicable law" in signal_text
+                or "laws of tunisia" in signal_text
+            ):
+                has_governing_law_signal = True
+
+            if any(
+                token in signal_text
+                for token in [
+                    "payment terms",
+                    "net 30",
+                    "late payment",
+                    "invoice due",
+                    "payment due",
+                    "amount due",
+                    "invoice",
+                ]
+            ):
+                has_payment_terms_signal = True
+
+        risks = self._reconcile_risks_with_contract_signals(
+            risks=risks,
+            has_governing_law_signal=has_governing_law_signal,
+            has_payment_terms_signal=has_payment_terms_signal,
+        )
+        main_issues = self._clean_main_issues(
+            issues=main_issues,
+            has_governing_law_signal=has_governing_law_signal,
+            has_payment_terms_signal=has_payment_terms_signal,
+        )
 
         intake_items = self._build_intake_items(consultation_requests)
         transcript_highlights = self._build_transcript_highlights(voice_recordings)
@@ -179,6 +238,8 @@ class CaseReasoningAgent(BaseAgent):
             "intake_items": intake_items[:6],
             "transcript_highlights": transcript_highlights[:6],
             "sources": sources[:10],
+            "_has_governing_law_signal": has_governing_law_signal,
+            "_has_payment_terms_signal": has_payment_terms_signal,
             "narrative_summary": self._build_fallback_narrative(
                 overview_lines=overview_lines,
                 main_issues=main_issues,
@@ -187,6 +248,53 @@ class CaseReasoningAgent(BaseAgent):
                 next_steps=actions,
             ),
         }
+
+    @staticmethod
+    def _reconcile_risks_with_contract_signals(
+        *,
+        risks: list[str],
+        has_governing_law_signal: bool,
+        has_payment_terms_signal: bool,
+    ) -> list[str]:
+        normalized: list[str] = []
+        for risk in risks:
+            lowered = risk.lower()
+            if has_governing_law_signal and "no governing law clause" in lowered:
+                continue
+            if has_payment_terms_signal and (
+                "no clear payment obligation" in lowered
+                or "payment obligation was confidently extracted" in lowered
+            ):
+                continue
+            if risk not in normalized:
+                normalized.append(risk)
+        return normalized
+
+    @staticmethod
+    def _clean_main_issues(
+        *,
+        issues: list[str],
+        has_governing_law_signal: bool,
+        has_payment_terms_signal: bool,
+    ) -> list[str]:
+        cleaned: list[str] = []
+        for issue in issues:
+            item = issue.strip()
+            if not item:
+                continue
+
+            lowered = item.lower()
+            if lowered.startswith("risk:"):
+                continue
+            if "no clear payment obligation" in lowered and has_payment_terms_signal:
+                continue
+            if "no governing law clause" in lowered and has_governing_law_signal:
+                continue
+
+            if item not in cleaned:
+                cleaned.append(item)
+
+        return cleaned
 
     def _generate_llm_case_brief(
         self,

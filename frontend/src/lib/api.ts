@@ -7,6 +7,8 @@ import type {
   CopilotResponse,
   DocumentItem,
   FullDocumentAnalysis,
+  LLMTestResponse,
+  ProviderStatusResponse,
   TokenResponse,
   UploadedDocumentResponse,
   UploadedVoiceRecordingResponse,
@@ -162,11 +164,22 @@ export const api = {
       token,
     }),
 
-  copilot: (token: string, message: string, topK = 5) =>
+  copilot: (
+    token: string,
+    message: string,
+    options?: {
+      topK?: number;
+      useExternalResearch?: boolean;
+    }
+  ) =>
     request<CopilotResponse>("/ai/copilot", {
       method: "POST",
       token,
-      body: { message, top_k: topK },
+      body: {
+        message,
+        top_k: options?.topK ?? 5,
+        use_external_research: options?.useExternalResearch ?? true,
+      },
     }),
 
   runAgentWorkflow: (token: string, caseId: number, objective?: string, topK = 5) =>
@@ -174,5 +187,17 @@ export const api = {
       method: "POST",
       token,
       body: { case_id: caseId, objective, top_k: topK },
+    }),
+
+  providerStatus: (token: string) =>
+    request<ProviderStatusResponse>("/ai/provider-status", {
+      token,
+    }),
+
+  testLlm: (token: string, prompt: string) =>
+    request<LLMTestResponse>("/ai/test-llm", {
+      method: "POST",
+      token,
+      body: { prompt },
     }),
 };

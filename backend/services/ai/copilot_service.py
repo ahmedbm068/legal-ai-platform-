@@ -70,7 +70,8 @@ class CopilotService:
             "analyze_risks_case": lambda: self._analyze_case_risks(
                 db=db,
                 tenant_id=tenant_id,
-                case_id=parsed["case_id"]
+                case_id=parsed["case_id"],
+                requested_count=parsed.get("requested_count"),
             ),
             "review_booking_case": lambda: self._review_case_booking(
                 db=db,
@@ -179,7 +180,7 @@ class CopilotService:
         )
         notes = optimized.payload.get("notes") if optimized.success else None
 
-        answer_lines = [optimized_query or raw_prompt]
+        answer_lines = [f"Optimized prompt: {optimized_query or raw_prompt}"]
         if notes:
             answer_lines.append("")
             answer_lines.append(f"Notes: {notes}")
@@ -606,6 +607,30 @@ External research snippets (JSON):
 
         return "\n".join(sections).strip()
 
+    @staticmethod
+    def _normalize_risk_items(items: List[str]) -> List[str]:
+        normalized: List[str] = []
+        for item in items:
+            cleaned = str(item or "").strip().rstrip(".")
+            if not cleaned:
+                continue
+            cleaned = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
+            if cleaned not in normalized:
+                normalized.append(cleaned)
+        return normalized
+
+    @classmethod
+    def _expand_risks_from_reasoning(cls, reasoning_payload: Dict[str, Any]) -> List[str]:
+        candidates: List[str] = []
+        for issue in reasoning_payload.get("main_issues") or []:
+            text = str(issue or "").strip()
+            lowered = text.lower()
+            if not text:
+                continue
+            if any(token in lowered for token in ["breach", "termination", "dispute", "deadline", "notice", "liability"]):
+                candidates.append(text)
+        return cls._normalize_risk_items(candidates)
+
     def _is_reasonable_party(self, value: str) -> bool:
         lowered = value.lower().strip()
         if not lowered:
@@ -775,7 +800,7 @@ External research snippets (JSON):
                 lines.append("")
                 lines.append(f"{section}:")
                 for item in items[:10]:
-                    lines.append(f"- {item['value']} ({item['label']}) — {item['filename']}")
+                    lines.append(f"- {item['value']} ({item['label']}) - {item['filename']}")
 
             return {
                 "answer": "\n".join(lines),
@@ -846,7 +871,8 @@ External research snippets (JSON):
         self,
         db: Session,
         tenant_id: int,
-        case_id: Optional[int]
+        case_id: Optional[int],
+        requested_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
         documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
@@ -860,13 +886,22 @@ External research snippets (JSON):
             case=case,
             documents=documents
         )
-        collected_risks = reasoning_payload.get("legal_risks") or []
+        collected_risks = self._normalize_risk_items(reasoning_payload.get("legal_risks") or [])
+        if requested_count:
+            expanded = self._expand_risks_from_reasoning(reasoning_payload)
+            for item in expanded:
+                if item not in collected_risks:
+                    collected_risks.append(item)
+                if len(collected_risks) >= requested_count:
+                    break
+
+        target_count = min(max(requested_count or 6, 1), 12)
 
         if collected_risks:
             return {
                 "answer": (
                     f"Detected legal risks for case {case.id}:\n\n"
-                    + "\n".join(f"- {risk}" for risk in collected_risks[:12])
+                    + "\n".join(f"- {risk}" for risk in collected_risks[:target_count])
                 ),
                 "used_fallback": not bool(reasoning_payload.get("used_llm")),
                 "fallback_reason": None if reasoning_payload.get("used_llm") else "Used case reasoning agent heuristic synthesis",

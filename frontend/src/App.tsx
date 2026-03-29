@@ -9,13 +9,16 @@ import type {
   ConsultationRequest,
   DocumentItem,
   FullDocumentAnalysis,
+  ProviderStatusResponse,
   SourceItem,
   User,
   VoiceRecording,
 } from "./types";
 
 const TOKEN_STORAGE_KEY = "legal-ai-platform-token";
+const THEME_STORAGE_KEY = "legal-ai-platform-theme";
 const caseStatuses: CaseStatus[] = ["open", "in_progress", "closed", "archived"];
+const CASE_REFERENCE_PATTERN = /\bcase\s*#?\s*(\d+)\b/i;
 
 function nowIso() {
   return new Date().toISOString();
@@ -191,7 +194,61 @@ function buildWelcomeMessage(caseTitle?: string): ChatMessage {
   };
 }
 
+function inferAgentFromIntent(intent?: string) {
+  if (!intent) {
+    return "Copilot Core";
+  }
+
+  if (intent === "optimize_prompt") {
+    return "Prompt Optimizer Agent";
+  }
+  if (intent === "build_timeline_case") {
+    return "Timeline Agent";
+  }
+  if (intent === "review_booking_case") {
+    return "Booking Agent";
+  }
+  if (intent === "compare_case_documents") {
+    return "Document Comparison Agent";
+  }
+  if (intent === "draft_client_email_case") {
+    return "Drafting Agent";
+  }
+  if (intent === "list_deadlines_case" || intent === "analyze_risks_case" || intent === "summarize_case") {
+    return "Case Reasoning Agent";
+  }
+  if (intent === "summarize_document") {
+    return "Summarization Agent";
+  }
+  if (intent.startsWith("ask_") || intent.startsWith("summarize_")) {
+    return "RAG + External Research";
+  }
+
+  return "Copilot Core";
+}
+
+function extractSourceUrl(source: SourceItem) {
+  const match = source.snippet.match(/https?:\/\/[^\s)]+/i);
+  return match ? match[0] : null;
+}
+
+function extractReferencedCaseId(value: string) {
+  const match = value.match(CASE_REFERENCE_PATTERN);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number(match[1]);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
 export default function App() {
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const stored = localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === "light" || stored === "dark") {
+      return stored;
+    }
+    return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+  });
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY));
   const [user, setUser] = useState<User | null>(null);
   const [cases, setCases] = useState<CaseItem[]>([]);
@@ -236,6 +293,15 @@ export default function App() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [copilotLoading, setCopilotLoading] = useState(false);
   const [workflowLoading, setWorkflowLoading] = useState(false);
+  const [activeWorkspaceSection, setActiveWorkspaceSection] = useState<
+    "workflow" | "intake" | "intelligence" | "evidence"
+  >("workflow");
+  const [useExternalResearch, setUseExternalResearch] = useState(true);
+  const [retrievalDepth, setRetrievalDepth] = useState(5);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
+  const [providerLoading, setProviderLoading] = useState(false);
+  const [llmSmokeOutput, setLlmSmokeOutput] = useState<string | null>(null);
+  const [llmSmokeLoading, setLlmSmokeLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
@@ -274,6 +340,24 @@ export default function App() {
     [documents, selectedDocumentId]
   );
 
+  const latestAssistantMessage = useMemo(
+    () => [...chatMessages].reverse().find((item) => item.role === "assistant") ?? null,
+    [chatMessages]
+  );
+
+  const activeIntent = latestAssistantMessage?.meta?.parsedIntent ?? null;
+  const activeAgentName = inferAgentFromIntent(activeIntent ?? undefined);
+
+  const externalResearchCount = useMemo(
+    () => activeSources.filter((source) => source.document_id === null && Boolean(extractSourceUrl(source))).length,
+    [activeSources]
+  );
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
+
   useEffect(() => {
     if (!token) {
       return;
@@ -281,6 +365,51 @@ export default function App() {
 
     void bootstrapWorkspace(token);
   }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    void refreshProviderStatus(token);
+  }, [token]);
+
+  async function refreshProviderStatus(currentToken: string) {
+    try {
+      setProviderLoading(true);
+      const status = await api.providerStatus(currentToken);
+      setProviderStatus(status);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Unable to fetch provider status.";
+      setProviderStatus(null);
+      setError(message);
+    } finally {
+      setProviderLoading(false);
+    }
+  }
+
+  async function runLlmSmokeTest() {
+    if (!token) {
+      return;
+    }
+
+    try {
+      setLlmSmokeLoading(true);
+      setError(null);
+      const result = await api.testLlm(token, "Reply with OK and model family.");
+      if (result.ok) {
+        setLlmSmokeOutput(result.output || `OK from ${result.provider_name} (${result.model})`);
+      } else {
+        setLlmSmokeOutput(`Test failed: ${result.error || "Unknown provider error."}`);
+      }
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "LLM health check failed.";
+      setLlmSmokeOutput(`Test failed: ${message}`);
+      setError(message);
+    } finally {
+      setLlmSmokeLoading(false);
+    }
+  }
 
   async function bootstrapWorkspace(currentToken: string) {
     try {
@@ -431,6 +560,9 @@ export default function App() {
     }
 
     const input = chatInput.trim();
+    const hasExplicitTarget = /\bcase\s*#?\s*\d+\b|\bdocument\s*#?\s*\d+\b/i.test(input);
+    const scopedMessage = hasExplicitTarget || !selectedCaseId ? input : `${input} for case #${selectedCaseId}`;
+
     setChatMessages((current) => [
       ...current,
       {
@@ -444,8 +576,37 @@ export default function App() {
     setCopilotLoading(true);
 
     try {
-      const scopedMessage = selectedCaseId ? `${input} for case #${selectedCaseId}` : input;
-      const response = await api.copilot(token, scopedMessage);
+      setError(null);
+      const referencedCaseId = extractReferencedCaseId(scopedMessage);
+      if (referencedCaseId && !cases.some((item) => item.id === referencedCaseId)) {
+        const suggestion = selectedCaseId
+          ? `Try running the same prompt with case #${selectedCaseId}.`
+          : "Select a case from the sidebar first, then retry.";
+        const validationMessage = `Case #${referencedCaseId} is not available in your workspace. ${suggestion}`;
+
+        setChatMessages((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            timestamp: nowIso(),
+            content: validationMessage,
+            meta: {
+              parsedIntent: "validation_error",
+              confidence: "high",
+              fallbackReason: "Invalid case id in prompt",
+              sources: [],
+            },
+          },
+        ]);
+        setError(validationMessage);
+        return;
+      }
+
+      const response = await api.copilot(token, scopedMessage, {
+        topK: retrievalDepth,
+        useExternalResearch,
+      });
 
       setChatMessages((current) => [
         ...current,
@@ -463,13 +624,30 @@ export default function App() {
         },
       ]);
       setActiveSources(response.sources);
+      setActiveWorkspaceSection("evidence");
 
       const topSource = response.sources[0];
       if (topSource?.document_id) {
         await selectDocument(token, topSource.document_id);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Copilot request failed.");
+      const message = caught instanceof Error ? caught.message : "Copilot request failed.";
+      setError(message);
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          timestamp: nowIso(),
+          content: `I could not answer this request: ${message}${selectedCaseId ? `\n\nTip: try with case #${selectedCaseId} selected.` : ""}`,
+          meta: {
+            parsedIntent: "request_error",
+            confidence: "low",
+            fallbackReason: message,
+            sources: [],
+          },
+        },
+      ]);
     } finally {
       setCopilotLoading(false);
     }
@@ -478,6 +656,13 @@ export default function App() {
   async function handleChatSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await submitCopilotPrompt();
+  }
+
+  function handleChatInputKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      void submitCopilotPrompt();
+    }
   }
 
   async function runAgentWorkflow() {
@@ -491,10 +676,12 @@ export default function App() {
       const response = await api.runAgentWorkflow(
         token,
         selectedCaseId,
-        workflowObjective.trim() || undefined
+        workflowObjective.trim() || undefined,
+        retrievalDepth
       );
       setAgentWorkflow(response);
       setActiveSources(response.sources);
+      setActiveWorkspaceSection("workflow");
 
       setChatMessages((current) => [
         ...current,
@@ -524,7 +711,12 @@ export default function App() {
   }
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    if (!token || !selectedCaseId) {
+    if (!token) {
+      return;
+    }
+
+    if (!selectedCaseId) {
+      setError("Select a case first before uploading documents.");
       return;
     }
 
@@ -550,7 +742,12 @@ export default function App() {
   }
 
   async function uploadVoiceFile(file: File) {
-    if (!token || !selectedCaseId) {
+    if (!token) {
+      return;
+    }
+
+    if (!selectedCaseId) {
+      setError("Select a case first before uploading voice notes.");
       return;
     }
 
@@ -604,6 +801,11 @@ export default function App() {
   async function startRecording() {
     if (!navigator.mediaDevices?.getUserMedia) {
       setError("This browser does not support microphone recording.");
+      return;
+    }
+
+    if (!selectedCaseId) {
+      setError("Select a case first before recording voice notes.");
       return;
     }
 
@@ -665,6 +867,8 @@ export default function App() {
     setSelectedDocumentAnalysis(null);
     setChatMessages([buildWelcomeMessage()]);
     setActiveSources([]);
+    setProviderStatus(null);
+    setLlmSmokeOutput(null);
   }
 
   if (!token || !user) {
@@ -681,6 +885,16 @@ export default function App() {
           </div>
 
           <div className="auth-card">
+            <div className="theme-row">
+              <button
+                className="ghost-button theme-toggle"
+                onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+                type="button"
+              >
+                {theme === "dark" ? "Light mode" : "Dark mode"}
+              </button>
+            </div>
+
             <div className="auth-tabs">
               <button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")} type="button">
                 Login
@@ -809,6 +1023,39 @@ export default function App() {
           </div>
         </div>
 
+        <div className="panel quick-ingest-panel">
+          <div className="panel-header">
+            <div>
+              <h3>Quick uploads</h3>
+              <span>{selectedCaseId ? `Attached to case #${selectedCaseId}` : "Select a case first"}</span>
+            </div>
+          </div>
+
+          <div className="quick-ingest-actions">
+            <label className="upload-button">
+              {uploading ? "Uploading PDF..." : "Upload PDF"}
+              <input accept="application/pdf" onChange={handleUpload} type="file" />
+            </label>
+
+            <label className="upload-button">
+              {voiceUploading ? "Uploading audio..." : "Upload audio"}
+              <input
+                accept="audio/webm,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/mp3,audio/ogg"
+                onChange={handleVoiceUpload}
+                type="file"
+              />
+            </label>
+
+            <button
+              className="secondary-button"
+              onClick={() => void (recordingAudio ? stopRecording() : startRecording())}
+              type="button"
+            >
+              {recordingAudio ? "Stop recording" : "Record voice note"}
+            </button>
+          </div>
+        </div>
+
         <div className="panel">
           <div className="panel-header">
             <div>
@@ -895,6 +1142,92 @@ export default function App() {
       </aside>
 
       <main className="workspace">
+        <section className="panel workspace-nav">
+          <div className="workspace-nav-row">
+            <div>
+              <div className="eyebrow">AI runtime and orchestration controls</div>
+              <h3>Copilot command bridge</h3>
+              <p>
+                Backend-aware command surface for Groq + retrieval + specialized legal agents.
+              </p>
+            </div>
+
+            <div className="workspace-nav-controls">
+              <button
+                className="secondary-button theme-toggle"
+                onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+                type="button"
+              >
+                {theme === "dark" ? "Light mode" : "Dark mode"}
+              </button>
+
+              <label className="toggle-control">
+                <input
+                  checked={useExternalResearch}
+                  onChange={(event) => setUseExternalResearch(event.target.checked)}
+                  type="checkbox"
+                />
+                External research
+              </label>
+
+              <label className="range-control">
+                Retrieval depth
+                <input
+                  max={10}
+                  min={3}
+                  onChange={(event) => setRetrievalDepth(Number(event.target.value))}
+                  type="range"
+                  value={retrievalDepth}
+                />
+                <span>{retrievalDepth}</span>
+              </label>
+
+              <button
+                className="secondary-button"
+                disabled={providerLoading}
+                onClick={() => token && void refreshProviderStatus(token)}
+                type="button"
+              >
+                {providerLoading ? "Refreshing..." : "Refresh provider"}
+              </button>
+
+              <button
+                className="secondary-button"
+                disabled={llmSmokeLoading}
+                onClick={() => void runLlmSmokeTest()}
+                type="button"
+              >
+                {llmSmokeLoading ? "Testing..." : "Run LLM test"}
+              </button>
+            </div>
+          </div>
+
+          <div className="workspace-status-row">
+            <div className="meta-card">
+              <span>Provider</span>
+              <strong>{providerStatus?.provider_name || "Unknown"}</strong>
+            </div>
+            <div className="meta-card">
+              <span>Model</span>
+              <strong>{providerStatus?.model || "Not configured"}</strong>
+            </div>
+            <div className="meta-card">
+              <span>Summary model</span>
+              <strong>{providerStatus?.summary_model || "Not configured"}</strong>
+            </div>
+            <div className="meta-card">
+              <span>API key</span>
+              <strong>{providerStatus?.key_present ? "Present" : "Missing"}</strong>
+            </div>
+            <div className="meta-card">
+              <span>External references</span>
+              <strong>{externalResearchCount}</strong>
+            </div>
+          </div>
+
+          {llmSmokeOutput ? <div className="loading-bar">{llmSmokeOutput}</div> : null}
+        </section>
+
         <section className="workspace-header">
           <div>
             <div className="eyebrow">Choose a matter and work from one command surface</div>
@@ -926,26 +1259,48 @@ export default function App() {
               <strong>{selectedDocument?.filename || "No document selected"}</strong>
             </div>
           </div>
+
+          <div className="workspace-tabs">
+            <button
+              className={`tab-button ${activeWorkspaceSection === "workflow" ? "active" : ""}`}
+              onClick={() => setActiveWorkspaceSection("workflow")}
+              type="button"
+            >
+              Workflow
+            </button>
+            <button
+              className={`tab-button ${activeWorkspaceSection === "intake" ? "active" : ""}`}
+              onClick={() => setActiveWorkspaceSection("intake")}
+              type="button"
+            >
+              Intake
+            </button>
+            <button
+              className={`tab-button ${activeWorkspaceSection === "intelligence" ? "active" : ""}`}
+              onClick={() => setActiveWorkspaceSection("intelligence")}
+              type="button"
+            >
+              Intelligence
+            </button>
+            <button
+              className={`tab-button ${activeWorkspaceSection === "evidence" ? "active" : ""}`}
+              onClick={() => setActiveWorkspaceSection("evidence")}
+              type="button"
+            >
+              Evidence
+            </button>
+          </div>
         </section>
 
         {error ? <div className="error-banner">{error}</div> : null}
 
         <section className="workspace-grid">
           <div className="column column-main">
-            <div className="panel hero-panel">
-              <div className="command-topline">
-                <button className="context-link" type="button">
-                  Choose case
-                </button>
-                <button className="context-link" type="button">
-                  Set client matter
-                </button>
-              </div>
-
+            <div className="panel chat-panel">
               <div className="panel-header">
                 <div>
-                  <h3>Ask your legal workspace anything</h3>
-                  <span>Grounded answers, agent workflows, and evidence-ready drafting in one place</span>
+                  <h3>Legal copilot</h3>
+                  <span>Case-aware command center with evidence grounding</span>
                 </div>
               </div>
 
@@ -1000,48 +1355,75 @@ export default function App() {
                 >
                   Compare docs
                 </button>
+                <button
+                  className="prompt-chip"
+                  onClick={() =>
+                    setChatInput(
+                      selectedDocumentId
+                        ? `Summarize document #${selectedDocumentId}`
+                        : selectedCaseId
+                          ? `Summarize case #${selectedCaseId}`
+                          : "Summarize the selected document"
+                    )
+                  }
+                  type="button"
+                >
+                  Summarize file
+                </button>
+                <button
+                  className="prompt-chip"
+                  onClick={() => setChatInput(selectedCaseId ? `Build timeline for case #${selectedCaseId}` : "Build timeline")}
+                  type="button"
+                >
+                  Build timeline
+                </button>
+                <button
+                  className="prompt-chip"
+                  onClick={() => setChatInput(selectedCaseId ? `Review booking for case #${selectedCaseId}` : "Review booking")}
+                  type="button"
+                >
+                  Booking review
+                </button>
+                <button
+                  className="prompt-chip"
+                  onClick={() => setChatInput(selectedCaseId ? `Draft client email for case #${selectedCaseId}` : "Draft client email")}
+                  type="button"
+                >
+                  Draft email
+                </button>
+                <button
+                  className="prompt-chip"
+                  onClick={() =>
+                    setChatInput(
+                      chatInput.trim()
+                        ? `Optimize prompt: ${chatInput.trim()}`
+                        : selectedCaseId
+                          ? `Optimize prompt: Analyze risks for case #${selectedCaseId}`
+                          : "Optimize prompt: Analyze litigation risks and next legal steps"
+                    )
+                  }
+                  type="button"
+                >
+                  Optimize prompt
+                </button>
               </div>
 
-              <div className="workflow-launcher">
-                <textarea
-                  placeholder="Ask for a legal summary, compare filings, analyze risk, build a timeline, or draft a client update..."
-                  value={chatInput}
-                  onChange={(event) => setChatInput(event.target.value)}
-                />
-                <div className="command-actions">
-                  <button
-                    className="secondary-button"
-                    disabled={!selectedCaseId || workflowLoading}
-                    onClick={() => void runAgentWorkflow()}
-                    type="button"
-                  >
-                    {workflowLoading ? "Running workflow..." : "Deep workflow"}
-                  </button>
-                  <button
-                    className="primary-button"
-                    disabled={copilotLoading || !selectedCaseId}
-                    onClick={() => void submitCopilotPrompt()}
-                    type="button"
-                  >
-                    Ask copilot
-                  </button>
+              <div className="agent-strip">
+                <div className="agent-badge active">
+                  <span>Primary agent</span>
+                  <strong>{activeAgentName}</strong>
                 </div>
-              </div>
-
-              <div className="source-chip-row">
-                <button className="source-chip" type="button">Voice intake</button>
-                <button className="source-chip" type="button">Case reasoning</button>
-                <button className="source-chip" type="button">Document intelligence</button>
-                <button className="source-chip" type="button">Verified citations</button>
-                <button className="source-chip" type="button">Draft-ready output</button>
-              </div>
-            </div>
-
-            <div className="panel chat-panel">
-              <div className="panel-header">
-                <div>
-                  <h3>Legal copilot</h3>
-                  <span>Case-aware chat with evidence grounding</span>
+                <div className="agent-badge">
+                  <span>Detected intent</span>
+                  <strong>{activeIntent || "none"}</strong>
+                </div>
+                <div className="agent-badge">
+                  <span>Confidence</span>
+                  <strong>{latestAssistantMessage?.meta?.confidence || "n/a"}</strong>
+                </div>
+                <div className="agent-badge">
+                  <span>Fallback</span>
+                  <strong>{latestAssistantMessage?.meta?.fallbackReason ? "yes" : "no"}</strong>
                 </div>
               </div>
 
@@ -1053,6 +1435,7 @@ export default function App() {
                       <p>{message.content}</p>
                       {message.meta ? (
                         <div className="message-meta">
+                          <span>Agent: {inferAgentFromIntent(message.meta.parsedIntent)}</span>
                           <span>Intent: {message.meta.parsedIntent || "n/a"}</span>
                           <span>Confidence: {message.meta.confidence || "n/a"}</span>
                           {message.meta.fallbackReason ? <span>Fallback: {message.meta.fallbackReason}</span> : null}
@@ -1064,19 +1447,42 @@ export default function App() {
                 {copilotLoading ? <div className="loading-bar">Consulting the case copilot...</div> : null}
               </div>
 
+              <div className="composer-hint">
+                Scope: {selectedCaseId ? `case #${selectedCaseId}` : "global"} | Retrieval depth: {retrievalDepth} |
+                External research: {useExternalResearch ? "on" : "off"} | Tip: Ctrl/Cmd + Enter to send
+              </div>
+              {error ? <div className="error-banner inline-error">{error}</div> : null}
+
               <form className="chat-composer" onSubmit={handleChatSubmit}>
                 <textarea
-                  placeholder="Ask grounded questions about this case, its deadlines, contradictions, or documents..."
+                  onKeyDown={handleChatInputKeyDown}
+                  placeholder="Ask anything. Examples: 'Summarize case #1', 'Build timeline for case #1', 'Optimize prompt: draft a client update'."
                   value={chatInput}
-                  onChange={(event) => setChatInput(event.target.value)}
+                  onChange={(event) => {
+                    if (error) {
+                      setError(null);
+                    }
+                    setChatInput(event.target.value);
+                  }}
                 />
-                <button className="primary-button" disabled={copilotLoading || !selectedCaseId} type="submit">
-                  Send
-                </button>
+                <div className="command-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={!selectedCaseId || workflowLoading}
+                    onClick={() => void runAgentWorkflow()}
+                    type="button"
+                  >
+                    {workflowLoading ? "Running workflow..." : "Deep workflow"}
+                  </button>
+                  <button className="primary-button" disabled={copilotLoading || !selectedCaseId} type="submit">
+                    Ask copilot
+                  </button>
+                </div>
               </form>
             </div>
 
-            <div className="panel workflow-panel">
+            {activeWorkspaceSection === "workflow" ? (
+              <div className="panel workflow-panel">
               <div className="panel-header">
                 <div>
                   <h3>Agent workflow</h3>
@@ -1084,56 +1490,81 @@ export default function App() {
                 </div>
               </div>
 
+              <div className="workflow-objective">
+                <textarea
+                  onChange={(event) => setWorkflowObjective(event.target.value)}
+                  placeholder="Optional workflow objective. Example: prepare negotiation strategy and client email for case hearing."
+                  value={workflowObjective}
+                />
+                <button
+                  className="secondary-button"
+                  disabled={!selectedCaseId || workflowLoading}
+                  onClick={() => void runAgentWorkflow()}
+                  type="button"
+                >
+                  {workflowLoading ? "Running..." : "Run full workflow"}
+                </button>
+              </div>
+
               {agentWorkflow ? (
-                <div className="analysis-stack">
-                  <div className="analysis-block">
-                    <h4>Objective</h4>
-                    <p>{agentWorkflow.objective}</p>
-                  </div>
+                  <div className="analysis-stack">
+                    <div className="analysis-block">
+                      <h4>Objective</h4>
+                      <p>{agentWorkflow.objective}</p>
+                    </div>
 
-                  <div className="analysis-block">
-                    <h4>Verified summary</h4>
-                    <p>{agentWorkflow.verified_summary}</p>
-                  </div>
+                    <div className="analysis-block">
+                      <h4>Verified summary</h4>
+                      <p>{agentWorkflow.verified_summary}</p>
+                    </div>
 
-                  <div className="analysis-block">
-                    <h4>Client email draft</h4>
-                    <p>{agentWorkflow.client_email}</p>
-                  </div>
+                    <div className="analysis-block">
+                      <h4>Client email draft</h4>
+                      <p>{agentWorkflow.client_email}</p>
+                    </div>
 
-                  <div className="analysis-block">
-                    <h4>Agent stages</h4>
-                    <div className="workflow-stage-list">
-                      {Object.entries(agentWorkflow.stages).map(([stageKey, stage]) => (
-                        <div key={stageKey} className="workflow-stage-card">
-                          <div className="workflow-stage-topline">
-                            <strong>{stage.agent_name}</strong>
-                            <span>{stage.success ? "ok" : "needs review"}</span>
-                          </div>
-                          {stage.warnings.length > 0 ? <p>Warnings: {stage.warnings.join(" | ")}</p> : null}
-                          {stage.error ? <p>Error: {stage.error}</p> : null}
-                          {stage.trace.length > 0 ? (
-                            <div className="workflow-trace">
-                              {stage.trace.map((item, index) => (
-                                <span key={`${stageKey}-${index}`}>{item}</span>
-                              ))}
+                    <div className="analysis-block">
+                      <h4>Agent stages</h4>
+                      <div className="workflow-stage-list">
+                        {Object.entries(agentWorkflow.stages).map(([stageKey, stage]) => (
+                          <div key={stageKey} className="workflow-stage-card">
+                            <div className="workflow-stage-topline">
+                              <strong>{stage.agent_name}</strong>
+                              <span>{stage.success ? "ok" : "needs review"}</span>
                             </div>
-                          ) : null}
-                        </div>
-                      ))}
+                            {stage.warnings.length > 0 ? <p>Warnings: {stage.warnings.join(" | ")}</p> : null}
+                            {stage.error ? <p>Error: {stage.error}</p> : null}
+                            {stage.trace.length > 0 ? (
+                              <div className="workflow-trace">
+                                {stage.trace.map((item, index) => (
+                                  <span key={`${stageKey}-${index}`}>{item}</span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="empty-state">
-                  Run the agent workflow to generate a verified case brief, inspect stage traces, and draft a client update.
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div className="empty-state">
+                    Run the agent workflow to generate a verified case brief, inspect stage traces, and draft a client update.
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
 
           <div className="column column-side">
-            <div className="panel">
+            {activeWorkspaceSection === "workflow" ? (
+              <div className="panel">
+                <div className="empty-state">
+                  Workflow details are shown below the copilot. Switch tabs to open intake, intelligence, or evidence tools.
+                </div>
+              </div>
+            ) : null}
+
+            <div className={`panel side-panel ${activeWorkspaceSection === "intake" ? "active" : "hidden"}`}>
               <div className="panel-header">
                 <div>
                   <h3>Voice intake</h3>
@@ -1204,7 +1635,7 @@ export default function App() {
               ) : null}
             </div>
 
-            <div className="panel evidence-panel">
+            <div className={`panel evidence-panel side-panel ${activeWorkspaceSection === "intake" ? "active" : "hidden"}`}>
               <div className="panel-header">
                 <div>
                   <h3>Consultation intake</h3>
@@ -1269,7 +1700,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="panel">
+            <div className={`panel side-panel ${activeWorkspaceSection === "intelligence" ? "active" : "hidden"}`}>
               <div className="panel-header">
                 <div>
                   <h3>Documents</h3>
@@ -1300,7 +1731,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="panel evidence-panel">
+            <div className={`panel evidence-panel side-panel ${activeWorkspaceSection === "intelligence" ? "active" : "hidden"}`}>
               <div className="panel-header">
                 <div>
                   <h3>Document intelligence</h3>
@@ -1353,7 +1784,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="panel evidence-panel">
+            <div className={`panel evidence-panel side-panel ${activeWorkspaceSection === "evidence" ? "active" : "hidden"}`}>
               <div className="panel-header">
                 <div>
                   <h3>Evidence trail</h3>
@@ -1364,18 +1795,34 @@ export default function App() {
               {activeSources.length > 0 ? (
                 <div className="source-list">
                   {activeSources.map((source, index) => (
-                    <button
-                      key={`${source.document_id}-${index}`}
-                      className="source-card"
-                      onClick={() => token && void selectDocument(token, source.document_id)}
-                      type="button"
-                    >
+                    <article key={`${source.document_id ?? "external"}-${index}`} className="source-card">
                       <strong>{source.filename}</strong>
                       <span>
-                        {source.chunk_index !== null ? `Chunk ${source.chunk_index}` : "Document source"} | score {source.score.toFixed(2)}
+                        {source.document_id
+                          ? source.chunk_index !== null
+                            ? `Document chunk ${source.chunk_index}`
+                            : "Document source"
+                          : "External research source"}{" "}
+                        | score {source.score.toFixed(2)}
                       </span>
                       <p>{source.snippet}</p>
-                    </button>
+                      <div className="source-actions">
+                        {source.document_id ? (
+                          <button
+                            className="secondary-button"
+                            onClick={() => token && void selectDocument(token, source.document_id as number)}
+                            type="button"
+                          >
+                            Open document
+                          </button>
+                        ) : null}
+                        {extractSourceUrl(source) ? (
+                          <a className="ghost-link" href={extractSourceUrl(source) || "#"} rel="noreferrer" target="_blank">
+                            Open web source
+                          </a>
+                        ) : null}
+                      </div>
+                    </article>
                   ))}
                 </div>
               ) : (

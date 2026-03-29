@@ -38,6 +38,14 @@ You are the Drafting Agent inside a legal AI platform.
 Draft a professional client update email using only the provided grounded case summary.
 Do not invent facts.
 Keep the tone clear, calm, and professional.
+Keep the email concise and practical.
+
+Structure:
+1) Subject line
+2) One short status paragraph
+3) "Key points" bullet list (3-6 bullets)
+4) "Next steps" bullet list (2-4 bullets)
+5) Closing with invitation for questions
 
 Return only the email body.
 
@@ -69,9 +77,12 @@ Grounded case summary:
         fallback_email = (
             f"Subject: Update on Case {case_id} - {case_title}\n\n"
             "Dear Client,\n\n"
-            "I am writing to provide you with an update regarding your case.\n\n"
+            "I am writing to provide a concise update on your case status.\n\n"
             f"{normalized_summary}\n\n"
-            "Please let me know if you would like a more detailed breakdown of any document or issue.\n\n"
+            "Next steps:\n"
+            "- We will continue monitoring deadlines and evidence consistency.\n"
+            "- We will share any material updates promptly.\n\n"
+            "Please let me know if you would like a deeper breakdown by issue or document.\n\n"
             "Best regards,\n"
             "Your Legal Team"
         )

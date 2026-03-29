@@ -137,7 +137,7 @@ export interface ConsultationRequest {
 
 export interface SourceItem {
   chunk_id: number | null;
-  document_id: number;
+  document_id: number | null;
   case_id: number | null;
   filename: string;
   chunk_index: number | null;
@@ -177,6 +177,23 @@ export interface AgentWorkflowResponse {
   sources: SourceItem[];
   stages: Record<string, WorkflowStage>;
   stage_outputs: Record<string, Record<string, unknown>>;
+}
+
+export interface ProviderStatusResponse {
+  provider_available: boolean;
+  base_url: string | null;
+  model: string | null;
+  summary_model: string | null;
+  key_present: boolean;
+  provider_name: string;
+}
+
+export interface LLMTestResponse {
+  ok: boolean;
+  provider_name: string;
+  model: string;
+  output: string;
+  error: string | null;
 }
 
 export interface UploadedDocumentResponse {
