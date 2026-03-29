@@ -1,13 +1,16 @@
-from jose import jwt
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
-import os
-from dotenv import load_dotenv
+from typing import Final
 
-load_dotenv()
+from jose import jwt
 
-SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-env")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60*24
+from backend.core.config import settings
+
+
+SECRET_KEY: Final[str] = settings.SECRET_KEY
+ALGORITHM: Final[str] = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES: Final[int] = 60 * 24
 
 
 def create_access_token(data: dict) -> str:

@@ -1,29 +1,31 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 from backend.core.enums import CaseStatus
 
 
 class CaseCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
 
-    title: str
+    title: str = Field(..., min_length=2, max_length=200)
 
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=4000)
 
     status: CaseStatus = CaseStatus.open
 
-    client_id: int
+    client_id: int = Field(..., ge=1)
 
 
 class CaseUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
 
-    title: Optional[str] = None
+    title: Optional[str] = Field(default=None, min_length=2, max_length=200)
 
-    description: Optional[str] = None
+    description: Optional[str] = Field(default=None, max_length=4000)
 
     status: Optional[CaseStatus] = None
 
-    client_id: Optional[int] = None
+    client_id: Optional[int] = Field(default=None, ge=1)
 
 
 class CaseOut(BaseModel):

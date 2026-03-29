@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -33,6 +32,14 @@ class RagService:
             return "case"
         return "global"
 
+    @staticmethod
+    def _sanitize_top_k(top_k: int) -> int:
+        try:
+            parsed = int(top_k)
+        except (TypeError, ValueError):
+            return 5
+        return max(1, min(parsed, 25))
+
     def retrieve_context(
         self,
         db: Session,
@@ -42,11 +49,17 @@ class RagService:
         case_id: Optional[int] = None,
         document_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
+        safe_question = (question or "").strip()
+        if not safe_question:
+            return []
+
+        safe_top_k = self._sanitize_top_k(top_k)
+
         agent_result = self.retrieval_agent.retrieve(
             db=db,
             tenant_id=tenant_id,
-            question=question,
-            top_k=max(top_k * 3, 10),
+            question=safe_question,
+            top_k=max(safe_top_k * 3, 10),
             case_id=case_id,
             document_id=document_id,
         )
@@ -54,7 +67,7 @@ class RagService:
         if not agent_result.success:
             return []
 
-        return (agent_result.payload.get("results") or [])[:top_k]
+        return (agent_result.payload.get("results") or [])[:safe_top_k]
 
     def _build_context(self, results: List[Dict[str, Any]]) -> str:
         blocks = []
@@ -128,18 +141,19 @@ class RagService:
         case_id: Optional[int] = None,
         document_id: Optional[int] = None
     ) -> Dict[str, Any]:
+        safe_top_k = self._sanitize_top_k(top_k)
         results = self.retrieve_context(
             db=db,
             tenant_id=tenant_id,
             question=query,
-            top_k=top_k,
+            top_k=safe_top_k,
             case_id=case_id,
             document_id=document_id
         )
 
         return {
             "query": query,
-            "top_k": top_k,
+            "top_k": safe_top_k,
             "scope": self._get_scope(case_id=case_id, document_id=document_id),
             "results": results
         }
@@ -153,11 +167,14 @@ class RagService:
         case_id: Optional[int] = None,
         document_id: Optional[int] = None
     ) -> Dict[str, Any]:
+        safe_question = (question or "").strip()
+        safe_top_k = self._sanitize_top_k(top_k)
+
         results = self.retrieve_context(
             db=db,
             tenant_id=tenant_id,
-            question=question,
-            top_k=top_k,
+            question=safe_question,
+            top_k=safe_top_k,
             case_id=case_id,
             document_id=document_id
         )
@@ -199,16 +216,16 @@ When helpful, cite support in this format:
 [filename - chunk X]
 
 Question:
-{question}
+{safe_question}
 
 Context:
 {context}
 """
 
         if not self.client:
-            fallback_answer = self._extractive_fallback_answer(question, results)
+            fallback_answer = self._extractive_fallback_answer(safe_question, results)
             verification = verifier_agent.verify_answer(
-                question=question,
+                question=safe_question,
                 answer=fallback_answer,
                 sources=formatted_sources,
             )
@@ -229,17 +246,17 @@ Context:
 
             answer_text = (response.output_text or "").strip()
             if not answer_text:
-                answer_text = self._extractive_fallback_answer(question, results)
+                answer_text = self._extractive_fallback_answer(safe_question, results)
 
             verification = verifier_agent.verify_answer(
-                question=question,
+                question=safe_question,
                 answer=answer_text,
                 sources=formatted_sources,
             )
 
             if not verification.success:
                 return {
-                    "answer": verification.payload.get("supported_answer") or self._extractive_fallback_answer(question, results),
+                    "answer": verification.payload.get("supported_answer") or self._extractive_fallback_answer(safe_question, results),
                     "used_fallback": True,
                     "fallback_reason": "Verifier agent flagged the generated answer as insufficiently grounded",
                     "confidence": verification.payload.get("confidence") or confidence,
@@ -257,9 +274,9 @@ Context:
             }
 
         except (RateLimitError, APIError, AuthenticationError) as exc:
-            fallback_answer = self._extractive_fallback_answer(question, results)
+            fallback_answer = self._extractive_fallback_answer(safe_question, results)
             verification = verifier_agent.verify_answer(
-                question=question,
+                question=safe_question,
                 answer=fallback_answer,
                 sources=formatted_sources,
             )
@@ -273,9 +290,9 @@ Context:
             }
 
         except Exception as exc:
-            fallback_answer = self._extractive_fallback_answer(question, results)
+            fallback_answer = self._extractive_fallback_answer(safe_question, results)
             verification = verifier_agent.verify_answer(
-                question=question,
+                question=safe_question,
                 answer=fallback_answer,
                 sources=formatted_sources,
             )

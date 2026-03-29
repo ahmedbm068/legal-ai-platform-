@@ -13,9 +13,11 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register(user_data: UserRegister, db: Session = Depends(get_db)):
+    normalized_email = user_data.email.lower().strip()
+
     existing_user = db.query(User).filter(
-        User.email == user_data.email,
-        User.deleted_at == None
+        User.email == normalized_email,
+        User.deleted_at.is_(None)
     ).first()
 
     if existing_user:
@@ -30,8 +32,8 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
         db.refresh(tenant)
 
     new_user = User(
-        name=user_data.name,
-        email=user_data.email,
+        name=user_data.name.strip(),
+        email=normalized_email,
         hashed_password=hash_password(user_data.password),
         role=user_data.role,
         tenant_id=tenant.id
@@ -46,9 +48,11 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 def login(user_data: UserLogin, db: Session = Depends(get_db)):
+    normalized_email = user_data.email.lower().strip()
+
     user = db.query(User).filter(
-        User.email == user_data.email,
-        User.deleted_at == None
+        User.email == normalized_email,
+        User.deleted_at.is_(None)
     ).first()
 
     if not user or not verify_password(user_data.password, user.hashed_password):

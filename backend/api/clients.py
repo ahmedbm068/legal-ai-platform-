@@ -42,7 +42,7 @@ def list_clients(
 ):
     clients = db.query(Client).filter(
         Client.tenant_id == current_user.tenant_id,
-        Client.deleted_at == None
+        Client.deleted_at.is_(None)
     ).all()
 
     return clients
@@ -57,7 +57,7 @@ def get_client(
     client = db.query(Client).filter(
         Client.id == client_id,
         Client.tenant_id == current_user.tenant_id,
-        Client.deleted_at == None
+        Client.deleted_at.is_(None)
     ).first()
 
     if not client:
@@ -78,7 +78,7 @@ def update_client(
     client = db.query(Client).filter(
         Client.id == client_id,
         Client.tenant_id == current_user.tenant_id,
-        Client.deleted_at == None
+        Client.deleted_at.is_(None)
     ).first()
 
     if not client:
@@ -113,7 +113,7 @@ def delete_client(
     client = db.query(Client).filter(
         Client.id == client_id,
         Client.tenant_id == current_user.tenant_id,
-        Client.deleted_at == None
+        Client.deleted_at.is_(None)
     ).first()
 
     if not client:

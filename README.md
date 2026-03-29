@@ -48,11 +48,22 @@ LLM_MODEL=openai/gpt-4o-mini
 SUMMARY_AGENT_MODEL=openai/gpt-4o-mini
 ```
 
-For speech transcription reliability, you can keep LLM reasoning on OpenRouter and use local Whisper fallback:
+If `LLM_BASE_URL` points to OpenRouter and `TRANSCRIPTION_BASE_URL` is blank, the backend intentionally skips remote speech transcription and falls back to local Whisper.
+
+For faster remote speech transcription while keeping LLM reasoning on OpenRouter, set a dedicated transcription provider:
+
+```bash
+TRANSCRIPTION_BASE_URL=https://api.openai.com/v1
+TRANSCRIPTION_API_KEY=your-openai-key
+TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
+```
+
+For local Whisper fallback, you can keep speech transcription on-device:
 
 ```bash
 TRANSCRIPTION_REMOTE_ENABLED=true
 LOCAL_TRANSCRIPTION_MODEL=openai/whisper-base
+TRANSCRIPTION_DEVICE=auto
 ```
 
 If SMTP delivery is unstable in development, keep portal code fallback enabled so login codes are written to server logs:

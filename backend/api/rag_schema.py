@@ -1,8 +1,10 @@
 from typing import Optional, List, Literal, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AskRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     question: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
     case_id: Optional[int] = None
@@ -10,6 +12,8 @@ class AskRequest(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     query: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
     case_id: Optional[int] = None
@@ -17,17 +21,23 @@ class SearchRequest(BaseModel):
 
 
 class CopilotRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     message: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
 
 
 class AgentWorkflowRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     case_id: int = Field(..., ge=1)
     objective: Optional[str] = None
     top_k: int = Field(default=5, ge=1, le=10)
 
 
 class LLMTestRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     prompt: str = Field(default="Reply with OK and the model family in one short sentence.", min_length=1)
 
 
@@ -86,9 +96,9 @@ class CopilotResponse(BaseModel):
 class WorkflowStage(BaseModel):
     agent_name: str
     success: bool
-    warnings: List[str] = []
+    warnings: List[str] = Field(default_factory=list)
     error: Optional[str] = None
-    trace: List[str] = []
+    trace: List[str] = Field(default_factory=list)
 
 
 class AgentWorkflowResponse(BaseModel):

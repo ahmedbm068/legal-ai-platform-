@@ -13,6 +13,8 @@ from backend.services.lexical_search_service import search_chunks_lexically
 
 class RetrievalAgent(BaseAgent):
     agent_name = "retrieval_agent"
+    DEFAULT_TOP_K = 5
+    MAX_TOP_K = 25
 
     def __init__(self, vector_store: VectorStore, embedding_service: EmbeddingService) -> None:
         self.vector_store = vector_store
@@ -35,17 +37,18 @@ class RetrievalAgent(BaseAgent):
                 error="Question/query is empty.",
                 trace=["Input validation failed: question was empty."],
             )
+        safe_top_k = self._sanitize_top_k(top_k)
 
         trace = [
             f"Starting retrieval for tenant={tenant_id}.",
-            f"Scope case_id={case_id}, document_id={document_id}, top_k={top_k}.",
+            f"Scope case_id={case_id}, document_id={document_id}, top_k={safe_top_k}.",
         ]
 
         lexical_results = search_chunks_lexically(
             db=db,
             tenant_id=tenant_id,
             query=normalized_question,
-            top_k=max(top_k * 3, 10),
+            top_k=max(safe_top_k * 3, 10),
             case_id=case_id,
             document_id=document_id,
         )
@@ -54,7 +57,7 @@ class RetrievalAgent(BaseAgent):
         query_embedding = self.embedding_service.embed_query(normalized_question)
         semantic_results = self.vector_store.search(
             query_embedding=query_embedding,
-            top_k=max(top_k * 3, 10),
+            top_k=max(safe_top_k * 3, 10),
             case_id=case_id,
             document_id=document_id,
             tenant_id=tenant_id,
@@ -119,13 +122,13 @@ class RetrievalAgent(BaseAgent):
                 item["retrieval_method"] = "semantic"
 
         preliminary_results = sorted(merged.values(), key=lambda x: x["score"], reverse=True)
-        rerank_pool = preliminary_results[: max(top_k * 4, 12)]
+        rerank_pool = preliminary_results[: max(safe_top_k * 4, 12)]
         trace.append(f"Hybrid ranking produced {len(preliminary_results)} merged chunks before reranking.")
 
         ranked_results, rerank_trace = reranker_service.rerank(
             normalized_question,
             rerank_pool,
-            top_k,
+            safe_top_k,
         )
         trace.extend(rerank_trace)
         trace.append(f"Final retrieval returned {len(ranked_results)} chunks.")
@@ -138,6 +141,16 @@ class RetrievalAgent(BaseAgent):
             },
             trace=trace,
         )
+
+    @classmethod
+    def _sanitize_top_k(cls, top_k: int | None) -> int:
+        if top_k is None:
+            return cls.DEFAULT_TOP_K
+        try:
+            parsed = int(top_k)
+        except (TypeError, ValueError):
+            return cls.DEFAULT_TOP_K
+        return max(1, min(parsed, cls.MAX_TOP_K))
 
     @staticmethod
     def _normalize_scores(items: list[dict[str, Any]], score_key: str) -> dict[Any, float]:

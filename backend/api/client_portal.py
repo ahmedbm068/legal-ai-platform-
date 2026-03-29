@@ -45,7 +45,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 router = APIRouter(prefix="/portal", tags=["Client Portal"])
 logger = logging.getLogger(__name__)
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 pipeline = DocumentAIPipeline()
 PASSWORD_POLICY_REGEX = re.compile(r"^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{10,}$")
 
@@ -69,6 +69,9 @@ def get_current_portal_account(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
 ) -> ClientPortalAccount:
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing portal token.")
+
     token = credentials.credentials
 
     try:
@@ -232,7 +235,10 @@ def build_consultation_items(db: Session, account: ClientPortalAccount) -> list[
 
 @router.post("/auth/register", response_model=ClientPortalMessageResponse, status_code=status.HTTP_201_CREATED)
 def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Depends(get_db)):
-    existing = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == data.email).first()
+    normalized_email = data.email.lower().strip()
+    normalized_name = data.full_name.strip()
+
+    existing = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == normalized_email).first()
     if existing:
         raise HTTPException(status_code=400, detail="A portal account already exists for this email.")
 
@@ -242,15 +248,15 @@ def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Dep
     client = get_or_create_client(
         db,
         tenant_id=tenant.id,
-        client_name=data.full_name,
-        client_email=data.email,
+        client_name=normalized_name,
+        client_email=normalized_email,
         client_phone=data.phone,
         client_address=data.address,
     )
 
     account = ClientPortalAccount(
-        full_name=data.full_name,
-        email=data.email,
+        full_name=normalized_name,
+        email=normalized_email,
         hashed_password=hash_password(data.password),
         tenant_id=tenant.id,
         client_id=client.id,
@@ -264,7 +270,8 @@ def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Dep
 
 @router.post("/auth/login/request-code", response_model=ClientPortalMessageResponse)
 def request_login_code(data: ClientPortalLoginCodeRequest, db: Session = Depends(get_db)):
-    account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == data.email).first()
+    normalized_email = data.email.lower().strip()
+    account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == normalized_email).first()
     if not account or not verify_password(data.password, account.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
 
@@ -308,7 +315,8 @@ def request_login_code(data: ClientPortalLoginCodeRequest, db: Session = Depends
 
 @router.post("/auth/login/verify-code", response_model=ClientPortalToken)
 def verify_login_code(data: ClientPortalLoginCodeVerifyRequest, db: Session = Depends(get_db)):
-    account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == data.email).first()
+    normalized_email = data.email.lower().strip()
+    account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == normalized_email).first()
     if not account:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid verification request.")
 

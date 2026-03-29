@@ -1,10 +1,12 @@
 from typing import List, Optional, Literal
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AskRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     question: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
     case_id: Optional[int] = None
@@ -12,6 +14,8 @@ class AskRequest(BaseModel):
 
 
 class SearchRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     query: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
     case_id: Optional[int] = None
@@ -19,6 +23,8 @@ class SearchRequest(BaseModel):
 
 
 class CopilotRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     message: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
 
@@ -76,13 +82,12 @@ class CopilotResponse(BaseModel):
 
 
 class EntityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     label: str
     value: str
     start_char: Optional[int] = None
     end_char: Optional[int] = None
-
-    class Config:
-        from_attributes = True
 
 
 class ProcessDocumentResponse(BaseModel):
@@ -100,6 +105,8 @@ class ImportantDateItem(BaseModel):
 
 
 class DocumentSummaryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     document_id: int
     summary: Optional[str] = None
     summary_short: Optional[str] = None
@@ -109,9 +116,6 @@ class DocumentSummaryOut(BaseModel):
     document_type: Optional[str] = None
     summary_version: Optional[str] = None
     summary_source: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 class StructuredDocumentInsightsOut(BaseModel):

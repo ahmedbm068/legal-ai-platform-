@@ -1,19 +1,23 @@
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from datetime import datetime
 from backend.core.enums import UserRole
 
 
 class UserRegister(BaseModel):
-    name: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(..., min_length=2, max_length=120)
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=8, max_length=256)
     role: UserRole = UserRole.lawyer
-    tenant_name: str
+    tenant_name: str = Field(..., min_length=2, max_length=120)
 
 
 class UserLogin(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     email: EmailStr
-    password: str
+    password: str = Field(..., min_length=1, max_length=256)
 
 
 class UserOut(BaseModel):

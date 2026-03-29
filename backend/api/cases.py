@@ -24,7 +24,7 @@ def create_case(
     client = db.query(Client).filter(
         Client.id == case_data.client_id,
         Client.tenant_id == current_user.tenant_id,
-        Client.deleted_at == None
+        Client.deleted_at.is_(None)
     ).first()
 
     if not client:
@@ -53,7 +53,7 @@ def list_cases(
 ):
     return db.query(Case).filter(
         Case.tenant_id == current_user.tenant_id,
-        Case.deleted_at == None
+        Case.deleted_at.is_(None)
     ).all()
 
 
@@ -66,7 +66,7 @@ def get_case(
     case = db.query(Case).filter(
         Case.id == case_id,
         Case.tenant_id == current_user.tenant_id,
-        Case.deleted_at == None
+        Case.deleted_at.is_(None)
     ).first()
 
     if not case:
@@ -87,7 +87,7 @@ def update_case(
     case = db.query(Case).filter(
         Case.id == case_id,
         Case.tenant_id == current_user.tenant_id,
-        Case.deleted_at == None
+        Case.deleted_at.is_(None)
     ).first()
 
     if not case:
@@ -103,7 +103,7 @@ def update_case(
         client = db.query(Client).filter(
             Client.id == case_data.client_id,
             Client.tenant_id == current_user.tenant_id,
-            Client.deleted_at == None
+            Client.deleted_at.is_(None)
         ).first()
 
         if not client:
@@ -137,7 +137,7 @@ def delete_case(
     case = db.query(Case).filter(
         Case.id == case_id,
         Case.tenant_id == current_user.tenant_id,
-        Case.deleted_at == None
+        Case.deleted_at.is_(None)
     ).first()
 
     if not case:

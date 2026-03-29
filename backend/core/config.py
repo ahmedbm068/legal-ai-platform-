@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     TRANSCRIPTION_BASE_URL: Optional[str] = None
     TRANSCRIPTION_MODEL: str = "gpt-4o-mini-transcribe"
     LOCAL_TRANSCRIPTION_MODEL: str = "openai/whisper-tiny"
+    TRANSCRIPTION_DEVICE: str = "auto"
+    LOCAL_TRANSCRIPTION_PREFER_LOCAL_FILES: bool = True
+    TRANSCRIPTION_PREWARM_ON_STARTUP: bool = True
     TRANSCRIPTION_REMOTE_ENABLED: bool = True
     OPENROUTER_SITE_URL: Optional[str] = None
     OPENROUTER_APP_NAME: str = "legal-ai-platform"

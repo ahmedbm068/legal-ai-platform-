@@ -19,7 +19,7 @@ def list_users(
 
     users = db.query(User).filter(
         User.tenant_id == current_user.tenant_id,
-        User.deleted_at == None
+        User.deleted_at.is_(None)
     ).all()
 
     return users

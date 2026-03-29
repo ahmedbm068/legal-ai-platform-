@@ -1,20 +1,24 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class ClientPortalRegisterRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     full_name: str = Field(..., min_length=2)
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=10, max_length=256)
     phone: Optional[str] = None
     address: Optional[str] = None
 
 
 class ClientPortalLoginRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=1, max_length=256)
 
 
 class ClientPortalToken(BaseModel):
@@ -27,13 +31,17 @@ class ClientPortalMessageResponse(BaseModel):
 
 
 class ClientPortalLoginCodeRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=1, max_length=256)
 
 
 class ClientPortalLoginCodeVerifyRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     email: EmailStr
-    code: str = Field(..., min_length=6, max_length=6)
+    code: str = Field(..., pattern=r"^\d{6}$")
 
 
 class ClientPortalAccountOut(BaseModel):

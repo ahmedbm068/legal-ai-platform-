@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import wave
 from typing import Any
 
@@ -10,6 +11,9 @@ from openai import APIError, AuthenticationError, RateLimitError
 from backend.core.config import settings
 
 
+logger = logging.getLogger(__name__)
+
+
 def looks_like_html_error_page(value: str) -> bool:
     normalized = value.lstrip().lower()
     return normalized.startswith("<!doctype html") or normalized.startswith("<html")
@@ -18,6 +22,8 @@ def looks_like_html_error_page(value: str) -> bool:
 class TranscriptionService:
     def __init__(self) -> None:
         self._local_pipeline = None
+        self._logged_remote_skip = False
+        self._logged_local_pipeline = False
 
     def _get_client(self) -> OpenAI | None:
         if not settings.TRANSCRIPTION_REMOTE_ENABLED:
@@ -38,17 +44,56 @@ class TranscriptionService:
         base_url = (settings.TRANSCRIPTION_BASE_URL or settings.LLM_BASE_URL or "").lower().strip()
         return "openrouter.ai" in base_url and not settings.TRANSCRIPTION_BASE_URL
 
+    def _resolve_local_device(self) -> int | str:
+        configured_device = (settings.TRANSCRIPTION_DEVICE or "auto").strip().lower()
+        if configured_device == "auto":
+            try:
+                import torch
+
+                return 0 if torch.cuda.is_available() else -1
+            except Exception:
+                return -1
+
+        if configured_device == "cpu":
+            return -1
+
+        if configured_device == "cuda":
+            return 0
+
+        return settings.TRANSCRIPTION_DEVICE
+
     def _get_local_pipeline(self):
         if self._local_pipeline is not None:
             return self._local_pipeline
 
         from transformers import pipeline
 
-        self._local_pipeline = pipeline(
-            "automatic-speech-recognition",
-            model=settings.LOCAL_TRANSCRIPTION_MODEL,
-            device=-1,
-        )
+        device = self._resolve_local_device()
+        pipeline_kwargs: dict[str, Any] = {
+            "task": "automatic-speech-recognition",
+            "model": settings.LOCAL_TRANSCRIPTION_MODEL,
+            "device": device,
+        }
+
+        if settings.LOCAL_TRANSCRIPTION_PREFER_LOCAL_FILES:
+            try:
+                self._local_pipeline = pipeline(
+                    local_files_only=True,
+                    **pipeline_kwargs,
+                )
+            except Exception:
+                # Cache miss or partial cache: retry online so first-time setup still works.
+                self._local_pipeline = pipeline(**pipeline_kwargs)
+        else:
+            self._local_pipeline = pipeline(**pipeline_kwargs)
+
+        if not self._logged_local_pipeline:
+            logger.info(
+                "Loaded local transcription pipeline with model=%s device=%s",
+                settings.LOCAL_TRANSCRIPTION_MODEL,
+                device,
+            )
+            self._logged_local_pipeline = True
         return self._local_pipeline
 
     def _load_wav_audio(self, file_path: str) -> tuple[np.ndarray, int]:
@@ -80,6 +125,21 @@ class TranscriptionService:
 
         return audio, sample_rate
 
+    def _resample_audio(self, audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
+        if source_rate == target_rate or audio.size == 0:
+            return audio
+
+        if source_rate <= 0 or target_rate <= 0:
+            raise ValueError("Invalid sample rate for resampling.")
+
+        source_indices = np.arange(audio.size, dtype=np.float64)
+        duration = audio.size / float(source_rate)
+        target_size = max(1, int(round(duration * float(target_rate))))
+        target_indices = np.arange(target_size, dtype=np.float64) * (float(source_rate) / float(target_rate))
+        target_indices = np.clip(target_indices, 0.0, max(0.0, audio.size - 1))
+        resampled = np.interp(target_indices, source_indices, audio.astype(np.float64))
+        return resampled.astype(np.float32)
+
     def _local_transcribe_file(self, file_path: str) -> dict[str, Any]:
         if not file_path.lower().endswith(".wav"):
             return {
@@ -102,6 +162,13 @@ class TranscriptionService:
                 }
 
             recognizer = self._get_local_pipeline()
+            target_rate = int(
+                getattr(getattr(recognizer, "feature_extractor", None), "sampling_rate", sample_rate)
+            )
+            if sample_rate != target_rate:
+                audio = self._resample_audio(audio, sample_rate, target_rate)
+                sample_rate = target_rate
+
             result = recognizer(
                 {"array": audio, "sampling_rate": sample_rate},
                 return_timestamps=False,
@@ -139,6 +206,14 @@ class TranscriptionService:
 
         if self._should_skip_remote_transcription():
             # OpenRouter model routes are great for text LLM tasks but often unreliable for speech endpoints.
+            if not self._logged_remote_skip:
+                logger.info(
+                    "Skipping remote transcription because base_url=%s appears to be OpenRouter without a dedicated "
+                    "TRANSCRIPTION_BASE_URL. Falling back to local model=%s.",
+                    settings.LLM_BASE_URL,
+                    settings.LOCAL_TRANSCRIPTION_MODEL,
+                )
+                self._logged_remote_skip = True
             return self._local_transcribe_file(file_path)
 
         if not client:
