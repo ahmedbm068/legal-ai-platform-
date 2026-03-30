@@ -113,6 +113,7 @@ const UI_BASE_COPY: Record<string, string> = {
   voiceIntake: "Voice and intake",
   evidence: "Evidence",
   webResearch: "Web research",
+  workflowMode: "Workflow mode",
   modeAgent: "Mode agent",
   soon: "Soon",
   on: "On",
@@ -172,6 +173,8 @@ const UI_BASE_COPY: Record<string, string> = {
   password: "Password",
   working: "Working...",
   createAccount: "Create account",
+  optimizePrompt: "Optimize prompt",
+  optimizingPrompt: "Optimizing...",
   languageEnglish: "English",
   languageGerman: "Deutsch",
   languageArabic: "Arabic",
@@ -209,6 +212,7 @@ const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
     voiceIntake: "Sprache und Intake",
     evidence: "Belege",
     webResearch: "Web-Recherche",
+    workflowMode: "Workflow-Modus",
     modeAgent: "Agent-Modus",
     soon: "Bald",
     on: "An",
@@ -267,6 +271,8 @@ const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
     password: "Passwort",
     working: "Bitte warten...",
     createAccount: "Konto erstellen",
+    optimizePrompt: "Prompt optimieren",
+    optimizingPrompt: "Wird optimiert...",
     languageEnglish: "Englisch",
     languageGerman: "Deutsch",
     languageArabic: "Arabisch",
@@ -301,6 +307,7 @@ const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
     voiceIntake: "الصوت والاستقبال",
     evidence: "الأدلة",
     webResearch: "بحث الويب",
+    workflowMode: "وضع سير العمل",
     modeAgent: "وضع الوكيل",
     soon: "قريبًا",
     on: "تشغيل",
@@ -359,6 +366,8 @@ const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
     password: "كلمة المرور",
     working: "جاري العمل...",
     createAccount: "إنشاء حساب",
+    optimizePrompt: "تحسين الطلب",
+    optimizingPrompt: "جارٍ التحسين...",
     languageEnglish: "الإنجليزية",
     languageGerman: "الألمانية",
     languageArabic: "العربية",
@@ -502,7 +511,7 @@ function inferAgentFromIntent(intent?: string) {
   if (intent === "review_booking_case") return "Booking Agent";
   if (intent === "compare_case_documents") return "Document Comparison Agent";
   if (intent === "draft_client_email_case") return "Drafting Agent";
-  if (intent === "list_deadlines_case" || intent === "analyze_risks_case" || intent === "summarize_case") return "Case Reasoning Agent";
+  if (intent === "list_deadlines_case" || intent === "analyze_risks_case" || intent === "summarize_case" || intent === "summarize_and_analyze_risks_case") return "Case Reasoning Agent";
   if (intent === "summarize_document") return "Summarization Agent";
   if (intent.startsWith("ask_") || intent.startsWith("summarize_")) return "RAG + External Research";
   return "Copilot Core";
@@ -696,7 +705,8 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
 
   const [activeSources, setActiveSources] = useState<SourceItem[]>([]);
-  const [useExternalResearch, setUseExternalResearch] = useState(true);
+  const [useExternalResearch, setUseExternalResearch] = useState(false);
+  const [workflowFromPrompt, setWorkflowFromPrompt] = useState(false);
   const [retrievalDepth, setRetrievalDepth] = useState(5);
   const [workflowObjective, setWorkflowObjective] = useState("");
 
@@ -724,6 +734,7 @@ export default function App() {
   const [workflowLoading, setWorkflowLoading] = useState(false);
   const [showComposerMenu, setShowComposerMenu] = useState(false);
   const [agentModeEnabled, setAgentModeEnabled] = useState(false);
+  const [optimizingPrompt, setOptimizingPrompt] = useState(false);
   const [semanticTranslationBusy, setSemanticTranslationBusy] = useState(false);
 
   const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
@@ -1300,6 +1311,15 @@ export default function App() {
         return;
       }
 
+      if (workflowFromPrompt) {
+        if (!selectedCaseId) {
+          setError("Select a case first to run workflow mode.");
+          return;
+        }
+        await runAgentWorkflow(input);
+        return;
+      }
+
       const conversationHistory = chatMessages.slice(-18).map((item) => ({
         role: item.role,
         content: item.content,
@@ -1367,12 +1387,40 @@ export default function App() {
     }
   }
 
-  async function runAgentWorkflow() {
+  async function optimizePromptInput() {
+    if (!token || !chatInput.trim()) return;
+    try {
+      setOptimizingPrompt(true);
+      setError(null);
+      const basePrompt = chatInput.trim();
+      const caseSuffix = selectedCaseId ? ` for case #${selectedCaseId}` : "";
+      const response = await api.copilot(token, `Optimize prompt: ${basePrompt}${caseSuffix}`, {
+        topK: retrievalDepth,
+        useExternalResearch,
+        conversationHistory: [],
+      });
+      if (response.parsed_intent !== "optimize_prompt") {
+        throw new Error("Prompt optimizer mode was not applied.");
+      }
+      const normalizedAnswer = (response.answer || "").replace(/^\[intent=.*?\]\s*/i, "").trim();
+      const extracted = normalizedAnswer.match(/optimized prompt:\s*(.+)$/im)?.[1]?.trim();
+      const cleaned = (extracted || normalizedAnswer).split(/\n\s*notes\s*:/i)[0].trim();
+      if (cleaned) setChatInput(cleaned);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to optimize prompt.");
+    } finally {
+      setOptimizingPrompt(false);
+    }
+  }
+
+  async function runAgentWorkflow(objectiveOverride?: string) {
     if (!token || !selectedCaseId) return;
+    const resolvedObjective = (objectiveOverride ?? workflowObjective).trim();
     try {
       setWorkflowLoading(true);
       setError(null);
-      const response = await api.runAgentWorkflow(token, selectedCaseId, workflowObjective.trim() || undefined, retrievalDepth);
+      if (resolvedObjective) setWorkflowObjective(resolvedObjective);
+      const response = await api.runAgentWorkflow(token, selectedCaseId, resolvedObjective || undefined, retrievalDepth);
       setAgentWorkflow(response);
       setActiveSources(response.sources);
       const [translatedSummary] = await translateSemantically([response.verified_summary], "legal_content");
@@ -2112,36 +2160,46 @@ export default function App() {
                 </span>
                 <span className="menu-item-badge">{t("soon", "Soon")}</span>
               </button>
-              <button className={`menu-item ${useExternalResearch ? "active" : ""}`} onClick={() => setUseExternalResearch((current) => !current)} type="button">
+              <button
+                className={`menu-item ${useExternalResearch ? "active" : ""}`}
+                onClick={() => {
+                  setUseExternalResearch((current) => !current);
+                  setShowComposerMenu(false);
+                }}
+                type="button"
+              >
                 <span className="menu-item-left">
                   <MenuIcon icon="web" />
                   <span>{t("webResearch", "Web research")}</span>
                 </span>
                 <span className="menu-item-badge">{useExternalResearch ? t("on", "On") : t("off", "Off")}</span>
               </button>
-              <button className="menu-item" onClick={() => documentUploadInputRef.current?.click()} type="button">
+              <button
+                className="menu-item"
+                onClick={() => {
+                  documentUploadInputRef.current?.click();
+                  setShowComposerMenu(false);
+                }}
+                type="button"
+              >
                 <span className="menu-item-left">
                   <MenuIcon icon="document" />
                   <span>{t("uploadPdf", "Upload document")}</span>
                 </span>
               </button>
-              <button className="menu-item" onClick={() => audioUploadInputRef.current?.click()} type="button">
-                <span className="menu-item-left">
-                  <MenuIcon icon="audio" />
-                  <span>{t("uploadAudio", "Upload audio")}</span>
-                </span>
-              </button>
-              <button className="menu-item" onClick={() => void (recordingAudio ? stopRecording() : startRecording())} type="button">
-                <span className="menu-item-left">
-                  <MenuIcon icon="record" />
-                  <span>{recordingAudio ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}</span>
-                </span>
-              </button>
-              <button className="menu-item" disabled={!selectedCaseId || workflowLoading} onClick={() => void runAgentWorkflow()} type="button">
+              <button
+                className={`menu-item ${workflowFromPrompt ? "active" : ""}`}
+                onClick={() => {
+                  setWorkflowFromPrompt((current) => !current);
+                  setShowComposerMenu(false);
+                }}
+                type="button"
+              >
                 <span className="menu-item-left">
                   <MenuIcon icon="workflow" />
                   <span>{t("runWorkflow", "Run workflow")}</span>
                 </span>
+                <span className="menu-item-badge">{workflowFromPrompt ? t("on", "On") : t("off", "Off")}</span>
               </button>
             </div>
           ) : null}
@@ -2150,15 +2208,44 @@ export default function App() {
             <button className="composer-plus-trigger" type="button" onClick={() => setShowComposerMenu((current) => !current)}>
               +
             </button>
-            <textarea
-              onKeyDown={handleChatInputKeyDown}
-              placeholder={t("placeholder", "Ask anything about your case, document, risks, deadlines, or drafting.")}
-              value={chatInput}
-              onChange={(event) => setChatInput(event.target.value)}
-            />
-            <button className="primary-button composer-send" disabled={copilotLoading || !chatInput.trim()} type="submit">
-              {t("askCopilot", "Ask copilot")}
-            </button>
+            <div className="composer-input-column">
+              {useExternalResearch || workflowFromPrompt ? (
+                <div className="composer-chip-row">
+                  {useExternalResearch ? (
+                    <button className="composer-chip active" onClick={() => setUseExternalResearch(false)} type="button">
+                      <MenuIcon icon="web" />
+                      <span>{t("webResearch", "Web research")}</span>
+                    </button>
+                  ) : null}
+                  {workflowFromPrompt ? (
+                    <button className="composer-chip active" onClick={() => setWorkflowFromPrompt(false)} type="button">
+                      <MenuIcon icon="workflow" />
+                      <span>{t("workflowMode", "Workflow mode")}</span>
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              <textarea
+                onKeyDown={handleChatInputKeyDown}
+                placeholder={t("placeholder", "Ask anything about your case, document, risks, deadlines, or drafting.")}
+                value={chatInput}
+                onChange={(event) => setChatInput(event.target.value)}
+              />
+            </div>
+            <div className="composer-action-group">
+              <button
+                className="ghost-button composer-optimize"
+                disabled={copilotLoading || optimizingPrompt || !chatInput.trim()}
+                onClick={() => void optimizePromptInput()}
+                title={t("optimizePrompt", "Optimize prompt")}
+                type="button"
+              >
+                <MenuIcon icon="agent" />
+              </button>
+              <button className="primary-button composer-send" disabled={copilotLoading || optimizingPrompt || workflowLoading || !chatInput.trim()} type="submit">
+                {t("askCopilot", "Ask copilot")}
+              </button>
+            </div>
           </form>
 
           {providerStatus ? (
@@ -2167,6 +2254,7 @@ export default function App() {
               {activeJurisdiction?.country_display_name || t("noJurisdiction", "No jurisdiction")} - {externalResearchCount} {t("webSources", "web sources")}
             </div>
           ) : null}
+          {optimizingPrompt ? <div className="composer-status">{t("optimizingPrompt", "Optimizing...")}</div> : null}
           {agentModeEnabled ? <div className="composer-status">{t("modeAgent", "Mode agent")}: {t("soon", "Soon")}</div> : null}
           {workspaceLoading ? <div className="composer-status">{t("loadingWorkspace", "Loading workspace...")}</div> : null}
           {agentWorkflow ? <div className="composer-status">{t("workflowReady", "Workflow ready")}: {localizedText(agentWorkflow.objective, "general")}</div> : null}

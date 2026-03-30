@@ -312,6 +312,8 @@ textarea {
 }
 
 .chatgpt-shell {
+  --sidebar-width: 330px;
+  --chat-center-shift: calc(var(--sidebar-width) * -0.33);
   min-height: 100vh;
   display: grid;
   grid-template-columns: 330px minmax(0, 1fr);
@@ -320,6 +322,7 @@ textarea {
 }
 
 .chatgpt-shell.sidebar-collapsed {
+  --sidebar-width: 86px;
   grid-template-columns: 86px minmax(0, 1fr);
 }
 
@@ -661,6 +664,8 @@ textarea {
   width: min(820px, calc(100% - 2rem));
   margin-inline: auto;
   padding: 0.5rem 1rem;
+  transform: translateX(var(--chat-center-shift));
+  transition: transform 180ms ease;
 }
 
 .chatgpt-home-hero h1 {
@@ -681,6 +686,8 @@ textarea {
   display: grid;
   gap: 0.88rem;
   padding-bottom: 1.2rem;
+  transform: translateX(var(--chat-center-shift));
+  transition: transform 180ms ease;
 }
 
 .message-stream-chatgpt {
@@ -751,7 +758,9 @@ textarea {
 .chatgpt-composer-dock {
   width: min(860px, calc(100% - 2rem));
   margin: 0 auto 1.1rem;
+  justify-self: center;
   position: relative;
+  transform: translateX(var(--chat-center-shift));
   transition: transform 190ms ease, box-shadow 190ms ease;
 }
 
@@ -790,6 +799,61 @@ textarea {
   resize: none;
   padding: 0.45rem 0.12rem 0.46rem;
   box-shadow: none;
+}
+
+.composer-input-column {
+  display: grid;
+  min-width: 0;
+}
+
+.composer-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.08rem 0.12rem 0.3rem;
+  flex-wrap: wrap;
+}
+
+.composer-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-muted);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+}
+
+.composer-chip .menu-item-icon {
+  width: 13px;
+  height: 13px;
+}
+
+.composer-chip.active {
+  border-color: color-mix(in srgb, var(--brand-soft) 56%, var(--border));
+  background: color-mix(in srgb, var(--brand-soft) 18%, var(--bg-elevated));
+  color: var(--ink);
+}
+
+.composer-action-group {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+}
+
+.composer-optimize {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+  border-color: var(--border);
+  background: var(--bg-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
 }
 
 .composer-send {
@@ -895,7 +959,17 @@ textarea {
 }
 
 .chatgpt-main.processing .chatgpt-composer-dock {
-  transform: translateY(-1px);
+  transform: translateX(var(--chat-center-shift)) translateY(-1px);
+}
+
+.chatgpt-shell.rtl-layout .chatgpt-home-hero,
+.chatgpt-shell.rtl-layout .message-stream,
+.chatgpt-shell.rtl-layout .chatgpt-composer-dock {
+  transform: translateX(calc(-1 * var(--chat-center-shift)));
+}
+
+.chatgpt-shell.rtl-layout .chatgpt-main.processing .chatgpt-composer-dock {
+  transform: translateX(calc(-1 * var(--chat-center-shift))) translateY(-1px);
 }
 
 .chatgpt-main.processing .chatgpt-canvas {
@@ -928,9 +1002,11 @@ textarea {
 
 @media (max-width: 1220px) {
   .chatgpt-shell {
+    --sidebar-width: 296px;
     grid-template-columns: 296px minmax(0, 1fr);
   }
   .chatgpt-shell.sidebar-collapsed {
+    --sidebar-width: 82px;
     grid-template-columns: 82px minmax(0, 1fr);
   }
   .chatgpt-topbar {
@@ -939,6 +1015,10 @@ textarea {
 }
 
 @media (max-width: 980px) {
+  .chatgpt-shell {
+    --sidebar-width: 0px;
+    --chat-center-shift: 0px;
+  }
   .auth-panel {
     grid-template-columns: 1fr;
   }
@@ -967,9 +1047,9 @@ textarea {
   .chatgpt-composer {
     grid-template-columns: auto 1fr;
   }
-  .composer-send {
+  .composer-action-group {
     grid-column: 1 / -1;
-    justify-self: stretch;
+    justify-self: end;
   }
   .message {
     grid-template-columns: auto 1fr;

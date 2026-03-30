@@ -14,6 +14,16 @@ from backend.services.ai.llm_gateway import llm_gateway
 
 class CaseReasoningAgent(BaseAgent):
     agent_name = "case_reasoning_agent"
+    PROMPT_NOISE_FRAGMENTS = (
+        "<case_id>",
+        "<document_id>",
+        "optimize prompt:",
+        "what success looks like",
+        "email for case #<",
+        "upload of specific documents",
+        "pdf_ready.md",
+        "` - `",
+    )
 
     def __init__(self) -> None:
         self.client = llm_gateway.create_client()
@@ -281,8 +291,9 @@ class CaseReasoningAgent(BaseAgent):
             ),
         }
 
-    @staticmethod
+    @classmethod
     def _reconcile_risks_with_contract_signals(
+        cls,
         *,
         risks: list[str],
         has_governing_law_signal: bool,
@@ -290,6 +301,8 @@ class CaseReasoningAgent(BaseAgent):
     ) -> list[str]:
         normalized: list[str] = []
         for risk in risks:
+            if cls._looks_like_prompt_noise(risk):
+                continue
             lowered = risk.lower()
             if has_governing_law_signal and "no governing law clause" in lowered:
                 continue
@@ -302,8 +315,9 @@ class CaseReasoningAgent(BaseAgent):
                 normalized.append(risk)
         return normalized
 
-    @staticmethod
+    @classmethod
     def _clean_main_issues(
+        cls,
         *,
         issues: list[str],
         has_governing_law_signal: bool,
@@ -313,6 +327,9 @@ class CaseReasoningAgent(BaseAgent):
         for issue in issues:
             item = issue.strip()
             if not item:
+                continue
+
+            if cls._looks_like_prompt_noise(item):
                 continue
 
             lowered = item.lower()
@@ -327,6 +344,13 @@ class CaseReasoningAgent(BaseAgent):
                 cleaned.append(item)
 
         return cleaned
+
+    @classmethod
+    def _looks_like_prompt_noise(cls, value: str) -> bool:
+        candidate = str(value or "").strip().lower()
+        if not candidate:
+            return False
+        return any(fragment in candidate for fragment in cls.PROMPT_NOISE_FRAGMENTS)
 
     def _generate_llm_case_brief(
         self,

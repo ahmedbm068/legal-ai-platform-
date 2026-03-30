@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -21,6 +22,17 @@ from backend.services.ai.summarization_service import summarization_service
 
 
 class AgentWorkflowService:
+    TEMPLATE_NOISE_PATTERNS = (
+        r"<case_id>",
+        r"<document_id>",
+        r"optimize prompt:",
+        r"what success looks like",
+        r"email for case #<",
+        r"#<case_id>",
+        r"sources appea",
+        r"pdf_ready\.md",
+    )
+
     def __init__(self, rag_service: RagService) -> None:
         self.rag_service = rag_service
 
@@ -106,7 +118,9 @@ class AgentWorkflowService:
         stages["booking"] = self._serialize_stage(booking_stage)
         stage_outputs["booking"] = booking_stage.payload
 
-        summary_text = self._format_reasoning_summary(case_reasoning_stage.payload)
+        summary_text = self._sanitize_workflow_text(
+            self._format_reasoning_summary(case_reasoning_stage.payload)
+        ) or "Case evidence was retrieved, but no stable summary could be generated."
         formatted_sources = self._format_sources(retrieval_stage.payload.get("results") or [])
         verifier_stage = verifier_agent.verify_answer(
             question=retrieval_query,
@@ -116,10 +130,18 @@ class AgentWorkflowService:
         stages["verifier"] = self._serialize_stage(verifier_stage)
         stage_outputs["verifier"] = verifier_stage.payload
 
-        grounded_summary = (
-            verifier_stage.payload.get("supported_answer")
-            or summary_text
-        ).strip()
+        verified_candidate = str(verifier_stage.payload.get("supported_answer") or "").strip()
+        use_verified_candidate = bool(
+            verifier_stage.success
+            and verified_candidate
+            and len(verified_candidate) >= 80
+            and not self._looks_like_prompt_template_noise(verified_candidate)
+        )
+        grounded_summary = self._sanitize_workflow_text(
+            verified_candidate if use_verified_candidate else summary_text
+        )
+        if not grounded_summary:
+            grounded_summary = summary_text
 
         drafting_stage = drafting_agent.draft_client_update_email(
             case_id=case.id,
@@ -162,6 +184,38 @@ class AgentWorkflowService:
             "stages": stages,
             "stage_outputs": stage_outputs,
         }
+
+    @classmethod
+    def _looks_like_prompt_template_noise(cls, text: str) -> bool:
+        candidate = str(text or "").strip().lower()
+        if not candidate:
+            return False
+        return any(re.search(pattern, candidate) for pattern in cls.TEMPLATE_NOISE_PATTERNS)
+
+    @classmethod
+    def _sanitize_workflow_text(cls, text: str) -> str:
+        candidate = str(text or "").strip()
+        if not candidate:
+            return ""
+
+        lines: list[str] = []
+        for raw_line in candidate.splitlines():
+            line = raw_line.rstrip()
+            if not line.strip():
+                lines.append("")
+                continue
+            if cls._looks_like_prompt_template_noise(line):
+                continue
+            lines.append(line)
+
+        sanitized = "\n".join(lines).strip()
+        if not sanitized:
+            return ""
+
+        if cls._looks_like_prompt_template_noise(sanitized):
+            return ""
+
+        return sanitized
 
     def _run_intake_stage(self, *, voice_recordings: list[VoiceRecording]):
         transcript_parts = [

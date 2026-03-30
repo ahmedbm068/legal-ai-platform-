@@ -150,6 +150,7 @@ class CopilotService:
         ):
             prior_intent = history_context["last_intent"]
             if prior_intent in {
+                "summarize_and_analyze_risks_case",
                 "summarize_case",
                 "summarize_document",
                 "list_deadlines_case",
@@ -177,8 +178,26 @@ class CopilotService:
         use_external_research: bool = True,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        corrected_message = self._autocorrect_message(message=message, conversation_history=conversation_history)
-        parsed = command_parsing_service.parse(corrected_message)
+        # Preserve explicit intent commands (e.g. "Optimize prompt: ...") before any correction pass.
+        raw_parsed = command_parsing_service.parse(message)
+        if raw_parsed.get("intent") == "optimize_prompt":
+            parsed = raw_parsed
+        else:
+            corrected_message = self._autocorrect_message(message=message, conversation_history=conversation_history)
+            parsed = command_parsing_service.parse(corrected_message)
+            # Guardrail: keep strong raw case intents if correction pass accidentally dilutes intent.
+            strong_case_intents = {
+                "summarize_and_analyze_risks_case",
+                "summarize_case",
+                "analyze_risks_case",
+                "list_deadlines_case",
+                "build_timeline_case",
+                "review_booking_case",
+                "draft_client_email_case",
+                "compare_case_documents",
+            }
+            if raw_parsed.get("intent") in strong_case_intents and parsed.get("intent") in {"ask_global", "summarize_global"}:
+                parsed = raw_parsed
         history_context = self._build_history_context(conversation_history)
         parsed = self._apply_conversation_memory(
             parsed=parsed,
@@ -198,6 +217,12 @@ class CopilotService:
                 db=db,
                 tenant_id=tenant_id,
                 case_id=parsed["case_id"]
+            ),
+            "summarize_and_analyze_risks_case": lambda: self._summarize_and_analyze_case_risks(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed["case_id"],
+                requested_count=parsed.get("requested_count"),
             ),
             "summarize_document": lambda: self._summarize_document(
                 db=db,
@@ -431,6 +456,8 @@ class CopilotService:
             external_results=external_results,
             jurisdiction_prompt_block=jurisdiction_prompt_block,
         )
+        if self._looks_like_prompt_template_noise(synthesized_answer):
+            synthesized_answer = base_result.get("answer", "")
 
         merged_sources = list(base_result.get("sources") or [])
         merged_sources.extend(self._external_results_to_sources(external_results))
@@ -444,6 +471,28 @@ class CopilotService:
             "sources": merged_sources[:20],
             "jurisdiction": jurisdiction_context,
         }
+
+    @staticmethod
+    def _looks_like_prompt_template_noise(text: str) -> bool:
+        candidate = str(text or "").strip().lower()
+        if not candidate:
+            return False
+
+        noisy_fragments = (
+            "<case_id>",
+            "<document_id>",
+            "optimize prompt:",
+            "what success looks like",
+            "email for case #<",
+            "sources appea",
+            "pdf_ready.md",
+            "` - `",
+        )
+        if any(fragment in candidate for fragment in noisy_fragments):
+            return True
+        if "email for case #" in candidate and "optimize prompt" in candidate:
+            return True
+        return False
 
     def _synthesize_answer_with_external_research(
         self,
@@ -886,10 +935,79 @@ External research snippets (JSON):
             cleaned = str(item or "").strip().rstrip(".")
             if not cleaned:
                 continue
+            if CopilotService._looks_like_prompt_template_noise(cleaned):
+                continue
             cleaned = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
             if cleaned not in normalized:
                 normalized.append(cleaned)
         return normalized
+
+    @classmethod
+    def _normalize_next_steps(cls, items: List[str]) -> List[str]:
+        normalized: List[str] = []
+        for item in items:
+            cleaned = str(item or "").strip().rstrip(".")
+            if not cleaned:
+                continue
+            if cls._looks_like_prompt_template_noise(cleaned):
+                continue
+            if cleaned not in normalized:
+                normalized.append(cleaned)
+        return normalized
+
+    @classmethod
+    def _extract_concise_summary_text(
+        cls,
+        *,
+        narrative_summary: str,
+        overview: str,
+        main_issues: List[str],
+    ) -> str:
+        candidate = (narrative_summary or "").strip()
+        if not candidate:
+            candidate = (overview or "").strip()
+
+        if candidate:
+            lines: List[str] = []
+            stop_headers = {
+                "main issues:",
+                "key dates:",
+                "legal risks:",
+                "recommended next steps:",
+                "risk assessment:",
+                "practical next steps:",
+            }
+            for raw_line in candidate.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    if lines:
+                        break
+                    continue
+                lowered = line.lower()
+                if lowered in stop_headers:
+                    break
+                if line.startswith("-"):
+                    continue
+                if cls._looks_like_prompt_template_noise(line):
+                    continue
+                lines.append(line)
+                if len(lines) >= 2:
+                    break
+
+            concise = " ".join(lines).strip()
+            concise = re.sub(r"\s+", " ", concise)
+            if concise:
+                return concise[:420]
+
+        cleaned_issues = [
+            str(item or "").strip().rstrip(".")
+            for item in (main_issues or [])
+            if str(item or "").strip() and not cls._looks_like_prompt_template_noise(str(item or ""))
+        ]
+        if cleaned_issues:
+            return f"{cleaned_issues[0]}."
+
+        return "A concise case summary could not be synthesized from current evidence."
 
     @classmethod
     def _expand_risks_from_reasoning(cls, reasoning_payload: Dict[str, Any]) -> List[str]:
@@ -1022,6 +1140,105 @@ External research snippets (JSON):
 
         return {
             "answer": self._format_case_reasoning_answer(reasoning_payload),
+            "used_fallback": not bool(reasoning_payload.get("used_llm")),
+            "fallback_reason": None if reasoning_payload.get("used_llm") else "Used case reasoning agent heuristic synthesis",
+            "confidence": "high" if reasoning_payload.get("used_llm") else "medium",
+            "scope": "case",
+            "sources": (reasoning_payload.get("sources") or [])[:10],
+            "jurisdiction": jurisdiction_context,
+        }
+
+    def _summarize_and_analyze_case_risks(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        requested_count: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+        documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        if not documents:
+            return {
+                "answer": f"Case {case.id} has no documents yet.",
+                "used_fallback": True,
+                "fallback_reason": "No documents found in case",
+                "confidence": "low",
+                "scope": "case",
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        for document in documents:
+            self._ensure_document_summary(db=db, document=document)
+
+        reasoning_payload = self._run_case_reasoning(
+            db=db,
+            tenant_id=tenant_id,
+            case=case,
+            documents=documents,
+        )
+
+        narrative_summary = self._extract_concise_summary_text(
+            narrative_summary=str(reasoning_payload.get("narrative_summary") or ""),
+            overview=str(reasoning_payload.get("overview") or ""),
+            main_issues=reasoning_payload.get("main_issues") or [],
+        )
+        key_dates = reasoning_payload.get("key_dates") or []
+        legal_risks = self._normalize_risk_items(reasoning_payload.get("legal_risks") or [])
+        next_steps = self._normalize_next_steps(reasoning_payload.get("recommended_next_steps") or [])
+        evidence_sources = []
+        for source in reasoning_payload.get("sources") or []:
+            filename = str(source.get("filename") or "").strip()
+            if not filename:
+                continue
+            if filename in evidence_sources:
+                continue
+            evidence_sources.append(filename)
+            if len(evidence_sources) >= 3:
+                break
+
+        risk_count = min(max(requested_count or 5, 1), 10)
+        lines: List[str] = [f"Case #{case.id} summary and risk assessment:"]
+
+        lines.append("")
+        lines.append("Summary:")
+        lines.append(narrative_summary)
+
+        if evidence_sources:
+            lines.append("")
+            lines.append("Evidence basis:")
+            for filename in evidence_sources:
+                lines.append(f"- {filename}")
+
+        if key_dates:
+            lines.append("")
+            lines.append("Key Dates:")
+            for item in key_dates[:5]:
+                label = str(item.get("label") or "").strip()
+                value = str(item.get("value") or "").strip()
+                if label and value:
+                    lines.append(f"- {label}: {value}")
+
+        lines.append("")
+        lines.append("Risk Assessment:")
+        if legal_risks:
+            for risk in legal_risks[:risk_count]:
+                lines.append(f"- {risk}")
+        else:
+            lines.append("- No major legal risks were clearly detected from current evidence.")
+
+        lines.append("")
+        lines.append("Practical Next Steps:")
+        if next_steps:
+            for step in next_steps[:5]:
+                lines.append(f"- {step}")
+        else:
+            lines.append("- Review obligations, dates, and dispute mechanics manually against the uploaded documents.")
+
+        return {
+            "answer": "\n".join(lines).strip(),
             "used_fallback": not bool(reasoning_payload.get("used_llm")),
             "fallback_reason": None if reasoning_payload.get("used_llm") else "Used case reasoning agent heuristic synthesis",
             "confidence": "high" if reasoning_payload.get("used_llm") else "medium",

@@ -75,6 +75,13 @@ class CommandParsingService:
         if self._contains_any(lowered, ["optimize prompt", "improve prompt", "rewrite prompt", "better prompt", "prompt optimizer"]):
             return "optimize_prompt", "high"
 
+        # Handle compound requests first: "summarize ... and analyze risks ..."
+        if target_type == "case":
+            wants_summary = self._looks_like_summary_request(lowered=lowered, target_type=target_type)
+            wants_risks = self._contains_any(lowered, ["risk", "risks", "missing evidence", "unresolved", "weakness", "exposure", "issue", "issues"])
+            if wants_summary and wants_risks:
+                return "summarize_and_analyze_risks_case", "high"
+
         if self._contains_any(lowered, ["draft", "write", "prepare"]) and self._contains_any(lowered, ["email", "mail", "client update"]):
             if target_type == "case":
                 return "draft_client_email_case", "high"
