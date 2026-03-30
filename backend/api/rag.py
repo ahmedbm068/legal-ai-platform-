@@ -164,9 +164,14 @@ def copilot(
     return copilot_service.handle_message(
         db=db,
         tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        user_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
         message=data.message,
         top_k=data.top_k,
         use_external_research=data.use_external_research,
+        agent_mode=data.agent_mode,
+        workspace_case_id=data.workspace_case_id,
+        workspace_document_id=data.workspace_document_id,
         conversation_history=[item.model_dump() for item in data.conversation_history],
     )
 

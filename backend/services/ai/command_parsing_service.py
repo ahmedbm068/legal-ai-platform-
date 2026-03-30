@@ -59,6 +59,57 @@ class CommandParsingService:
         "liability",
         "liabilities",
     ]
+    CASE_STATUS_PATTERN = re.compile(
+        r"\b(open|in\s+progress|in_progress|closed|archived)\b",
+        re.IGNORECASE,
+    )
+    LIST_CASE_KEYWORDS = [
+        "list cases",
+        "show cases",
+        "my cases",
+        "active cases",
+        "all cases",
+    ]
+    LIST_CLIENT_KEYWORDS = [
+        "list clients",
+        "show clients",
+        "my clients",
+        "all clients",
+        "client list",
+    ]
+    LIST_CASE_DOCUMENT_KEYWORDS = [
+        "list documents",
+        "show documents",
+        "case documents",
+        "documents in this case",
+        "files in this case",
+        "list files",
+    ]
+    LIST_APPOINTMENT_KEYWORDS = [
+        "appointments",
+        "consultations",
+        "consultation requests",
+        "booking requests",
+        "meeting requests",
+    ]
+    CREATE_APPOINTMENT_KEYWORDS = [
+        "create appointment",
+        "schedule appointment",
+        "book appointment",
+        "new appointment",
+        "create consultation",
+        "schedule consultation",
+        "book consultation",
+    ]
+    UPDATE_STATUS_KEYWORDS = [
+        "update status",
+        "set status",
+        "change status",
+        "mark case",
+        "close case",
+        "archive case",
+        "reopen case",
+    ]
 
     def parse(self, message: str) -> Dict[str, Any]:
         original_message = (message or "").strip()
@@ -82,6 +133,7 @@ class CommandParsingService:
 
         intent, confidence = self._detect_intent(lowered=lowered, target_type=target_type)
         clean_query = self._clean_query(original_message)
+        requested_case_status = self._extract_case_status(lowered=lowered, intent=intent)
         requested_count = self._extract_requested_count(
             lowered=lowered,
             intent=intent,
@@ -95,11 +147,30 @@ class CommandParsingService:
             "case_id": case_id,
             "document_id": document_id,
             "clean_query": clean_query,
+            "requested_case_status": requested_case_status,
             "requested_count": requested_count,
             "confidence": confidence
         }
 
     def _detect_intent(self, lowered: str, target_type: Optional[str]) -> tuple[str, str]:
+        if self._contains_any(lowered, self.LIST_CLIENT_KEYWORDS):
+            return "list_clients", "high"
+
+        if self._contains_any(lowered, self.LIST_CASE_KEYWORDS):
+            return "list_cases", "high"
+
+        if target_type == "case" and self._contains_any(lowered, self.UPDATE_STATUS_KEYWORDS):
+            return "update_case_status", "high"
+
+        if target_type == "case" and self._contains_any(lowered, self.CREATE_APPOINTMENT_KEYWORDS):
+            return "create_case_appointment", "medium"
+
+        if target_type == "case" and self._contains_any(lowered, self.LIST_APPOINTMENT_KEYWORDS):
+            return "list_case_appointments", "high"
+
+        if target_type == "case" and self._contains_any(lowered, self.LIST_CASE_DOCUMENT_KEYWORDS):
+            return "list_case_documents", "high"
+
         if self._contains_any(lowered, ["optimize prompt", "improve prompt", "rewrite prompt", "better prompt", "prompt optimizer"]):
             return "optimize_prompt", "high"
 
@@ -258,6 +329,26 @@ class CommandParsingService:
             return None
 
         return min(count, 12)
+
+    def _extract_case_status(self, *, lowered: str, intent: str) -> Optional[str]:
+        if intent != "update_case_status":
+            return None
+
+        if "reopen" in lowered:
+            return "open"
+        if "close" in lowered:
+            return "closed"
+        if "archive" in lowered:
+            return "archived"
+
+        match = self.CASE_STATUS_PATTERN.search(lowered)
+        if not match:
+            return None
+
+        normalized = match.group(1).strip().lower().replace(" ", "_")
+        if normalized in {"open", "in_progress", "closed", "archived"}:
+            return normalized
+        return None
 
 
 command_parsing_service = CommandParsingService()

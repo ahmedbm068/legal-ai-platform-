@@ -22,6 +22,7 @@ const UI_LANGUAGE_STORAGE_KEY = "legal-ai-platform-ui-language";
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "legal-ai-platform-sidebar-collapsed";
 const CHAT_THREADS_STORAGE_KEY = "legal-ai-platform-chat-threads-v3";
 const CASE_REFERENCE_PATTERN = /\bcase\s*#?\s*(\d+)\b/i;
+const WRITE_ACTION_ROLES = new Set(["admin", "lawyer"]);
 
 type UiLanguage = "en" | "de" | "ar";
 
@@ -840,6 +841,26 @@ export default function App() {
       risk_focus_areas: [],
     };
   }, [latestAssistantMessage, selectedCase]);
+  const normalizedUserRole = (user?.role || "assistant").toLowerCase();
+  const canRunOperationalActions = WRITE_ACTION_ROLES.has(normalizedUserRole);
+  const pendingDocumentCount = useMemo(
+    () => documents.filter((item) => (item.processing_status || "").toLowerCase() !== "completed").length,
+    [documents]
+  );
+  const pendingConsultationCount = useMemo(
+    () =>
+      consultationRequests.filter((item) =>
+        ["new", "submitted", "ready_for_review"].includes((item.status || "").toLowerCase())
+      ).length,
+    [consultationRequests]
+  );
+  const failedRecordingCount = useMemo(
+    () =>
+      voiceRecordings.filter(
+        (item) => (item.transcription_status || "").toLowerCase() === "failed"
+      ).length,
+    [voiceRecordings]
+  );
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -854,6 +875,12 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (!canRunOperationalActions && workflowFromPrompt) {
+      setWorkflowFromPrompt(false);
+    }
+  }, [canRunOperationalActions, workflowFromPrompt]);
 
   useEffect(() => {
     if (!languageSwitchInitializedRef.current) {
@@ -1416,6 +1443,9 @@ export default function App() {
       const response = await api.copilot(token, scopedMessage, {
         topK: retrievalDepth,
         useExternalResearch,
+        agentMode: agentModeEnabled,
+        workspaceCaseId: selectedCaseId,
+        workspaceDocumentId: selectedDocumentId,
         conversationHistory,
       });
       const [translatedAnswer] = await translateSemantically([response.answer], "legal_content");
@@ -1431,6 +1461,11 @@ export default function App() {
             parsedIntent: response.parsed_intent,
             confidence: response.confidence,
             fallbackReason: response.fallback_reason,
+            actionCategory: response.action_category,
+            actionStatus: response.action_status,
+            permissionDenied: response.permission_denied,
+            steps: response.steps,
+            structuredResult: response.structured_result,
             sources: response.sources,
             artifact: response.artifact || null,
             jurisdiction: response.jurisdiction || null,
@@ -1439,6 +1474,10 @@ export default function App() {
         },
       ]);
       setActiveSources(response.sources);
+
+      if (response.permission_denied) {
+        setError(response.answer);
+      }
 
       if (response.artifact) {
         setArtifactContext(response.artifact);
@@ -1483,6 +1522,9 @@ export default function App() {
       const response = await api.copilot(token, `Optimize prompt: ${basePrompt}${caseSuffix}`, {
         topK: retrievalDepth,
         useExternalResearch,
+        agentMode: false,
+        workspaceCaseId: selectedCaseId,
+        workspaceDocumentId: selectedDocumentId,
         conversationHistory: [],
       });
       if (response.parsed_intent !== "optimize_prompt") {
@@ -1913,9 +1955,15 @@ export default function App() {
             </button>
             <button
               className="icon-sidebar-button"
-              disabled={!selectedCaseId || workflowLoading}
+              disabled={!selectedCaseId || workflowLoading || !canRunOperationalActions}
               onClick={() => void runAgentWorkflow()}
-              title={workflowLoading ? t("running", "Running...") : t("runWorkflow", "Run workflow")}
+              title={
+                !canRunOperationalActions
+                  ? "Your role is read-only for workflow execution."
+                  : workflowLoading
+                    ? t("running", "Running...")
+                    : t("runWorkflow", "Run workflow")
+              }
               type="button"
             >
               <SidebarIcon icon="features" />
@@ -2011,8 +2059,17 @@ export default function App() {
             <button className="secondary-button" onClick={() => void (recordingAudio ? stopRecording() : startRecording())} type="button">
               {recordingAudio ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
             </button>
-            <button className="secondary-button" disabled={!selectedCaseId || workflowLoading} onClick={() => void runAgentWorkflow()} type="button">
-              {workflowLoading ? t("running", "Running...") : t("runWorkflow", "Run workflow")}
+            <button
+              className="secondary-button"
+              disabled={!selectedCaseId || workflowLoading || !canRunOperationalActions}
+              onClick={() => void runAgentWorkflow()}
+              type="button"
+            >
+              {!canRunOperationalActions
+                ? "Run workflow (lawyer/admin only)"
+                : workflowLoading
+                  ? t("running", "Running...")
+                  : t("runWorkflow", "Run workflow")}
             </button>
             <label className="toggle-control">
               <input checked={useExternalResearch} onChange={(event) => setUseExternalResearch(event.target.checked)} type="checkbox" />
@@ -2210,6 +2267,29 @@ export default function App() {
           </div>
         </header>
 
+        <section className="lawyer-kpi-strip">
+          <article>
+            <span>Case status</span>
+            <strong>{selectedCase ? selectedCase.status : "-"}</strong>
+          </article>
+          <article>
+            <span>Documents</span>
+            <strong>{documents.length}</strong>
+          </article>
+          <article>
+            <span>Pending documents</span>
+            <strong>{pendingDocumentCount}</strong>
+          </article>
+          <article>
+            <span>Open intakes</span>
+            <strong>{pendingConsultationCount}</strong>
+          </article>
+          <article>
+            <span>Transcription failures</span>
+            <strong>{failedRecordingCount}</strong>
+          </article>
+        </section>
+
         <section className="chatgpt-canvas">
           {inConversationMode ? (
             <div className="message-stream message-stream-chatgpt">
@@ -2222,7 +2302,15 @@ export default function App() {
                       <div className="message-meta">
                         <span>{inferAgentFromIntent(message.meta.parsedIntent)}</span>
                         <span>{message.meta.confidence || "n/a"}</span>
+                        {message.meta.actionCategory ? <span>{message.meta.actionCategory}</span> : null}
+                        {message.meta.actionStatus ? <span>{message.meta.actionStatus}</span> : null}
+                        {message.meta.permissionDenied ? <span>permission denied</span> : null}
                         {message.meta.fallbackReason ? <span>{message.meta.fallbackReason}</span> : null}
+                      </div>
+                    ) : null}
+                    {message.meta?.steps?.length ? (
+                      <div className="message-meta message-steps">
+                        <span>{message.meta.steps.slice(0, 3).join(" | ")}</span>
                       </div>
                     ) : null}
                     {message.role === "assistant" ? (
@@ -2269,7 +2357,7 @@ export default function App() {
                   <MenuIcon icon="agent" />
                   <span>{t("modeAgent", "Mode agent")}</span>
                 </span>
-                <span className="menu-item-badge">{t("soon", "Soon")}</span>
+                <span className="menu-item-badge">{agentModeEnabled ? t("on", "On") : t("off", "Off")}</span>
               </button>
               <button
                 className={`menu-item ${useExternalResearch ? "active" : ""}`}
@@ -2287,6 +2375,7 @@ export default function App() {
               </button>
               <button
                 className={`menu-item ${workflowFromPrompt ? "active" : ""}`}
+                disabled={!canRunOperationalActions}
                 onClick={() => {
                   setWorkflowFromPrompt((current) => !current);
                   setShowComposerMenu(false);
@@ -2297,7 +2386,13 @@ export default function App() {
                   <MenuIcon icon="workflow" />
                   <span>{t("runWorkflow", "Run workflow")}</span>
                 </span>
-                <span className="menu-item-badge">{workflowFromPrompt ? t("on", "On") : t("off", "Off")}</span>
+                <span className="menu-item-badge">
+                  {!canRunOperationalActions
+                    ? "Lawyer/Admin"
+                    : workflowFromPrompt
+                      ? t("on", "On")
+                      : t("off", "Off")}
+                </span>
               </button>
             </div>
           ) : null}
@@ -2307,8 +2402,14 @@ export default function App() {
               +
             </button>
             <div className="composer-input-column">
-              {useExternalResearch || workflowFromPrompt ? (
+              {useExternalResearch || workflowFromPrompt || agentModeEnabled ? (
                 <div className="composer-chip-row">
+                  {agentModeEnabled ? (
+                    <button className="composer-chip active" onClick={() => setAgentModeEnabled(false)} type="button">
+                      <MenuIcon icon="agent" />
+                      <span>{t("modeAgent", "Mode agent")}</span>
+                    </button>
+                  ) : null}
                   {useExternalResearch ? (
                     <button className="composer-chip active" onClick={() => setUseExternalResearch(false)} type="button">
                       <MenuIcon icon="web" />
@@ -2353,7 +2454,14 @@ export default function App() {
             </div>
           ) : null}
           {optimizingPrompt ? <div className="composer-status">{t("optimizingPrompt", "Optimizing...")}</div> : null}
-          {agentModeEnabled ? <div className="composer-status">{t("modeAgent", "Mode agent")}: {t("soon", "Soon")}</div> : null}
+          {agentModeEnabled ? (
+            <div className="composer-status">
+              {t("modeAgent", "Mode agent")}:{" "}
+              {canRunOperationalActions
+                ? "analysis + query + authorized actions"
+                : "analysis + query only (read-only role)"}
+            </div>
+          ) : null}
           {workspaceLoading ? <div className="composer-status">{t("loadingWorkspace", "Loading workspace...")}</div> : null}
           {agentWorkflow ? <div className="composer-status">{t("workflowReady", "Workflow ready")}: {localizedText(agentWorkflow.objective, "general")}</div> : null}
           {selectedDocument ? <div className="composer-status">{t("focusedDocument", "Focused document")}: {selectedDocument.filename}</div> : null}

@@ -152,6 +152,12 @@ export interface CopilotResponse {
   parsed_intent: string;
   target_type: string | null;
   target_id: number | null;
+  agent_mode?: boolean;
+  action_category?: string;
+  action_status?: string | null;
+  permission_denied?: boolean;
+  steps?: string[];
+  structured_result?: Record<string, unknown>;
   answer: string;
   used_fallback: boolean;
   fallback_reason: string | null;
@@ -322,6 +328,11 @@ export interface ChatMessage {
     parsedIntent?: string;
     confidence?: string;
     fallbackReason?: string | null;
+    actionCategory?: string;
+    actionStatus?: string | null;
+    permissionDenied?: boolean;
+    steps?: string[];
+    structuredResult?: Record<string, unknown>;
     sources?: SourceItem[];
     artifact?: ArtifactContext | null;
     jurisdiction?: JurisdictionContext | null;

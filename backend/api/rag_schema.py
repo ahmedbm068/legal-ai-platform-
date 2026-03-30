@@ -37,6 +37,9 @@ class CopilotRequest(BaseModel):
     message: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
     use_external_research: bool = True
+    agent_mode: bool = False
+    workspace_case_id: Optional[int] = Field(default=None, ge=1)
+    workspace_document_id: Optional[int] = Field(default=None, ge=1)
     conversation_history: List[ConversationTurn] = Field(default_factory=list, max_length=30)
 
 
@@ -141,6 +144,12 @@ class CopilotResponse(BaseModel):
     parsed_intent: str
     target_type: Optional[str] = None
     target_id: Optional[int] = None
+    agent_mode: bool = False
+    action_category: str = "analysis"
+    action_status: Optional[str] = None
+    permission_denied: bool = False
+    steps: List[str] = Field(default_factory=list)
+    structured_result: Dict[str, Any] = Field(default_factory=dict)
     answer: str
     used_fallback: bool
     fallback_reason: Optional[str] = None

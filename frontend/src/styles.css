@@ -593,7 +593,7 @@ textarea {
 
 .chatgpt-main {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   min-width: 0;
   height: 100vh;
   transition: background 180ms ease;
@@ -652,6 +652,34 @@ textarea {
   min-height: 0;
   overflow-y: auto;
   padding: 0.7rem 0 1rem;
+}
+
+.lawyer-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.45rem;
+  padding: 0.62rem 1rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-muted) 40%, transparent);
+}
+
+.lawyer-kpi-strip article {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  padding: 0.42rem 0.55rem;
+}
+
+.lawyer-kpi-strip span {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.lawyer-kpi-strip strong {
+  display: block;
+  margin-top: 0.14rem;
+  font-size: 0.9rem;
 }
 
 .chatgpt-main.home-mode .chatgpt-canvas {
@@ -753,6 +781,13 @@ textarea {
   padding: 0.18rem 0.46rem;
   font-size: 0.72rem;
   color: var(--ink-faint);
+}
+
+.message-steps span {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .message-feedback-row {
@@ -931,6 +966,11 @@ textarea {
   background: color-mix(in srgb, var(--brand-soft) 16%, var(--bg-elevated));
 }
 
+.composer-plus-menu .menu-item:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
 .menu-item-left {
   display: inline-flex;
   align-items: center;
@@ -1070,6 +1110,9 @@ textarea {
     flex-wrap: wrap;
     justify-content: flex-end;
   }
+  .lawyer-kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 640px) {
@@ -1082,5 +1125,8 @@ textarea {
   }
   .message {
     grid-template-columns: auto 1fr;
+  }
+  .lawyer-kpi-strip {
+    grid-template-columns: 1fr;
   }
 }

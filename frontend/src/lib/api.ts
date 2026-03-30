@@ -182,6 +182,9 @@ export const api = {
     options?: {
       topK?: number;
       useExternalResearch?: boolean;
+      agentMode?: boolean;
+      workspaceCaseId?: number | null;
+      workspaceDocumentId?: number | null;
       conversationHistory?: Array<{
         role: "user" | "assistant";
         content: string;
@@ -198,6 +201,9 @@ export const api = {
         message,
         top_k: options?.topK ?? 5,
         use_external_research: options?.useExternalResearch ?? true,
+        agent_mode: options?.agentMode ?? false,
+        workspace_case_id: options?.workspaceCaseId ?? null,
+        workspace_document_id: options?.workspaceDocumentId ?? null,
         conversation_history: options?.conversationHistory ?? [],
       },
     }),

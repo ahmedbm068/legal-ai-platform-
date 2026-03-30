@@ -8,6 +8,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.models.case import Case
+from backend.models.client import Client
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
@@ -28,6 +29,30 @@ from backend.services.ai.summarization_service import summarization_service
 
 
 class CopilotService:
+    READ_ONLY_ROLES = {"admin", "lawyer", "assistant"}
+    CASE_WRITE_ROLES = {"admin", "lawyer"}
+    ACTION_CATEGORY_BY_INTENT = {
+        "list_cases": "query",
+        "list_clients": "query",
+        "list_case_documents": "query",
+        "list_case_appointments": "query",
+        "create_case_appointment": "crud",
+        "update_case_status": "crud",
+        "optimize_prompt": "analysis",
+        "summarize_case": "analysis",
+        "summarize_document": "analysis",
+        "summarize_and_analyze_risks_case": "analysis",
+        "analyze_risks_case": "analysis",
+        "list_deadlines_case": "analysis",
+        "build_timeline_case": "analysis",
+        "compare_case_documents": "analysis",
+        "review_booking_case": "analysis",
+        "draft_client_email_case": "analysis",
+        "ask_case": "query",
+        "ask_document": "query",
+        "ask_global": "query",
+        "summarize_global": "analysis",
+    }
     NUMBER_WORDS = {
         "one": 1,
         "two": 2,
@@ -67,6 +92,62 @@ class CopilotService:
         self.rag_service = rag_service
         self.client = llm_gateway.create_client()
         self.model = llm_gateway.default_model
+
+    @staticmethod
+    def _normalize_role(value: str | None) -> str:
+        normalized = str(value or "").strip().lower()
+        return normalized if normalized in {"admin", "lawyer", "assistant"} else "assistant"
+
+    def _permission_denied_response(self, *, user_role: str, action: str) -> Dict[str, Any]:
+        return {
+            "answer": f"Permission denied: your role '{user_role}' cannot perform '{action}'.",
+            "used_fallback": True,
+            "fallback_reason": "permission_denied",
+            "confidence": "high",
+            "scope": "global",
+            "sources": [],
+            "action_status": "denied",
+            "permission_denied": True,
+            "structured_result": {
+                "action": action,
+                "required_roles": sorted(self.CASE_WRITE_ROLES),
+                "current_role": user_role,
+            },
+        }
+
+    @staticmethod
+    def _normalize_status_value(value: str | None) -> str | None:
+        normalized = str(value or "").strip().lower().replace(" ", "_")
+        if normalized in {"open", "in_progress", "closed", "archived"}:
+            return normalized
+        return None
+
+    def _apply_workspace_scope(
+        self,
+        *,
+        parsed: Dict[str, Any],
+        intent: str,
+        workspace_case_id: Optional[int],
+        workspace_document_id: Optional[int],
+    ) -> Dict[str, Any]:
+        next_parsed = dict(parsed)
+
+        if intent in {"list_cases", "list_clients"}:
+            return next_parsed
+
+        if next_parsed.get("case_id") is None and isinstance(workspace_case_id, int):
+            next_parsed["case_id"] = workspace_case_id
+            if next_parsed.get("target_type") is None:
+                next_parsed["target_type"] = "case"
+                next_parsed["target_id"] = workspace_case_id
+
+        if next_parsed.get("document_id") is None and isinstance(workspace_document_id, int):
+            if next_parsed.get("target_type") in {None, "document"}:
+                next_parsed["document_id"] = workspace_document_id
+                next_parsed["target_type"] = "document"
+                next_parsed["target_id"] = workspace_document_id
+
+        return next_parsed
 
     def _autocorrect_message(self, message: str, conversation_history: List[Dict[str, Any]] | None = None) -> str:
         corrected = prompt_correction_agent.correct_query(
@@ -173,7 +254,11 @@ class CopilotService:
                 "compare_case_documents",
                 "ask_case",
                 "ask_document",
-            }:
+                "list_cases",
+                "list_clients",
+                "list_case_documents",
+                "list_case_appointments",
+                }:
                 updated["intent"] = prior_intent
 
             if updated.get("requested_count") is None and count_hint is not None:
@@ -185,9 +270,14 @@ class CopilotService:
         self,
         db: Session,
         tenant_id: int,
+        user_id: Optional[int],
+        user_role: str,
         message: str,
         top_k: int = 5,
         use_external_research: bool = True,
+        agent_mode: bool = False,
+        workspace_case_id: Optional[int] = None,
+        workspace_document_id: Optional[int] = None,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         # Preserve explicit intent commands (e.g. "Optimize prompt: ...") before any correction pass.
@@ -207,6 +297,12 @@ class CopilotService:
                 "review_booking_case",
                 "draft_client_email_case",
                 "compare_case_documents",
+                "list_case_documents",
+                "list_case_appointments",
+                "create_case_appointment",
+                "update_case_status",
+                "list_cases",
+                "list_clients",
             }
             if raw_parsed.get("intent") in strong_case_intents and parsed.get("intent") in {"ask_global", "summarize_global"}:
                 parsed = raw_parsed
@@ -217,8 +313,54 @@ class CopilotService:
             history_context=history_context,
         )
         intent = parsed["intent"]
+        parsed = self._apply_workspace_scope(
+            parsed=parsed,
+            intent=intent,
+            workspace_case_id=workspace_case_id,
+            workspace_document_id=workspace_document_id,
+        )
+        intent = parsed["intent"]
+        normalized_role = self._normalize_role(user_role)
+        steps: List[str] = [
+            f"Parsed intent: {intent}",
+            f"Target: {parsed.get('target_type') or 'global'}",
+            f"Role: {normalized_role}",
+        ]
 
         handlers = {
+            "list_cases": lambda: self._list_cases(
+                db=db,
+                tenant_id=tenant_id,
+            ),
+            "list_clients": lambda: self._list_clients(
+                db=db,
+                tenant_id=tenant_id,
+            ),
+            "list_case_documents": lambda: self._list_case_documents(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed["case_id"],
+            ),
+            "list_case_appointments": lambda: self._list_case_appointments(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed["case_id"],
+            ),
+            "create_case_appointment": lambda: self._create_case_appointment(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed["case_id"],
+                user_role=normalized_role,
+                message=parsed.get("clean_query") or parsed.get("raw_message") or message,
+            ),
+            "update_case_status": lambda: self._update_case_status(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed["case_id"],
+                user_role=normalized_role,
+                user_id=user_id,
+                requested_status=parsed.get("requested_case_status"),
+            ),
             "optimize_prompt": lambda: self._optimize_prompt_intent(
                 raw_prompt=parsed["clean_query"] or parsed["raw_message"],
                 intent=parsed["intent"],
@@ -324,12 +466,25 @@ class CopilotService:
         }
 
         result = handlers.get(intent, self._unsupported_intent_response)()
+        action_category = self.ACTION_CATEGORY_BY_INTENT.get(intent, "analysis")
+        action_status = str(result.pop("action_status", "")).strip() or ("fallback" if result.get("used_fallback") else "completed")
+        permission_denied = bool(result.pop("permission_denied", False))
+        structured_result = result.pop("structured_result", {})
+        if agent_mode:
+            steps.append(f"Action category: {action_category}")
+            steps.append(f"Action status: {action_status}")
 
         return {
             "message": message,
             "parsed_intent": parsed["intent"],
             "target_type": parsed["target_type"],
             "target_id": parsed["target_id"],
+            "agent_mode": bool(agent_mode),
+            "action_category": action_category,
+            "action_status": action_status,
+            "permission_denied": permission_denied,
+            "steps": steps if agent_mode else [],
+            "structured_result": structured_result if isinstance(structured_result, dict) else {},
             **result
         }
 
@@ -341,6 +496,315 @@ class CopilotService:
             "confidence": "low",
             "scope": "global",
             "sources": []
+        }
+
+    def _list_cases(self, *, db: Session, tenant_id: int) -> Dict[str, Any]:
+        rows = (
+            db.query(Case)
+            .filter(
+                Case.tenant_id == tenant_id,
+                Case.deleted_at.is_(None),
+            )
+            .order_by(Case.updated_at.desc(), Case.id.desc())
+            .limit(40)
+            .all()
+        )
+
+        if not rows:
+            return {
+                "answer": "No cases were found in your workspace.",
+                "used_fallback": True,
+                "fallback_reason": "No cases found",
+                "confidence": "medium",
+                "scope": "tenant",
+                "sources": [],
+                "structured_result": {"cases": []},
+            }
+
+        lines = ["Cases in your workspace:"]
+        for row in rows[:12]:
+            lines.append(
+                f"- Case #{row.id}: {row.title} | status: {row.status} | jurisdiction: {row.jurisdiction_country}"
+            )
+
+        return {
+            "answer": "\n".join(lines),
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "structured_result": {
+                "cases": [
+                    {
+                        "id": row.id,
+                        "title": row.title,
+                        "status": row.status,
+                        "jurisdiction_country": row.jurisdiction_country,
+                        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                    }
+                    for row in rows[:12]
+                ]
+            },
+        }
+
+    def _list_clients(self, *, db: Session, tenant_id: int) -> Dict[str, Any]:
+        rows = (
+            db.query(Client)
+            .filter(
+                Client.tenant_id == tenant_id,
+                Client.deleted_at.is_(None),
+            )
+            .order_by(Client.created_at.desc(), Client.id.desc())
+            .limit(60)
+            .all()
+        )
+        if not rows:
+            return {
+                "answer": "No clients were found in your workspace.",
+                "used_fallback": True,
+                "fallback_reason": "No clients found",
+                "confidence": "medium",
+                "scope": "tenant",
+                "sources": [],
+                "structured_result": {"clients": []},
+            }
+
+        lines = ["Clients in your workspace:"]
+        for row in rows[:15]:
+            email = row.email or "no-email"
+            lines.append(f"- Client #{row.id}: {row.name} | {email}")
+
+        return {
+            "answer": "\n".join(lines),
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "structured_result": {
+                "clients": [
+                    {
+                        "id": row.id,
+                        "name": row.name,
+                        "email": row.email,
+                        "phone": row.phone,
+                    }
+                    for row in rows[:15]
+                ]
+            },
+        }
+
+    def _list_case_documents(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+    ) -> Dict[str, Any]:
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+        if not documents:
+            return {
+                "answer": f"Case #{case.id} has no uploaded documents yet.",
+                "used_fallback": True,
+                "fallback_reason": "No documents in case",
+                "confidence": "medium",
+                "scope": "case",
+                "sources": [],
+                "structured_result": {"case_id": case.id, "documents": []},
+            }
+
+        lines = [f"Documents for case #{case.id} ({case.title}):"]
+        for row in documents[:15]:
+            lines.append(f"- Document #{row.id}: {row.filename} | status: {row.processing_status}")
+
+        return {
+            "answer": "\n".join(lines),
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [
+                self._build_source(
+                    document=row,
+                    snippet=(row.summary_short or row.summary or row.filename),
+                )
+                for row in documents[:10]
+            ],
+            "structured_result": {
+                "case_id": case.id,
+                "documents": [
+                    {
+                        "id": row.id,
+                        "filename": row.filename,
+                        "status": row.processing_status,
+                        "upload_timestamp": row.upload_timestamp.isoformat() if row.upload_timestamp else None,
+                    }
+                    for row in documents[:15]
+                ],
+            },
+        }
+
+    def _list_case_appointments(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+    ) -> Dict[str, Any]:
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
+        if not consultations:
+            return {
+                "answer": f"Case #{case.id} has no consultation requests yet.",
+                "used_fallback": True,
+                "fallback_reason": "No appointments in case",
+                "confidence": "medium",
+                "scope": "case",
+                "sources": [],
+                "structured_result": {"case_id": case.id, "appointments": []},
+            }
+
+        lines = [f"Consultation requests for case #{case.id}:"]
+        for row in consultations[:12]:
+            lines.append(
+                f"- Request #{row.id}: status={row.status}, urgency={row.urgency_level}, preferred schedule={row.preferred_schedule or 'not provided'}"
+            )
+
+        return {
+            "answer": "\n".join(lines),
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [],
+            "structured_result": {
+                "case_id": case.id,
+                "appointments": [
+                    {
+                        "id": row.id,
+                        "status": row.status,
+                        "urgency_level": row.urgency_level,
+                        "preferred_schedule": row.preferred_schedule,
+                        "issue_summary": row.issue_summary,
+                    }
+                    for row in consultations[:12]
+                ],
+            },
+        }
+
+    def _create_case_appointment(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        user_role: str,
+        message: str,
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="create_case_appointment")
+
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        cleaned_message = str(message or "").strip() or f"Appointment requested for case #{case.id}."
+        preferred_schedule = None
+        schedule_match = re.search(r"(?:on|at|for)\s+(.+)$", cleaned_message, re.IGNORECASE)
+        if schedule_match:
+            preferred_schedule = schedule_match.group(1).strip()[:240]
+
+        consultation = ConsultationRequest(
+            case_id=case.id,
+            tenant_id=tenant_id,
+            booking_intent="requested",
+            urgency_level="normal",
+            preferred_schedule=preferred_schedule,
+            issue_summary=cleaned_message[:900],
+            extracted_case_description=cleaned_message[:1500],
+            intake_notes="Created through copilot agent mode action.",
+            status="submitted",
+            extraction_source="copilot_agent_mode",
+            source_channel="internal_agent",
+        )
+        db.add(consultation)
+        db.commit()
+        db.refresh(consultation)
+
+        return {
+            "answer": (
+                f"Created consultation request #{consultation.id} for case #{case.id}."
+                f" Preferred schedule: {consultation.preferred_schedule or 'not provided'}."
+            ),
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "appointment": {
+                    "id": consultation.id,
+                    "status": consultation.status,
+                    "preferred_schedule": consultation.preferred_schedule,
+                    "issue_summary": consultation.issue_summary,
+                }
+            },
+        }
+
+    def _update_case_status(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        user_role: str,
+        user_id: Optional[int],
+        requested_status: Optional[str],
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="update_case_status")
+
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        if user_role == "lawyer" and user_id and case.lawyer_id != user_id:
+            return {
+                **self._permission_denied_response(user_role=user_role, action="update_case_status"),
+                "answer": f"Permission denied: you can only update cases assigned to you. Case #{case.id} is assigned to another lawyer.",
+            }
+
+        normalized_status = self._normalize_status_value(requested_status)
+        if not normalized_status:
+            return {
+                "answer": "I could not determine the target status. Use one of: open, in progress, closed, archived.",
+                "used_fallback": True,
+                "fallback_reason": "Missing status value",
+                "confidence": "medium",
+                "scope": "case",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"allowed_statuses": ["open", "in_progress", "closed", "archived"]},
+            }
+
+        previous_status = str(case.status or "")
+        case.status = normalized_status
+        db.commit()
+        db.refresh(case)
+
+        return {
+            "answer": f"Updated case #{case.id} status from {previous_status or 'unknown'} to {case.status}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "case": {
+                    "id": case.id,
+                    "title": case.title,
+                    "previous_status": previous_status,
+                    "new_status": case.status,
+                }
+            },
         }
 
     def _optimize_prompt_intent(

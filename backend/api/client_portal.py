@@ -14,8 +14,12 @@ from sqlalchemy.orm import Session
 
 from backend.api.client_portal_schema import (
     ClientPortalAccountOut,
+    ClientPortalActivityItem,
+    ClientPortalCaseItem,
     ClientPortalConsultationItem,
+    ClientPortalDashboardMetrics,
     ClientPortalDashboardResponse,
+    ClientPortalDocumentItem,
     ClientPortalLoginCodeRequest,
     ClientPortalLoginCodeVerifyRequest,
     ClientPortalLoginRequest,
@@ -253,6 +257,190 @@ def build_consultation_items(db: Session, account: ClientPortalAccount) -> list[
     ]
 
 
+def build_case_items(db: Session, account: ClientPortalAccount) -> tuple[list[dict], list[Case]]:
+    if not account.client_id:
+        return [], []
+
+    cases = (
+        db.query(Case)
+        .filter(
+            Case.client_id == account.client_id,
+            Case.tenant_id == account.tenant_id,
+            Case.deleted_at.is_(None),
+        )
+        .order_by(Case.updated_at.desc(), Case.id.desc())
+        .all()
+    )
+
+    if not cases:
+        return [], []
+
+    case_ids = [case.id for case in cases]
+
+    consultations = (
+        db.query(ConsultationRequest)
+        .filter(
+            ConsultationRequest.case_id.in_(case_ids),
+            ConsultationRequest.tenant_id == account.tenant_id,
+        )
+        .all()
+    )
+    consultations_by_case: dict[int, list[ConsultationRequest]] = {}
+    for row in consultations:
+        consultations_by_case.setdefault(row.case_id, []).append(row)
+
+    documents = (
+        db.query(Document)
+        .filter(
+            Document.case_id.in_(case_ids),
+            Document.tenant_id == account.tenant_id,
+        )
+        .all()
+    )
+    documents_by_case: dict[int, list[Document]] = {}
+    for row in documents:
+        documents_by_case.setdefault(row.case_id, []).append(row)
+
+    items: list[dict] = []
+    for case in cases:
+        case_consultations = consultations_by_case.get(case.id, [])
+        case_documents = documents_by_case.get(case.id, [])
+        latest_consultation = sorted(
+            case_consultations,
+            key=lambda item: (item.updated_at or item.created_at),
+            reverse=True,
+        )[0] if case_consultations else None
+        pending_documents = sum(1 for document in case_documents if (document.processing_status or "").lower() != "completed")
+
+        if pending_documents > 0:
+            next_step = "Your uploaded documents are currently being analyzed."
+        elif latest_consultation and (latest_consultation.status or "").lower() in {"submitted", "new", "ready_for_review"}:
+            next_step = "Your consultation request is under legal review."
+        elif (case.status or "").lower() in {"open", "in_progress"}:
+            next_step = "Your assigned lawyer is preparing the next legal step."
+        else:
+            next_step = "No immediate client action is required right now."
+
+        items.append(
+            {
+                "id": case.id,
+                "title": case.title,
+                "description": case.description,
+                "status": case.status,
+                "jurisdiction_country": case.jurisdiction_country,
+                "lawyer_name": case.lawyer.name if case.lawyer else None,
+                "document_count": len(case_documents),
+                "consultation_count": len(case_consultations),
+                "next_recommended_step": next_step,
+                "created_at": case.created_at,
+                "updated_at": case.updated_at,
+            }
+        )
+
+    return items, cases
+
+
+def build_document_items(db: Session, account: ClientPortalAccount) -> list[dict]:
+    if not account.client_id:
+        return []
+
+    documents = (
+        db.query(Document, Case)
+        .join(Case, Case.id == Document.case_id)
+        .filter(
+            Case.client_id == account.client_id,
+            Case.tenant_id == account.tenant_id,
+            Case.deleted_at.is_(None),
+            Document.tenant_id == account.tenant_id,
+        )
+        .order_by(Document.upload_timestamp.desc(), Document.id.desc())
+        .all()
+    )
+
+    return [
+        {
+            "id": document.id,
+            "case_id": document.case_id,
+            "case_title": case.title,
+            "filename": document.filename,
+            "file_type": document.file_type,
+            "file_size": document.file_size,
+            "processing_status": document.processing_status,
+            "upload_timestamp": document.upload_timestamp,
+        }
+        for document, case in documents
+    ]
+
+
+def build_dashboard_metrics(
+    consultations: list[dict],
+    cases: list[dict],
+    documents: list[dict],
+) -> dict:
+    active_cases = sum(1 for case in cases if (case.get("status") or "").lower() in {"open", "in_progress"})
+    pending_documents = sum(1 for document in documents if (document.get("processing_status") or "").lower() != "completed")
+    requests_under_review = sum(
+        1
+        for consultation in consultations
+        if (consultation.get("status") or "").lower() in {"submitted", "new", "ready_for_review"}
+    )
+    return {
+        "total_cases": len(cases),
+        "active_cases": active_cases,
+        "total_documents": len(documents),
+        "pending_documents": pending_documents,
+        "consultation_requests": len(consultations),
+        "requests_under_review": requests_under_review,
+    }
+
+
+def build_activity_feed(
+    consultations: list[dict],
+    documents: list[dict],
+    cases: list[dict],
+) -> list[dict]:
+    activity: list[dict] = []
+
+    for consultation in consultations[:12]:
+        activity.append(
+            {
+                "id": f"consultation-{consultation['id']}",
+                "event_type": "consultation_update",
+                "title": f"Consultation request is {consultation['status']}",
+                "description": consultation["issue_summary"],
+                "created_at": consultation["created_at"],
+                "case_id": consultation["case_id"],
+            }
+        )
+
+    for document in documents[:12]:
+        activity.append(
+            {
+                "id": f"document-{document['id']}",
+                "event_type": "document_update",
+                "title": f"Document '{document['filename']}' is {document['processing_status']}",
+                "description": f"Attached to case: {document['case_title']}",
+                "created_at": document["upload_timestamp"],
+                "case_id": document["case_id"],
+            }
+        )
+
+    for case in cases[:8]:
+        activity.append(
+            {
+                "id": f"case-{case['id']}",
+                "event_type": "case_update",
+                "title": f"Case status: {case['status']}",
+                "description": case["title"],
+                "created_at": case["updated_at"],
+                "case_id": case["id"],
+            }
+        )
+
+    activity.sort(key=lambda item: item.get("created_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return activity[:18]
+
+
 @router.post("/auth/register", response_model=ClientPortalMessageResponse, status_code=status.HTTP_201_CREATED)
 def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Depends(get_db)):
     normalized_email = data.email.lower().strip()
@@ -461,9 +649,18 @@ def dashboard(
     account: ClientPortalAccount = Depends(get_current_portal_account),
 ):
     db.refresh(account)
+    consultations = build_consultation_items(db, account)
+    case_items, _ = build_case_items(db, account)
+    document_items = build_document_items(db, account)
+    activity = build_activity_feed(consultations=consultations, documents=document_items, cases=case_items)
+    metrics = build_dashboard_metrics(consultations=consultations, cases=case_items, documents=document_items)
     return {
         "account": build_account_out(account),
-        "consultations": build_consultation_items(db, account),
+        "consultations": consultations,
+        "cases": case_items,
+        "documents": document_items,
+        "activity": activity,
+        "metrics": metrics,
     }
 
 
@@ -600,7 +797,23 @@ def submit_authenticated_intake(
         if document.file_type == "application/pdf":
             pipeline.process_document(document, db)
 
+    consultations = build_consultation_items(db, account)
+    case_items, _ = build_case_items(db, account)
+    document_items = build_document_items(db, account)
+
     return {
         "account": build_account_out(account),
-        "consultations": build_consultation_items(db, account),
+        "consultations": consultations,
+        "cases": case_items,
+        "documents": document_items,
+        "activity": build_activity_feed(
+            consultations=consultations,
+            documents=document_items,
+            cases=case_items,
+        ),
+        "metrics": build_dashboard_metrics(
+            consultations=consultations,
+            cases=case_items,
+            documents=document_items,
+        ),
     }
