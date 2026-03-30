@@ -50,6 +50,18 @@ class CopilotService:
         r"\b(just|only|same|again|i meant|shorter|one)\b",
         re.IGNORECASE,
     )
+    SUMMARY_STOP_HEADERS = (
+        "main issues:",
+        "key dates:",
+        "legal risks:",
+        "recommended next steps:",
+        "risk assessment:",
+        "practical next steps:",
+        "deadlines:",
+        "notice periods:",
+        "other time references:",
+        "evidence basis:",
+    )
 
     def __init__(self, rag_service: RagService):
         self.rag_service = rag_service
@@ -1010,6 +1022,44 @@ External research snippets (JSON):
         return "A concise case summary could not be synthesized from current evidence."
 
     @classmethod
+    def _to_clean_summary_paragraph(
+        cls,
+        text: str,
+        *,
+        fallback: str,
+        max_sentences: int = 3,
+        max_chars: int = 560,
+    ) -> str:
+        candidate = str(text or "").strip()
+        if not candidate:
+            return fallback
+
+        lowered = candidate.lower()
+        cut_indexes = [lowered.find(marker) for marker in cls.SUMMARY_STOP_HEADERS if lowered.find(marker) >= 0]
+        if cut_indexes:
+            candidate = candidate[: min(cut_indexes)].strip()
+
+        candidate = re.sub(r"^\s*(summary|overview)\s*:\s*", "", candidate, flags=re.IGNORECASE)
+        candidate = candidate.replace("\r", "\n")
+        candidate = re.sub(r"\n+", " ", candidate)
+        candidate = re.sub(r"\s+", " ", candidate).strip(" -:;,.")
+
+        if not candidate or cls._looks_like_prompt_template_noise(candidate):
+            return fallback
+
+        sentence_chunks = [part.strip() for part in re.split(r"(?<=[.!?])\s+", candidate) if part.strip()]
+        if sentence_chunks:
+            paragraph = " ".join(sentence_chunks[:max_sentences]).strip()
+        else:
+            paragraph = candidate
+
+        paragraph = re.sub(r"\s+", " ", paragraph).strip()
+        if len(paragraph) > max_chars:
+            paragraph = paragraph[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
+
+        return paragraph or fallback
+
+    @classmethod
     def _expand_risks_from_reasoning(cls, reasoning_payload: Dict[str, Any]) -> List[str]:
         candidates: List[str] = []
         for issue in reasoning_payload.get("main_issues") or []:
@@ -1092,7 +1142,10 @@ External research snippets (JSON):
             }
 
         return {
-            "answer": summary_text,
+            "answer": self._to_clean_summary_paragraph(
+                summary_text,
+                fallback=f"A concise summary is not available yet for {document.filename}.",
+            ),
             "used_fallback": False,
             "fallback_reason": None,
             "confidence": "high" if document.summary else "medium",
@@ -1130,21 +1183,58 @@ External research snippets (JSON):
 
         for document in documents:
             self._ensure_document_summary(db=db, document=document)
+        document_types: List[str] = []
+        parties: List[str] = []
+        paragraphs: List[str] = []
+        sources: List[Dict[str, Any]] = []
 
-        reasoning_payload = self._run_case_reasoning(
-            db=db,
-            tenant_id=tenant_id,
-            case=case,
-            documents=documents
+        for document in documents:
+            insights = self._safe_load_insights(document)
+
+            document_type = self._normalize_text(insights.get("document_type") or document.document_type)
+            if document_type and document_type not in document_types:
+                document_types.append(document_type)
+
+            for party in insights.get("parties_detected", []):
+                party_text = self._normalize_text(party)
+                if party_text and party_text not in parties and self._is_reasonable_party(party_text):
+                    parties.append(party_text)
+
+            source_text = (
+                document.summary
+                or document.summary_short
+                or self._normalize_text(insights.get("general_summary"))
+                or (document.redacted_text or document.extracted_text or "")[:1200]
+            )
+            doc_paragraph = self._to_clean_summary_paragraph(
+                source_text,
+                fallback=f"No processed summary is available yet for {document.filename}.",
+            )
+            paragraphs.append(f"Document {len(paragraphs) + 1} ({document.filename}): {doc_paragraph}")
+            sources.append(self._build_source(document=document, snippet=doc_paragraph))
+
+        overview_parts: List[str] = [f"Case {case.id} ({case.title}) currently includes {len(documents)} document(s)."]
+        if document_types:
+            overview_parts.append(f"The file set mainly includes {', '.join(document_types[:4])}.")
+        if parties:
+            overview_parts.append(f"The main parties across these documents are {', '.join(parties[:5])}.")
+
+        case_overview_paragraph = self._to_clean_summary_paragraph(
+            " ".join(overview_parts),
+            fallback=f"Case {case.id} ({case.title}) currently includes {len(documents)} document(s).",
+            max_sentences=4,
+            max_chars=640,
         )
 
+        answer = "\n\n".join([case_overview_paragraph, *paragraphs]).strip()
+
         return {
-            "answer": self._format_case_reasoning_answer(reasoning_payload),
-            "used_fallback": not bool(reasoning_payload.get("used_llm")),
-            "fallback_reason": None if reasoning_payload.get("used_llm") else "Used case reasoning agent heuristic synthesis",
-            "confidence": "high" if reasoning_payload.get("used_llm") else "medium",
+            "answer": answer,
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high" if all((doc.summary or "").strip() for doc in documents) else "medium",
             "scope": "case",
-            "sources": (reasoning_payload.get("sources") or [])[:10],
+            "sources": sources[:10],
             "jurisdiction": jurisdiction_context,
         }
 
