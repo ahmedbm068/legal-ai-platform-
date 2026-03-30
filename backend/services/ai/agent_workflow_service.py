@@ -15,6 +15,7 @@ from backend.services.ai.agents.drafting_agent import drafting_agent
 from backend.services.ai.agents.intake_agent import intake_agent
 from backend.services.ai.agents.timeline_agent import timeline_agent
 from backend.services.ai.agents.verifier_agent import verifier_agent
+from backend.services.ai.artifact_versioning_service import artifact_versioning_service
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
 
@@ -81,6 +82,7 @@ class AgentWorkflowService:
         case_reasoning_stage = case_reasoning_agent.analyze_case(
             case=case,
             documents=documents,
+            jurisdiction_country=case.jurisdiction_country,
             consultation_requests=consultation_requests,
             voice_recordings=voice_recordings,
         )
@@ -123,9 +125,30 @@ class AgentWorkflowService:
             case_id=case.id,
             case_title=case.title,
             case_summary=grounded_summary,
+            jurisdiction_country=case.jurisdiction_country,
         )
         stages["drafting"] = self._serialize_stage(drafting_stage)
         stage_outputs["drafting"] = drafting_stage.payload
+
+        drafted_email = (drafting_stage.payload.get("email_body") or "").strip()
+        if drafted_email:
+            try:
+                artifact_versioning_service.create_version(
+                    db=db,
+                    tenant_id=tenant_id,
+                    artifact_type="case_email",
+                    content=drafted_email,
+                    case_id=case.id,
+                    source_kind="agent_generation",
+                    metadata={
+                        "workflow": "agent_workflow",
+                        "objective": workflow_objective,
+                        "used_llm": bool(drafting_stage.payload.get("used_llm")),
+                    },
+                    auto_select=True,
+                )
+            except Exception:
+                pass
 
         return {
             "case_id": case.id,
@@ -134,7 +157,7 @@ class AgentWorkflowService:
             "retrieval_query": retrieval_query,
             "summary": summary_text,
             "verified_summary": grounded_summary,
-            "client_email": (drafting_stage.payload.get("email_body") or "").strip(),
+            "client_email": drafted_email,
             "sources": formatted_sources,
             "stages": stages,
             "stage_outputs": stage_outputs,

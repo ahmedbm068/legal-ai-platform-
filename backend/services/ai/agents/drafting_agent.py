@@ -17,6 +17,7 @@ class DraftingAgent(BaseAgent):
         case_id: int,
         case_title: str,
         case_summary: str,
+        jurisdiction_country: str | None = None,
     ) -> AgentResult:
         normalized_summary = (case_summary or "").strip()
         if not normalized_summary:
@@ -30,8 +31,15 @@ class DraftingAgent(BaseAgent):
             f"Starting drafting for case_id={case_id}.",
             "Using grounded case summary as drafting context.",
         ]
+        if jurisdiction_country:
+            trace.append(f"Applying jurisdiction context for {jurisdiction_country}.")
 
         if self.client:
+            jurisdiction_line = (
+                f"The case jurisdiction is {jurisdiction_country}. Keep wording aligned with that legal context.\n"
+                if jurisdiction_country
+                else ""
+            )
             prompt = f"""
 You are the Drafting Agent inside a legal AI platform.
 
@@ -49,6 +57,7 @@ Structure:
 
 Return only the email body.
 
+{jurisdiction_line}
 Case id: {case_id}
 Case title: {case_title}
 

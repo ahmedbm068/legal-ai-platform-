@@ -8,6 +8,7 @@ from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
+from backend.services.ai.jurisdiction_context_service import jurisdiction_context_service
 from backend.services.ai.llm_gateway import llm_gateway
 
 
@@ -23,6 +24,7 @@ class CaseReasoningAgent(BaseAgent):
         *,
         case: Case,
         documents: list[Document],
+        jurisdiction_country: str | None = None,
         consultation_requests: list[ConsultationRequest] | None = None,
         voice_recordings: list[VoiceRecording] | None = None,
     ) -> AgentResult:
@@ -41,17 +43,25 @@ class CaseReasoningAgent(BaseAgent):
             f"Received {len(documents)} documents, {len(consultation_requests)} consultation requests, "
             f"and {len(voice_recordings)} voice recordings.",
         ]
+        trace.append(
+            f"Using jurisdiction profile '{jurisdiction_context_service.normalize_country(jurisdiction_country)}'."
+        )
 
         heuristic_payload = self._build_heuristic_payload(
             case=case,
             documents=documents,
+            jurisdiction_country=jurisdiction_country,
             consultation_requests=consultation_requests,
             voice_recordings=voice_recordings,
         )
         trace.append("Built heuristic case intelligence payload.")
 
         if self.client:
-            llm_payload = self._generate_llm_case_brief(case=case, heuristic_payload=heuristic_payload)
+            llm_payload = self._generate_llm_case_brief(
+                case=case,
+                heuristic_payload=heuristic_payload,
+                jurisdiction_country=jurisdiction_country,
+            )
             if llm_payload:
                 heuristic_payload.update(llm_payload)
                 heuristic_payload["used_llm"] = True
@@ -95,9 +105,11 @@ class CaseReasoningAgent(BaseAgent):
         *,
         case: Case,
         documents: list[Document],
+        jurisdiction_country: str | None,
         consultation_requests: list[ConsultationRequest],
         voice_recordings: list[VoiceRecording],
     ) -> dict[str, Any]:
+        jurisdiction_profile = jurisdiction_context_service.get_profile(jurisdiction_country)
         document_summaries: list[str] = []
         parties: list[str] = []
         dates: list[dict[str, str]] = []
@@ -226,6 +238,21 @@ class CaseReasoningAgent(BaseAgent):
         if intake_items:
             overview_lines.append("Client intake context is available from consultation workflows.")
 
+        jurisdiction_risk_lines = [
+            f"Jurisdiction-specific review required: {item} ({jurisdiction_profile.display_name})."
+            for item in jurisdiction_profile.risk_focus_areas[:2]
+        ]
+        for item in jurisdiction_risk_lines:
+            if item not in risks:
+                risks.append(item)
+
+        jurisdiction_next_step = (
+            f"Validate obligations, enforcement assumptions, and risk posture under {jurisdiction_profile.display_name} "
+            "mandatory law and constitutional principles."
+        )
+        if jurisdiction_next_step not in actions:
+            actions.append(jurisdiction_next_step)
+
         return {
             "overview": " ".join(overview_lines).strip(),
             "main_issues": main_issues[:8],
@@ -238,6 +265,11 @@ class CaseReasoningAgent(BaseAgent):
             "intake_items": intake_items[:6],
             "transcript_highlights": transcript_highlights[:6],
             "sources": sources[:10],
+            "jurisdiction_country": jurisdiction_profile.country_code,
+            "jurisdiction_display_name": jurisdiction_profile.display_name,
+            "constitutional_references": jurisdiction_profile.constitutional_references,
+            "legal_guardrails": jurisdiction_profile.legal_guardrails,
+            "risk_focus_areas": jurisdiction_profile.risk_focus_areas,
             "_has_governing_law_signal": has_governing_law_signal,
             "_has_payment_terms_signal": has_payment_terms_signal,
             "narrative_summary": self._build_fallback_narrative(
@@ -301,7 +333,9 @@ class CaseReasoningAgent(BaseAgent):
         *,
         case: Case,
         heuristic_payload: dict[str, Any],
+        jurisdiction_country: str | None,
     ) -> dict[str, Any] | None:
+        jurisdiction_block = jurisdiction_context_service.get_prompt_block(jurisdiction_country)
         prompt = f"""
 You are the Case Reasoning Agent inside a legal AI platform.
 
@@ -323,6 +357,10 @@ Rules:
 - If evidence is thin, keep the wording cautious.
 - Do not invent legal conclusions, statutes, or deadlines.
 - Keep the output practical and concise.
+- Respect the jurisdiction guardrails below.
+
+Jurisdiction context:
+{jurisdiction_block}
 
 Case id: {case.id}
 Case title: {case.title}

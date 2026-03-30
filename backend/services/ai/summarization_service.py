@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.document import Document
 from backend.services.ai.agents.summarization_agent import summarization_agent
+from backend.services.ai.artifact_versioning_service import artifact_versioning_service
 from backend.services.ai.document_insight_service import document_insight_service
 from backend.services.ai.legal_text_formatter import LegalTextFormatter
 
@@ -109,6 +110,27 @@ class SummarizationService:
 
             db.commit()
             db.refresh(document)
+
+            try:
+                artifact_versioning_service.create_version(
+                    db=db,
+                    tenant_id=document.tenant_id,
+                    artifact_type="document_summary",
+                    content=document.summary or document.summary_short or "",
+                    case_id=document.case_id,
+                    document_id=document.id,
+                    source_kind="agent_generation",
+                    metadata={
+                        "summary_short": document.summary_short,
+                        "summary_source": document.summary_source,
+                        "summary_version": document.summary_version,
+                    },
+                    auto_select=True,
+                )
+            except Exception:
+                # Version history should never block summary generation itself.
+                pass
+
             return document
 
         except Exception as exc:

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional, List, Literal, Dict, Any
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,12 +21,23 @@ class SearchRequest(BaseModel):
     document_id: Optional[int] = None
 
 
+class ConversationTurn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1)
+    parsed_intent: Optional[str] = None
+    case_id: Optional[int] = Field(default=None, ge=1)
+    document_id: Optional[int] = Field(default=None, ge=1)
+
+
 class CopilotRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     message: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
     use_external_research: bool = True
+    conversation_history: List[ConversationTurn] = Field(default_factory=list, max_length=30)
 
 
 class AgentWorkflowRequest(BaseModel):
@@ -40,6 +52,15 @@ class LLMTestRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     prompt: str = Field(default="Reply with OK and the model family in one short sentence.", min_length=1)
+
+
+class SemanticTranslateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    texts: List[str] = Field(default_factory=list, min_length=1, max_length=40)
+    target_language: Literal["en", "de", "ar"] = "en"
+    source_language: Literal["auto", "en", "de", "ar"] = "auto"
+    domain: Literal["legal_ui", "legal_content", "general"] = "legal_content"
 
 
 class RetrievedChunk(BaseModel):
@@ -72,6 +93,40 @@ class SourceItem(BaseModel):
     snippet: str
 
 
+class ArtifactVersionOut(BaseModel):
+    id: int
+    tenant_id: int
+    case_id: Optional[int] = None
+    document_id: Optional[int] = None
+    artifact_type: Literal["document_summary", "case_email"]
+    version_number: int
+    content: str
+    source_kind: str
+    edit_instruction: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    is_selected: bool
+    parent_version_id: Optional[int] = None
+    created_by_user_id: Optional[int] = None
+    created_at: datetime
+
+
+class ArtifactContext(BaseModel):
+    artifact_type: Literal["document_summary", "case_email"]
+    case_id: Optional[int] = None
+    document_id: Optional[int] = None
+    selected_version_id: Optional[int] = None
+    version_count: int = 0
+    latest_version: Optional[ArtifactVersionOut] = None
+
+
+class JurisdictionContext(BaseModel):
+    country_code: str
+    country_display_name: str
+    constitutional_references: List[str] = Field(default_factory=list)
+    legal_guardrails: List[str] = Field(default_factory=list)
+    risk_focus_areas: List[str] = Field(default_factory=list)
+
+
 class AskResponse(BaseModel):
     answer: str
     used_fallback: bool
@@ -92,6 +147,8 @@ class CopilotResponse(BaseModel):
     confidence: str
     scope: str
     sources: List[SourceItem]
+    artifact: Optional[ArtifactContext] = None
+    jurisdiction: Optional[JurisdictionContext] = None
 
 
 class WorkflowStage(BaseModel):
@@ -130,3 +187,47 @@ class LLMTestResponse(BaseModel):
     model: str
     output: str
     error: Optional[str] = None
+
+
+class SemanticTranslateResponse(BaseModel):
+    target_language: Literal["en", "de", "ar"]
+    translations: List[str] = Field(default_factory=list)
+    used_fallback: bool
+
+
+class ArtifactVersionListResponse(BaseModel):
+    artifact_type: Literal["document_summary", "case_email"]
+    case_id: Optional[int] = None
+    document_id: Optional[int] = None
+    selected_version_id: Optional[int] = None
+    versions: List[ArtifactVersionOut] = Field(default_factory=list)
+
+
+class ArtifactVersionManualEditRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    artifact_type: Literal["document_summary", "case_email"]
+    case_id: Optional[int] = Field(default=None, ge=1)
+    document_id: Optional[int] = Field(default=None, ge=1)
+    content: str = Field(..., min_length=1)
+    edit_instruction: Optional[str] = None
+    parent_version_id: Optional[int] = Field(default=None, ge=1)
+
+
+class ArtifactVersionAgentReviseRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    artifact_type: Literal["document_summary", "case_email"]
+    case_id: Optional[int] = Field(default=None, ge=1)
+    document_id: Optional[int] = Field(default=None, ge=1)
+    instruction: str = Field(..., min_length=1)
+    base_version_id: Optional[int] = Field(default=None, ge=1)
+
+
+class ArtifactVersionMutationResponse(BaseModel):
+    artifact_type: Literal["document_summary", "case_email"]
+    case_id: Optional[int] = None
+    document_id: Optional[int] = None
+    selected_version_id: Optional[int] = None
+    version: ArtifactVersionOut
+    versions: List[ArtifactVersionOut] = Field(default_factory=list)

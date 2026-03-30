@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional
 from datetime import datetime
 from backend.core.enums import CaseStatus
+from backend.core.enums import JurisdictionCountry
 
 
 class CaseCreate(BaseModel):
@@ -14,6 +15,7 @@ class CaseCreate(BaseModel):
     status: CaseStatus = CaseStatus.open
 
     client_id: int = Field(..., ge=1)
+    jurisdiction_country: JurisdictionCountry = JurisdictionCountry.tunisia
 
 
 class CaseUpdate(BaseModel):
@@ -26,6 +28,7 @@ class CaseUpdate(BaseModel):
     status: Optional[CaseStatus] = None
 
     client_id: Optional[int] = Field(default=None, ge=1)
+    jurisdiction_country: Optional[JurisdictionCountry] = None
 
 
 class CaseOut(BaseModel):
@@ -45,5 +48,6 @@ class CaseOut(BaseModel):
     lawyer_id: int
 
     client_id: int
+    jurisdiction_country: JurisdictionCountry
 
     created_at: datetime

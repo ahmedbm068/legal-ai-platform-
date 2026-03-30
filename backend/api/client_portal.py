@@ -503,6 +503,7 @@ def submit_authenticated_intake(
         title=normalize_case_title(account.full_name, issue_summary),
         description=case_description or issue_summary,
         status="open",
+        jurisdiction_country="tunisia",
         tenant_id=account.tenant_id,
         lawyer_id=lawyer.id,
         client_id=client.id,

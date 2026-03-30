@@ -34,6 +34,9 @@ def create_case(
         title=case_data.title,
         description=case_data.description,
         status=case_data.status,
+        jurisdiction_country=case_data.jurisdiction_country.value
+        if hasattr(case_data.jurisdiction_country, "value")
+        else str(case_data.jurisdiction_country),
         tenant_id=current_user.tenant_id,
         lawyer_id=current_user.id,
         client_id=case_data.client_id
@@ -119,6 +122,13 @@ def update_case(
 
     if case_data.status is not None:
         case.status = case_data.status
+
+    if case_data.jurisdiction_country is not None:
+        case.jurisdiction_country = (
+            case_data.jurisdiction_country.value
+            if hasattr(case_data.jurisdiction_country, "value")
+            else str(case_data.jurisdiction_country)
+        )
 
     db.commit()
     db.refresh(case)

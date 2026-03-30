@@ -1,5 +1,7 @@
 import type {
   AgentWorkflowResponse,
+  ArtifactVersionListResponse,
+  ArtifactVersionMutationResponse,
   CaseItem,
   Client,
   ConsultationFromTranscriptResponse,
@@ -9,10 +11,12 @@ import type {
   FullDocumentAnalysis,
   LLMTestResponse,
   ProviderStatusResponse,
+  SemanticTranslateResponse,
   TokenResponse,
   UploadedDocumentResponse,
   UploadedVoiceRecordingResponse,
   User,
+  JurisdictionCountry,
   VoiceRecording,
 } from "../types";
 
@@ -93,7 +97,13 @@ export const api = {
 
   createCase: (
     token: string,
-    payload: { title: string; description: string; status: string; client_id: number }
+    payload: {
+      title: string;
+      description: string;
+      status: string;
+      client_id: number;
+      jurisdiction_country: JurisdictionCountry;
+    }
   ) =>
     request<CaseItem>("/cases/", {
       method: "POST",
@@ -170,6 +180,13 @@ export const api = {
     options?: {
       topK?: number;
       useExternalResearch?: boolean;
+      conversationHistory?: Array<{
+        role: "user" | "assistant";
+        content: string;
+        parsed_intent?: string;
+        case_id?: number | null;
+        document_id?: number | null;
+      }>;
     }
   ) =>
     request<CopilotResponse>("/ai/copilot", {
@@ -179,6 +196,7 @@ export const api = {
         message,
         top_k: options?.topK ?? 5,
         use_external_research: options?.useExternalResearch ?? true,
+        conversation_history: options?.conversationHistory ?? [],
       },
     }),
 
@@ -199,5 +217,79 @@ export const api = {
       method: "POST",
       token,
       body: { prompt },
+    }),
+
+  semanticTranslate: (
+    token: string,
+    payload: {
+      texts: string[];
+      target_language: "en" | "de" | "ar";
+      source_language?: "auto" | "en" | "de" | "ar";
+      domain?: "legal_ui" | "legal_content" | "general";
+    }
+  ) =>
+    request<SemanticTranslateResponse>("/ai/translate", {
+      method: "POST",
+      token,
+      body: payload,
+    }),
+
+  listArtifactVersions: (
+    token: string,
+    params: {
+      artifactType: "document_summary" | "case_email";
+      caseId?: number | null;
+      documentId?: number | null;
+    }
+  ) => {
+    const search = new URLSearchParams({ artifact_type: params.artifactType });
+    if (params.caseId) {
+      search.set("case_id", String(params.caseId));
+    }
+    if (params.documentId) {
+      search.set("document_id", String(params.documentId));
+    }
+    return request<ArtifactVersionListResponse>(`/ai/artifacts/versions?${search.toString()}`, {
+      token,
+    });
+  },
+
+  editArtifactVersion: (
+    token: string,
+    payload: {
+      artifact_type: "document_summary" | "case_email";
+      case_id?: number | null;
+      document_id?: number | null;
+      content: string;
+      edit_instruction?: string | null;
+      parent_version_id?: number | null;
+    }
+  ) =>
+    request<ArtifactVersionMutationResponse>("/ai/artifacts/versions/edit", {
+      method: "POST",
+      token,
+      body: payload,
+    }),
+
+  reviseArtifactVersionWithAgent: (
+    token: string,
+    payload: {
+      artifact_type: "document_summary" | "case_email";
+      case_id?: number | null;
+      document_id?: number | null;
+      instruction: string;
+      base_version_id?: number | null;
+    }
+  ) =>
+    request<ArtifactVersionMutationResponse>("/ai/artifacts/versions/agent-revise", {
+      method: "POST",
+      token,
+      body: payload,
+    }),
+
+  selectArtifactVersion: (token: string, versionId: number) =>
+    request<ArtifactVersionMutationResponse>(`/ai/artifacts/versions/${versionId}/select`, {
+      method: "POST",
+      token,
     }),
 };

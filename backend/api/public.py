@@ -145,6 +145,7 @@ def submit_public_intake(
             title=normalize_case_title(normalized_client_name, issue_summary),
             description=case_description or issue_summary,
             status="open",
+            jurisdiction_country="tunisia",
             tenant_id=tenant.id,
             lawyer_id=lawyer.id,
             client_id=client.id,

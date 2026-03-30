@@ -1,5 +1,6 @@
 export type UserRole = "admin" | "lawyer" | "assistant";
 export type CaseStatus = "open" | "in_progress" | "closed" | "archived";
+export type JurisdictionCountry = "tunisia" | "germany";
 
 export interface User {
   id: number;
@@ -30,6 +31,7 @@ export interface CaseItem {
   title: string;
   description: string | null;
   status: CaseStatus;
+  jurisdiction_country: JurisdictionCountry;
   tenant_id: number;
   lawyer_id: number;
   client_id: number;
@@ -156,6 +158,59 @@ export interface CopilotResponse {
   confidence: string;
   scope: string;
   sources: SourceItem[];
+  artifact?: ArtifactContext | null;
+  jurisdiction?: JurisdictionContext | null;
+}
+
+export interface ArtifactVersion {
+  id: number;
+  tenant_id: number;
+  case_id: number | null;
+  document_id: number | null;
+  artifact_type: "document_summary" | "case_email";
+  version_number: number;
+  content: string;
+  source_kind: string;
+  edit_instruction: string | null;
+  metadata: Record<string, unknown>;
+  is_selected: boolean;
+  parent_version_id: number | null;
+  created_by_user_id: number | null;
+  created_at: string;
+}
+
+export interface ArtifactContext {
+  artifact_type: "document_summary" | "case_email";
+  case_id: number | null;
+  document_id: number | null;
+  selected_version_id: number | null;
+  version_count: number;
+  latest_version: ArtifactVersion | null;
+}
+
+export interface JurisdictionContext {
+  country_code: JurisdictionCountry;
+  country_display_name: string;
+  constitutional_references: string[];
+  legal_guardrails: string[];
+  risk_focus_areas: string[];
+}
+
+export interface ArtifactVersionListResponse {
+  artifact_type: "document_summary" | "case_email";
+  case_id: number | null;
+  document_id: number | null;
+  selected_version_id: number | null;
+  versions: ArtifactVersion[];
+}
+
+export interface ArtifactVersionMutationResponse {
+  artifact_type: "document_summary" | "case_email";
+  case_id: number | null;
+  document_id: number | null;
+  selected_version_id: number | null;
+  version: ArtifactVersion;
+  versions: ArtifactVersion[];
 }
 
 export interface WorkflowStage {
@@ -196,6 +251,12 @@ export interface LLMTestResponse {
   error: string | null;
 }
 
+export interface SemanticTranslateResponse {
+  target_language: "en" | "de" | "ar";
+  translations: string[];
+  used_fallback: boolean;
+}
+
 export interface UploadedDocumentResponse {
   document: DocumentItem;
   ai_processing: {
@@ -230,5 +291,7 @@ export interface ChatMessage {
     confidence?: string;
     fallbackReason?: string | null;
     sources?: SourceItem[];
+    artifact?: ArtifactContext | null;
+    jurisdiction?: JurisdictionContext | null;
   };
 }

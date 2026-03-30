@@ -8,8 +8,28 @@ from typing import Any, Dict, Optional
 class CommandParsingService:
     CASE_PATTERN = re.compile(r"\bcase\s*#?\s*(\d+)\b", re.IGNORECASE)
     DOCUMENT_PATTERN = re.compile(r"\bdocument\s*#?\s*(\d+)\b", re.IGNORECASE)
-    RISK_COUNT_PATTERN = re.compile(r"\b(?:top\s+)?(\d{1,2})\s+risks?\b", re.IGNORECASE)
-    DEADLINE_COUNT_PATTERN = re.compile(r"\b(?:top\s+)?(\d{1,2})\s+deadlines?\b", re.IGNORECASE)
+    RISK_COUNT_PATTERN = re.compile(
+        r"\b(?:top\s+|only\s+|just\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+risks?\b",
+        re.IGNORECASE,
+    )
+    DEADLINE_COUNT_PATTERN = re.compile(
+        r"\b(?:top\s+|only\s+|just\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+deadlines?\b",
+        re.IGNORECASE,
+    )
+    NUMBER_WORDS = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+    }
     SUMMARY_KEYWORDS = ["summarize", "summary", "recap", "overview", "brief", "synopsis", "tldr", "tl;dr"]
 
     def parse(self, message: str) -> Dict[str, Any]:
@@ -187,7 +207,11 @@ class CommandParsingService:
         if not match:
             return None
 
-        count = int(match.group(1))
+        raw_count = match.group(1).lower()
+        if raw_count.isdigit():
+            count = int(raw_count)
+        else:
+            count = self.NUMBER_WORDS.get(raw_count, 0)
         if count <= 0:
             return None
 

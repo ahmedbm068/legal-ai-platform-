@@ -7,6 +7,10 @@ from backend.database.database import engine
 
 LEGACY_SCHEMA_PATCHES = [
     """
+    ALTER TABLE cases
+    ADD COLUMN IF NOT EXISTS jurisdiction_country VARCHAR NOT NULL DEFAULT 'tunisia';
+    """,
+    """
     ALTER TABLE consultation_requests
     ADD COLUMN IF NOT EXISTS public_reference VARCHAR;
     """,

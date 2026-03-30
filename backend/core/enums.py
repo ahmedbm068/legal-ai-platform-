@@ -12,3 +12,8 @@ class CaseStatus(str, Enum):
     in_progress = "in_progress"
     closed = "closed"
     archived = "archived"
+
+
+class JurisdictionCountry(str, Enum):
+    tunisia = "tunisia"
+    germany = "germany"

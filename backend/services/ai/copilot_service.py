@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
@@ -15,19 +16,157 @@ from backend.services.ai.agents.case_reasoning_agent import case_reasoning_agent
 from backend.services.ai.agents.drafting_agent import drafting_agent
 from backend.services.ai.agents.document_comparison_agent import document_comparison_agent
 from backend.services.ai.agents.prompt_optimizer_agent import prompt_optimizer_agent
+from backend.services.ai.agents.prompt_correction_agent import prompt_correction_agent
 from backend.services.ai.agents.timeline_agent import timeline_agent
+from backend.services.ai.artifact_versioning_service import artifact_versioning_service
 from backend.services.ai.command_parsing_service import command_parsing_service
 from backend.services.ai.external_research_service import external_research_service
+from backend.services.ai.jurisdiction_context_service import jurisdiction_context_service
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
 
 
 class CopilotService:
+    NUMBER_WORDS = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+    }
+    FOLLOW_UP_COUNT_PATTERN = re.compile(
+        r"\b(?:just|only|exactly|give\s+me|show\s+me|list)?\s*(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b",
+        re.IGNORECASE,
+    )
+    FOLLOW_UP_HINT_PATTERN = re.compile(
+        r"\b(just|only|same|again|i meant|shorter|one)\b",
+        re.IGNORECASE,
+    )
+
     def __init__(self, rag_service: RagService):
         self.rag_service = rag_service
         self.client = llm_gateway.create_client()
         self.model = llm_gateway.default_model
+
+    def _autocorrect_message(self, message: str, conversation_history: List[Dict[str, Any]] | None = None) -> str:
+        corrected = prompt_correction_agent.correct_query(
+            raw_query=message,
+            conversation_history=conversation_history or [],
+        )
+        candidate = corrected.payload.get("corrected_query") if corrected.success else None
+        normalized = str(candidate or "").strip()
+        return normalized or message
+
+    def _extract_count_hint(self, message: str) -> Optional[int]:
+        lowered = (message or "").strip().lower()
+        if not lowered:
+            return None
+        match = self.FOLLOW_UP_COUNT_PATTERN.search(lowered)
+        if not match:
+            return None
+        token = match.group(1).strip().lower()
+        if token.isdigit():
+            value = int(token)
+        else:
+            value = self.NUMBER_WORDS.get(token, 0)
+        if value <= 0:
+            return None
+        return min(value, 12)
+
+    def _build_history_context(self, conversation_history: List[Dict[str, Any]] | None) -> Dict[str, Any]:
+        items = conversation_history or []
+        last_case_id: Optional[int] = None
+        last_document_id: Optional[int] = None
+        last_intent: Optional[str] = None
+
+        for item in reversed(items):
+            if last_case_id is None:
+                case_id = item.get("case_id")
+                if isinstance(case_id, int):
+                    last_case_id = case_id
+            if last_document_id is None:
+                document_id = item.get("document_id")
+                if isinstance(document_id, int):
+                    last_document_id = document_id
+
+            if last_intent is None and item.get("role") == "assistant":
+                parsed_intent = str(item.get("parsed_intent") or "").strip()
+                if parsed_intent and parsed_intent not in {"request_error", "validation_error"}:
+                    last_intent = parsed_intent
+            if last_case_id is not None and last_document_id is not None and last_intent:
+                break
+
+        return {
+            "last_case_id": last_case_id,
+            "last_document_id": last_document_id,
+            "last_intent": last_intent,
+        }
+
+    def _is_follow_up_message(self, message: str) -> bool:
+        lowered = (message or "").strip().lower()
+        if not lowered:
+            return False
+        if self._extract_count_hint(lowered):
+            return True
+        return bool(self.FOLLOW_UP_HINT_PATTERN.search(lowered))
+
+    def _apply_conversation_memory(
+        self,
+        *,
+        parsed: Dict[str, Any],
+        original_message: str,
+        history_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        updated = dict(parsed)
+
+        if updated.get("case_id") is None and isinstance(history_context.get("last_case_id"), int):
+            updated["case_id"] = history_context["last_case_id"]
+            if updated.get("target_type") is None:
+                updated["target_type"] = "case"
+                updated["target_id"] = history_context["last_case_id"]
+
+        if updated.get("document_id") is None and isinstance(history_context.get("last_document_id"), int):
+            if updated.get("target_type") is None:
+                updated["document_id"] = history_context["last_document_id"]
+                updated["target_type"] = "document"
+                updated["target_id"] = history_context["last_document_id"]
+
+        count_hint = self._extract_count_hint(original_message)
+        if count_hint and not updated.get("requested_count"):
+            updated["requested_count"] = count_hint
+
+        if (
+            updated.get("intent") in {"ask_global", "summarize_global"}
+            and self._is_follow_up_message(original_message)
+            and isinstance(history_context.get("last_intent"), str)
+        ):
+            prior_intent = history_context["last_intent"]
+            if prior_intent in {
+                "summarize_case",
+                "summarize_document",
+                "list_deadlines_case",
+                "build_timeline_case",
+                "analyze_risks_case",
+                "review_booking_case",
+                "draft_client_email_case",
+                "compare_case_documents",
+                "ask_case",
+                "ask_document",
+            }:
+                updated["intent"] = prior_intent
+
+            if updated.get("requested_count") is None and count_hint is not None:
+                updated["requested_count"] = count_hint
+
+        return updated
 
     def handle_message(
         self,
@@ -36,8 +175,16 @@ class CopilotService:
         message: str,
         top_k: int = 5,
         use_external_research: bool = True,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        parsed = command_parsing_service.parse(message)
+        corrected_message = self._autocorrect_message(message=message, conversation_history=conversation_history)
+        parsed = command_parsing_service.parse(corrected_message)
+        history_context = self._build_history_context(conversation_history)
+        parsed = self._apply_conversation_memory(
+            parsed=parsed,
+            original_message=message,
+            history_context=history_context,
+        )
         intent = parsed["intent"]
 
         handlers = {
@@ -60,7 +207,8 @@ class CopilotService:
             "list_deadlines_case": lambda: self._list_case_deadlines(
                 db=db,
                 tenant_id=tenant_id,
-                case_id=parsed["case_id"]
+                case_id=parsed["case_id"],
+                requested_count=parsed.get("requested_count"),
             ),
             "build_timeline_case": lambda: self._build_case_timeline(
                 db=db,
@@ -225,6 +373,18 @@ class CopilotService:
         target_type: str | None,
         target_id: int | None,
     ) -> Dict[str, Any]:
+        jurisdiction_context = self._resolve_jurisdiction_context(
+            db=db,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            document_id=document_id,
+        )
+        jurisdiction_prompt_block = (
+            jurisdiction_context_service.get_prompt_block(jurisdiction_context.get("country_code"))
+            if jurisdiction_context
+            else ""
+        )
+
         optimized_question = self._optimize_prompt_for_query(
             question=question,
             intent=intent,
@@ -242,24 +402,34 @@ class CopilotService:
         )
 
         if not use_external_research:
-            return base_result
+            return {
+                **base_result,
+                "jurisdiction": jurisdiction_context,
+            }
 
         research = external_research_service.search(
             query=optimized_question,
             max_results=max(3, min(top_k, 8)),
         )
         if not research.get("used_external"):
-            return base_result
+            return {
+                **base_result,
+                "jurisdiction": jurisdiction_context,
+            }
 
         external_results = research.get("results") or []
         if not external_results:
-            return base_result
+            return {
+                **base_result,
+                "jurisdiction": jurisdiction_context,
+            }
 
         synthesized_answer = self._synthesize_answer_with_external_research(
             question=question,
             internal_answer=base_result.get("answer", ""),
             internal_sources=base_result.get("sources") or [],
             external_results=external_results,
+            jurisdiction_prompt_block=jurisdiction_prompt_block,
         )
 
         merged_sources = list(base_result.get("sources") or [])
@@ -272,6 +442,7 @@ class CopilotService:
             "confidence": base_result.get("confidence", "medium"),
             "scope": base_result.get("scope", "global"),
             "sources": merged_sources[:20],
+            "jurisdiction": jurisdiction_context,
         }
 
     def _synthesize_answer_with_external_research(
@@ -281,6 +452,7 @@ class CopilotService:
         internal_answer: str,
         internal_sources: List[Dict[str, Any]],
         external_results: List[Dict[str, Any]],
+        jurisdiction_prompt_block: str,
     ) -> str:
         if not self.client:
             return self._build_fallback_external_answer(
@@ -302,6 +474,10 @@ Rules:
 - Do not invent facts.
 - Keep the answer concise and professional.
 - End with a short "Web references" line listing up to 3 URLs.
+- Respect the jurisdiction guardrails when applicable.
+
+Jurisdiction context:
+{jurisdiction_prompt_block or "No specific jurisdiction scope was provided."}
 
 Question:
 {question}
@@ -370,6 +546,87 @@ External research snippets (JSON):
                 combined += f" ({url})"
             lines.append(combined[:360])
         return "\n".join(lines).strip()
+
+    def _resolve_case_for_context(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int] = None,
+        document_id: Optional[int] = None,
+    ) -> Optional[Case]:
+        resolved_case_id = case_id
+        if resolved_case_id is None and document_id is not None:
+            document = (
+                db.query(Document)
+                .filter(
+                    Document.id == document_id,
+                    Document.tenant_id == tenant_id,
+                )
+                .first()
+            )
+            if document:
+                resolved_case_id = document.case_id
+
+        if resolved_case_id is None:
+            return None
+
+        return (
+            db.query(Case)
+            .filter(
+                Case.id == resolved_case_id,
+                Case.tenant_id == tenant_id,
+                Case.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+    def _resolve_jurisdiction_context(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int] = None,
+        document_id: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        case = self._resolve_case_for_context(
+            db=db,
+            tenant_id=tenant_id,
+            case_id=case_id,
+            document_id=document_id,
+        )
+        if not case:
+            return None
+        return jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+
+    def _build_artifact_context(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        artifact_type: str,
+        case_id: Optional[int] = None,
+        document_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        rows = artifact_versioning_service.list_versions(
+            db=db,
+            tenant_id=tenant_id,
+            artifact_type=artifact_type,  # type: ignore[arg-type]
+            case_id=case_id,
+            document_id=document_id,
+        )
+        version_payloads = [artifact_versioning_service.to_public_payload(row) for row in rows]
+        selected = next((item for item in version_payloads if item.get("is_selected")), None)
+        latest = selected or (version_payloads[-1] if version_payloads else None)
+
+        return {
+            "artifact_type": artifact_type,
+            "case_id": latest.get("case_id") if latest else case_id,
+            "document_id": latest.get("document_id") if latest else document_id,
+            "selected_version_id": latest.get("id") if latest else None,
+            "version_count": len(version_payloads),
+            "latest_version": latest,
+        }
 
     def _get_case_or_404(self, db: Session, tenant_id: int, case_id: Optional[int]) -> Case:
         if case_id is None:
@@ -527,6 +784,7 @@ External research snippets (JSON):
         agent_result = case_reasoning_agent.analyze_case(
             case=case,
             documents=documents,
+            jurisdiction_country=case.jurisdiction_country,
             consultation_requests=self._get_case_consultation_requests(
                 db=db,
                 tenant_id=tenant_id,
@@ -542,6 +800,7 @@ External research snippets (JSON):
         if agent_result.success:
             return agent_result.payload
 
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
         return {
             "overview": f"Case {case.id} - {case.title}",
             "narrative_summary": f"Case {case.id} could not be fully synthesized by the case reasoning agent.",
@@ -553,12 +812,18 @@ External research snippets (JSON):
                 "Regenerate case intelligence after more documents are processed.",
             ],
             "sources": [],
+            "jurisdiction_country": jurisdiction_context.get("country_code"),
+            "jurisdiction_display_name": jurisdiction_context.get("country_display_name"),
+            "constitutional_references": jurisdiction_context.get("constitutional_references") or [],
             "used_llm": False,
         }
 
     @staticmethod
     def _format_case_reasoning_answer(reasoning_payload: Dict[str, Any]) -> str:
         sections: List[str] = []
+
+        jurisdiction_name = (reasoning_payload.get("jurisdiction_display_name") or "").strip()
+        constitutional_refs = reasoning_payload.get("constitutional_references") or []
 
         narrative_summary = (reasoning_payload.get("narrative_summary") or "").strip()
         if narrative_summary:
@@ -568,6 +833,13 @@ External research snippets (JSON):
             if overview:
                 sections.append("Overview:")
                 sections.append(overview)
+
+        if jurisdiction_name:
+            sections.append("")
+            sections.append(f"Jurisdiction Lens: {jurisdiction_name}")
+            if constitutional_refs:
+                sections.append("Constitution references:")
+                sections.extend(f"- {item}" for item in constitutional_refs[:2])
 
         sections.append("")
         sections.append("Main Issues:")
@@ -660,6 +932,28 @@ External research snippets (JSON):
     ) -> Dict[str, Any]:
         document = self._get_document_or_404(db=db, tenant_id=tenant_id, document_id=document_id)
         document = self._ensure_document_summary(db=db, document=document)
+        jurisdiction_context = self._resolve_jurisdiction_context(
+            db=db,
+            tenant_id=tenant_id,
+            document_id=document.id,
+        )
+
+        try:
+            artifact_versioning_service.ensure_seed_version_for_document_summary(
+                db=db,
+                tenant_id=tenant_id,
+                document=document,
+            )
+        except Exception:
+            pass
+
+        artifact_context = self._build_artifact_context(
+            db=db,
+            tenant_id=tenant_id,
+            artifact_type="document_summary",
+            case_id=document.case_id,
+            document_id=document.id,
+        )
 
         summary_text = (
             document.summary
@@ -674,7 +968,9 @@ External research snippets (JSON):
                 "fallback_reason": "Document has no processed text",
                 "confidence": "low",
                 "scope": "document",
-                "sources": []
+                "sources": [],
+                "artifact": artifact_context,
+                "jurisdiction": jurisdiction_context,
             }
 
         return {
@@ -688,7 +984,9 @@ External research snippets (JSON):
                     document=document,
                     snippet=document.summary_short or summary_text
                 )
-            ]
+            ],
+            "artifact": artifact_context,
+            "jurisdiction": jurisdiction_context,
         }
 
     def _summarize_case(
@@ -698,6 +996,7 @@ External research snippets (JSON):
         case_id: Optional[int]
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
         documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
 
         if not documents:
@@ -707,7 +1006,8 @@ External research snippets (JSON):
                 "fallback_reason": "No documents found in case",
                 "confidence": "low",
                 "scope": "case",
-                "sources": []
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
             }
 
         for document in documents:
@@ -726,16 +1026,19 @@ External research snippets (JSON):
             "fallback_reason": None if reasoning_payload.get("used_llm") else "Used case reasoning agent heuristic synthesis",
             "confidence": "high" if reasoning_payload.get("used_llm") else "medium",
             "scope": "case",
-            "sources": (reasoning_payload.get("sources") or [])[:10]
+            "sources": (reasoning_payload.get("sources") or [])[:10],
+            "jurisdiction": jurisdiction_context,
         }
 
     def _list_case_deadlines(
         self,
         db: Session,
         tenant_id: int,
-        case_id: Optional[int]
+        case_id: Optional[int],
+        requested_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
         documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
 
         deadline_items: List[Dict[str, str]] = []
@@ -763,6 +1066,8 @@ External research snippets (JSON):
                     deadline_items.append(normalized_item)
 
         if deadline_items:
+            target_count = min(max(requested_count or 10, 1), 12)
+            ordered_deadlines = deadline_items[:25]
             grouped: Dict[str, List[Dict[str, str]]] = {
                 "Deadlines / Due Dates": [],
                 "Notice Periods": [],
@@ -770,7 +1075,7 @@ External research snippets (JSON):
                 "Other Time References": []
             }
 
-            for item in deadline_items[:25]:
+            for item in ordered_deadlines:
                 label = item["label"].lower()
 
                 if "notice" in label:
@@ -792,6 +1097,20 @@ External research snippets (JSON):
                     "snippet": f"{item['label']}: {item['value']}"
                 })
 
+            if requested_count:
+                lines = [f"Detected key deadlines for case {case.id}:"]
+                for item in ordered_deadlines[:target_count]:
+                    lines.append(f"- {item['value']} ({item['label']}) - {item['filename']}")
+                return {
+                    "answer": "\n".join(lines),
+                    "used_fallback": False,
+                    "fallback_reason": None,
+                    "confidence": "high",
+                    "scope": "case",
+                    "sources": sources[:10],
+                    "jurisdiction": jurisdiction_context,
+                }
+
             lines = [f"Detected deadlines and time-related obligations for case {case.id}:"]
 
             for section, items in grouped.items():
@@ -808,7 +1127,8 @@ External research snippets (JSON):
                 "fallback_reason": None,
                 "confidence": "high",
                 "scope": "case",
-                "sources": sources[:10]
+                "sources": sources[:10],
+                "jurisdiction": jurisdiction_context,
             }
 
         rag_result = self.rag_service.answer_question(
@@ -820,6 +1140,7 @@ External research snippets (JSON):
             document_id=None
         )
         rag_result["scope"] = "case"
+        rag_result["jurisdiction"] = jurisdiction_context
         return rag_result
 
     def _build_case_timeline(
@@ -829,6 +1150,7 @@ External research snippets (JSON):
         case_id: Optional[int]
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
         documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
         consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
 
@@ -856,6 +1178,7 @@ External research snippets (JSON):
                 "confidence": "high" if timeline_result.payload.get("events") else "medium",
                 "scope": "case",
                 "sources": sources[:10],
+                "jurisdiction": jurisdiction_context,
             }
 
         return {
@@ -865,6 +1188,7 @@ External research snippets (JSON):
             "confidence": "low",
             "scope": "case",
             "sources": [],
+            "jurisdiction": jurisdiction_context,
         }
 
     def _analyze_case_risks(
@@ -875,6 +1199,7 @@ External research snippets (JSON):
         requested_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
         documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
 
         for document in documents:
@@ -907,7 +1232,8 @@ External research snippets (JSON):
                 "fallback_reason": None if reasoning_payload.get("used_llm") else "Used case reasoning agent heuristic synthesis",
                 "confidence": "high" if reasoning_payload.get("used_llm") else "medium",
                 "scope": "case",
-                "sources": (reasoning_payload.get("sources") or [])[:10]
+                "sources": (reasoning_payload.get("sources") or [])[:10],
+                "jurisdiction": jurisdiction_context,
             }
 
         rag_result = self.rag_service.answer_question(
@@ -919,6 +1245,7 @@ External research snippets (JSON):
             document_id=None
         )
         rag_result["scope"] = "case"
+        rag_result["jurisdiction"] = jurisdiction_context
         return rag_result
 
     def _draft_client_email_for_case(
@@ -929,20 +1256,50 @@ External research snippets (JSON):
     ) -> Dict[str, Any]:
         case_summary = self._summarize_case(db=db, tenant_id=tenant_id, case_id=case_id)
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
 
         draft_result = drafting_agent.draft_client_update_email(
             case_id=case.id,
             case_title=case.title,
             case_summary=case_summary["answer"],
+            jurisdiction_country=case.jurisdiction_country,
+        )
+        draft_text = (draft_result.payload.get("email_body") or "").strip()
+
+        if draft_text:
+            try:
+                artifact_versioning_service.create_version(
+                    db=db,
+                    tenant_id=tenant_id,
+                    artifact_type="case_email",
+                    content=draft_text,
+                    case_id=case.id,
+                    source_kind="agent_generation",
+                    metadata={
+                        "case_title": case.title,
+                        "used_llm": bool(draft_result.payload.get("used_llm")),
+                    },
+                    auto_select=True,
+                )
+            except Exception:
+                pass
+
+        artifact_context = self._build_artifact_context(
+            db=db,
+            tenant_id=tenant_id,
+            artifact_type="case_email",
+            case_id=case.id,
         )
 
         return {
-            "answer": (draft_result.payload.get("email_body") or "").strip(),
+            "answer": draft_text,
             "used_fallback": not bool(draft_result.payload.get("used_llm")),
             "fallback_reason": None if draft_result.payload.get("used_llm") else "Used drafting agent template fallback",
             "confidence": "high" if draft_result.payload.get("used_llm") else "medium",
             "scope": "case",
-            "sources": case_summary["sources"]
+            "sources": case_summary["sources"],
+            "artifact": artifact_context,
+            "jurisdiction": jurisdiction_context,
         }
 
     def _review_case_booking(
@@ -952,6 +1309,7 @@ External research snippets (JSON):
         case_id: Optional[int]
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
         consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
 
         booking_result = booking_agent.analyze_consultations(
@@ -977,6 +1335,7 @@ External research snippets (JSON):
                 "confidence": "high" if payload.get("booking_intent") == "requested" else "medium",
                 "scope": "case",
                 "sources": [],
+                "jurisdiction": jurisdiction_context,
             }
 
         return {
@@ -986,6 +1345,7 @@ External research snippets (JSON):
             "confidence": "low",
             "scope": "case",
             "sources": [],
+            "jurisdiction": jurisdiction_context,
         }
 
     def _compare_case_documents(
@@ -995,6 +1355,7 @@ External research snippets (JSON):
         case_id: Optional[int]
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
         documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
 
         if len(documents) < 2:
@@ -1004,7 +1365,8 @@ External research snippets (JSON):
                 "fallback_reason": "Need at least two documents",
                 "confidence": "low",
                 "scope": "case",
-                "sources": []
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
             }
 
         sources: List[Dict[str, Any]] = []
@@ -1030,5 +1392,6 @@ External research snippets (JSON):
             "fallback_reason": None if comparison_result.payload.get("used_llm") else "Used document comparison agent heuristic synthesis",
             "confidence": "high" if comparison_result.success else "low",
             "scope": "case",
-            "sources": sources[:10]
+            "sources": sources[:10],
+            "jurisdiction": jurisdiction_context,
         }

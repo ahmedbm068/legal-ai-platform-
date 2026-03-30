@@ -13,6 +13,7 @@ class Case(Base):
     title = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=True)
     status = Column(String, nullable=False, default="open", index=True)
+    jurisdiction_country = Column(String, nullable=False, default="tunisia", index=True)
 
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     lawyer_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
