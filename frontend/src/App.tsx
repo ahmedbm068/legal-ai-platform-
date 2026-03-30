@@ -2175,19 +2175,6 @@ export default function App() {
                 <span className="menu-item-badge">{useExternalResearch ? t("on", "On") : t("off", "Off")}</span>
               </button>
               <button
-                className="menu-item"
-                onClick={() => {
-                  documentUploadInputRef.current?.click();
-                  setShowComposerMenu(false);
-                }}
-                type="button"
-              >
-                <span className="menu-item-left">
-                  <MenuIcon icon="document" />
-                  <span>{t("uploadPdf", "Upload document")}</span>
-                </span>
-              </button>
-              <button
                 className={`menu-item ${workflowFromPrompt ? "active" : ""}`}
                 onClick={() => {
                   setWorkflowFromPrompt((current) => !current);

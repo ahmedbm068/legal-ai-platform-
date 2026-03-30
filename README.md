@@ -115,3 +115,34 @@ Run an end-to-end API smoke test (auth, clients, cases, documents, voice, copilo
 ```bash
 .\venv\Scripts\python.exe scripts\full_smoke_test.py --port 8021
 ```
+
+## Agent Evals
+
+Run automatic backend agent quality checks (intent + output-shape assertions) and save reports:
+
+```bash
+.\venv\Scripts\python.exe scripts\run_agent_evals.py --base-url http://127.0.0.1:8000
+```
+
+What this does:
+
+- Creates a temporary eval user/case
+- Uploads synthetic legal PDFs
+- Runs prompts from `scripts/evals/default_eval_suite.json`
+- Writes JSON + Markdown reports to `advancement/evals/`
+
+If you want to evaluate your own existing case:
+
+```bash
+.\venv\Scripts\python.exe scripts\run_agent_evals.py --case-id 11 --email you@example.com --password your-password
+```
+
+## Advancement Auto-Log
+
+On every GitHub push, a workflow auto-creates a markdown file in `advancement/` with what changed in that push.
+
+Manual generation (local):
+
+```bash
+python scripts/generate_advancement_log.py --before <old_sha> --after <new_sha> --branch <branch_name>
+```

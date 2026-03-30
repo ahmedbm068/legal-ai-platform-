@@ -1,0 +1,51 @@
+[
+  {
+    "id": "summary_case_paragraph_only",
+    "prompt": "Summarize case #{{case_id}}",
+    "expected_intent": "summarize_case",
+    "required_substrings": [
+      "Document 1 (",
+      "Document 2 ("
+    ],
+    "forbidden_substrings": [
+      "Main Issues:",
+      "Key Dates:",
+      "Legal Risks:",
+      "Risk Assessment:",
+      "Recommended Next Steps:",
+      "Practical Next Steps:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_plus_risks_clean",
+    "prompt": "For case #{{case_id}}, provide a concise summary and identify potential risks, citing relevant evidence and outlining practical next steps.",
+    "expected_intent": "summarize_and_analyze_risks_case",
+    "required_substrings": [
+      "Summary:",
+      "Risk Assessment:",
+      "Practical Next Steps:"
+    ],
+    "forbidden_substrings": [
+      "<CASE_ID>",
+      "What success looks like",
+      "Optimize prompt:",
+      "Sources appea",
+      "email for case #<"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "single_risk_obeys_count",
+    "prompt": "Give me only one risk for case #{{case_id}}",
+    "expected_intent": "analyze_risks_case",
+    "required_substrings": [
+      "Detected legal risks for case"
+    ],
+    "max_bullets": 1,
+    "use_external_research": false,
+    "top_k": 5
+  }
+]
