@@ -1,1 +1,1 @@
-from backend.models.document_entity import DocumentEntity
+"""SQLAlchemy model package."""

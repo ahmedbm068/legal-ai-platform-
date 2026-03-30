@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     OPENROUTER_APP_NAME: str = "legal-ai-platform"
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RERANKER_ENABLED: bool = True
+    RETRIEVAL_LEXICAL_WEIGHT: float = 0.4
+    RETRIEVAL_SEMANTIC_WEIGHT: float = 0.6
+    RETRIEVAL_MIN_SCORE: float = 0.05
+    RETRIEVAL_FILTER_NON_LEGAL_TEST: bool = True
+    CHUNK_SIZE: int = 1000
+    CHUNK_OVERLAP: int = 180
 
     # Frontend
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"

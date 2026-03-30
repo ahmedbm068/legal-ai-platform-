@@ -1,12 +1,14 @@
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 import re
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-import json
 
 from backend.core.deps import get_db, get_current_user
 from backend.models.case import Case
+from backend.models.copilot_feedback import CopilotFeedback
 from backend.models.document import Document
 from backend.models.generated_artifact_version import GeneratedArtifactVersion
 from backend.models.user import User
@@ -23,6 +25,9 @@ from backend.api.rag_schema import (
     SearchResponse,
     CopilotRequest,
     CopilotResponse,
+    CopilotFeedbackCreateRequest,
+    CopilotFeedbackOut,
+    CopilotFeedbackWeeklySummaryResponse,
     AgentWorkflowRequest,
     AgentWorkflowResponse,
     ProviderStatusResponse,
@@ -164,6 +169,111 @@ def copilot(
         use_external_research=data.use_external_research,
         conversation_history=[item.model_dump() for item in data.conversation_history],
     )
+
+
+@router.post("/feedback", response_model=CopilotFeedbackOut, status_code=status.HTTP_201_CREATED)
+def create_copilot_feedback(
+    data: CopilotFeedbackCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    feedback = CopilotFeedback(
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        case_id=data.case_id,
+        document_id=data.document_id,
+        message_id=data.message_id,
+        parsed_intent=data.parsed_intent,
+        confidence=data.confidence,
+        feedback_value=data.feedback_value,
+        prompt_text=data.prompt_text,
+        response_text=data.response_text,
+        comment=data.comment,
+        source_count=int(data.source_count),
+        metadata_json=json.dumps(data.metadata or {}, ensure_ascii=False),
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return {
+        "id": feedback.id,
+        "tenant_id": feedback.tenant_id,
+        "user_id": feedback.user_id,
+        "case_id": feedback.case_id,
+        "document_id": feedback.document_id,
+        "message_id": feedback.message_id,
+        "parsed_intent": feedback.parsed_intent,
+        "confidence": feedback.confidence,
+        "feedback_value": feedback.feedback_value,
+        "prompt_text": feedback.prompt_text,
+        "response_text": feedback.response_text,
+        "comment": feedback.comment,
+        "source_count": feedback.source_count,
+        "metadata": json.loads(feedback.metadata_json) if feedback.metadata_json else {},
+        "created_at": feedback.created_at,
+    }
+
+
+@router.get("/feedback/weekly-summary", response_model=CopilotFeedbackWeeklySummaryResponse)
+def copilot_feedback_weekly_summary(
+    weeks: int = Query(default=8, ge=1, le=52),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    horizon = datetime.now(timezone.utc) - timedelta(weeks=weeks)
+    rows = (
+        db.query(CopilotFeedback)
+        .filter(
+            CopilotFeedback.tenant_id == current_user.tenant_id,
+            CopilotFeedback.created_at >= horizon,
+        )
+        .order_by(CopilotFeedback.created_at.desc())
+        .all()
+    )
+
+    grouped: dict[tuple[str, str], dict[str, int | float | str]] = {}
+    for row in rows:
+        created_at = row.created_at
+        if created_at is None:
+            continue
+
+        localized = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        week_start_date = (localized - timedelta(days=localized.weekday())).date().isoformat()
+        intent = (row.parsed_intent or "unknown").strip() or "unknown"
+        key = (week_start_date, intent)
+
+        bucket = grouped.setdefault(
+            key,
+            {
+                "week_start": week_start_date,
+                "intent": intent,
+                "up": 0,
+                "down": 0,
+                "total": 0,
+                "up_rate": 0.0,
+            },
+        )
+
+        if row.feedback_value == "up":
+            bucket["up"] = int(bucket["up"]) + 1
+        else:
+            bucket["down"] = int(bucket["down"]) + 1
+        bucket["total"] = int(bucket["total"]) + 1
+
+    summary_rows = sorted(
+        grouped.values(),
+        key=lambda item: (str(item["week_start"]), int(item["total"])),
+        reverse=True,
+    )
+
+    for item in summary_rows:
+        total = int(item["total"])
+        item["up_rate"] = round((int(item["up"]) / total), 4) if total else 0.0
+
+    return {
+        "weeks": weeks,
+        "rows": summary_rows,
+    }
 
 
 @router.get("/artifacts/versions", response_model=ArtifactVersionListResponse)

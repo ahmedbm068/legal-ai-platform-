@@ -31,6 +31,34 @@ class CommandParsingService:
         "twelve": 12,
     }
     SUMMARY_KEYWORDS = ["summarize", "summary", "recap", "overview", "brief", "synopsis", "tldr", "tl;dr"]
+    SUMMARY_ONLY_HINTS = [
+        "summary only",
+        "only summary",
+        "paragraph only",
+        "no risks",
+        "without risks",
+        "no dates",
+        "without dates",
+        "no bullets",
+        "just summary",
+        "only a summary",
+    ]
+    RISK_KEYWORDS = [
+        "risk",
+        "risks",
+        "danger",
+        "dangers",
+        "exposure",
+        "exposures",
+        "weakness",
+        "weaknesses",
+        "issue",
+        "issues",
+        "missing evidence",
+        "unresolved",
+        "liability",
+        "liabilities",
+    ]
 
     def parse(self, message: str) -> Dict[str, Any]:
         original_message = (message or "").strip()
@@ -78,9 +106,16 @@ class CommandParsingService:
         # Handle compound requests first: "summarize ... and analyze risks ..."
         if target_type == "case":
             wants_summary = self._looks_like_summary_request(lowered=lowered, target_type=target_type)
-            wants_risks = self._contains_any(lowered, ["risk", "risks", "missing evidence", "unresolved", "weakness", "exposure", "issue", "issues"])
+            wants_risks = self._contains_any(lowered, self.RISK_KEYWORDS)
+            if wants_summary and self._contains_any(lowered, self.SUMMARY_ONLY_HINTS):
+                return "summarize_case", "high"
             if wants_summary and wants_risks:
                 return "summarize_and_analyze_risks_case", "high"
+
+        if target_type == "document":
+            wants_summary = self._looks_like_summary_request(lowered=lowered, target_type=target_type)
+            if wants_summary and self._contains_any(lowered, self.SUMMARY_ONLY_HINTS):
+                return "summarize_document", "high"
 
         if self._contains_any(lowered, ["draft", "write", "prepare"]) and self._contains_any(lowered, ["email", "mail", "client update"]):
             if target_type == "case":
@@ -104,7 +139,7 @@ class CommandParsingService:
                 return "review_booking_case", "high"
             return "ask_global", "medium"
 
-        if self._contains_any(lowered, ["risk", "risks", "missing evidence", "unresolved", "weakness", "exposure", "issue", "issues"]):
+        if self._contains_any(lowered, self.RISK_KEYWORDS):
             if target_type == "case":
                 return "analyze_risks_case", "high"
             if target_type == "document":

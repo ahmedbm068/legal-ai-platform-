@@ -1,0 +1,254 @@
+{
+  "generated_at_utc": "2026-03-30T15:23:59.158564+00:00",
+  "base_url": "http://127.0.0.1:8031",
+  "case_id": 16,
+  "suite_path": "scripts\\evals\\default_eval_suite.json",
+  "total": 6,
+  "passed": 6,
+  "failed": 0,
+  "pass_rate": 1.0,
+  "results": [
+    {
+      "id": "summary_case_paragraph_only_01",
+      "prompt": "Summarize case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 988.764199995785,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Document 1 (",
+          "passed": true,
+          "detail": "must contain 'Document 1 ('"
+        },
+        {
+          "name": "contains:Document 2 (",
+          "passed": true,
+          "detail": "must contain 'Document 2 ('"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        },
+        {
+          "name": "not_contains:Recommended Next Steps:",
+          "passed": true,
+          "detail": "must not contain 'Recommended Next Steps:'"
+        },
+        {
+          "name": "not_contains:Practical Next Steps:",
+          "passed": true,
+          "detail": "must not contain 'Practical Next Steps:'"
+        },
+        {
+          "name": "max_answer_chars",
+          "passed": true,
+          "detail": "chars=727, max=2800"
+        }
+      ],
+      "answer_preview": "Case 16 (Eval Case 6884) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL\n\nDocument 1 (eval_contract.pdf): This document is a c"
+    },
+    {
+      "id": "summary_case_paragraph_only_02",
+      "prompt": "Give me a concise case summary for case #16 in paragraph form only.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 95.65940000175033,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        }
+      ],
+      "answer_preview": "Case 16 (Eval Case 6884) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL\n\nDocument 1 (eval_contract.pdf): This document is a c"
+    },
+    {
+      "id": "summary_case_paragraph_only_03",
+      "prompt": "Make a resume of case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 145.54409999982454,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        }
+      ],
+      "answer_preview": "Case 16 (Eval Case 6884) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL\n\nDocument 1 (eval_contract.pdf): This document is a c"
+    },
+    {
+      "id": "summary_case_paragraph_only_04",
+      "prompt": "I need a short recap for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 97.54380000231322,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case 16 (Eval Case 6884) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL\n\nDocument 1 (eval_contract.pdf): This document is a c"
+    },
+    {
+      "id": "summary_case_paragraph_only_05",
+      "prompt": "Provide a practical overview of case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 102.59629999927711,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case 16 (Eval Case 6884) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL\n\nDocument 1 (eval_contract.pdf): This document is a c"
+    },
+    {
+      "id": "summary_case_paragraph_only_06",
+      "prompt": "Summarize all documents in case #16 with one paragraph per document.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 97.80049999972107,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Document 1 (",
+          "passed": true,
+          "detail": "must contain 'Document 1 ('"
+        },
+        {
+          "name": "contains:Document 2 (",
+          "passed": true,
+          "detail": "must contain 'Document 2 ('"
+        }
+      ],
+      "answer_preview": "Case 16 (Eval Case 6884) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL\n\nDocument 1 (eval_contract.pdf): This document is a c"
+    }
+  ]
+}

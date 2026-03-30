@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from backend.models.case import Case
@@ -23,6 +24,14 @@ class CaseReasoningAgent(BaseAgent):
         "upload of specific documents",
         "pdf_ready.md",
         "` - `",
+    )
+    NON_LEGAL_FILENAME_MARKERS = (
+        "runbook",
+        "smoke",
+        "test",
+        "prompt",
+        "readme",
+        ".md",
     )
 
     def __init__(self) -> None:
@@ -131,6 +140,7 @@ class CaseReasoningAgent(BaseAgent):
         has_governing_law_signal = False
         has_payment_terms_signal = False
 
+        prepared_docs: list[tuple[Document, dict[str, Any], str]] = []
         for document in documents:
             insights = self._safe_load_json(document.insights_json)
             summary_text = self._normalize_text(
@@ -138,6 +148,21 @@ class CaseReasoningAgent(BaseAgent):
                 or document.summary
                 or (document.redacted_text or document.extracted_text or "")[:500]
             )
+            prepared_docs.append((document, insights, summary_text))
+
+        legal_docs = [
+            (document, insights, summary_text)
+            for (document, insights, summary_text) in prepared_docs
+            if not self._looks_like_non_legal_test_document(
+                document=document,
+                insights=insights,
+                summary_text=summary_text,
+            )
+        ]
+        active_docs = legal_docs or prepared_docs
+        filtered_doc_count = max(0, len(prepared_docs) - len(active_docs))
+
+        for document, insights, summary_text in active_docs:
 
             if summary_text:
                 document_summaries.append(f"{document.filename}: {summary_text}")
@@ -241,6 +266,10 @@ class CaseReasoningAgent(BaseAgent):
             f"Case {case.id} - {case.title}",
             f"The case currently contains {len(documents)} document(s).",
         ]
+        if filtered_doc_count > 0:
+            overview_lines.append(
+                f"{len(active_docs)} document(s) were used for legal synthesis after filtering test/non-legal artifacts."
+            )
         if document_types:
             overview_lines.append("Detected document types: " + ", ".join(document_types[:6]) + ".")
         if parties:
@@ -351,6 +380,44 @@ class CaseReasoningAgent(BaseAgent):
         if not candidate:
             return False
         return any(fragment in candidate for fragment in cls.PROMPT_NOISE_FRAGMENTS)
+
+    @classmethod
+    def _looks_like_non_legal_test_document(
+        cls,
+        *,
+        document: Document,
+        insights: dict[str, Any],
+        summary_text: str,
+    ) -> bool:
+        filename = cls._normalize_text(document.filename).lower()
+        if not filename:
+            return False
+
+        filename_flag = any(marker in filename for marker in cls.NON_LEGAL_FILENAME_MARKERS)
+        if not filename_flag:
+            return False
+
+        combined = " ".join(
+            [
+                cls._normalize_text(summary_text),
+                cls._normalize_text(insights.get("general_summary")),
+                cls._normalize_text(document.extracted_text)[:800],
+                cls._normalize_text(document.redacted_text)[:800],
+            ]
+        ).lower()
+        if not combined:
+            return filename_flag
+
+        if any(marker in combined for marker in cls.PROMPT_NOISE_FRAGMENTS):
+            return True
+
+        legal_signal = bool(
+            re.search(
+                r"\b(agreement|contract|breach|termination|invoice|clause|obligation|notice|dispute|liability|governing law)\b",
+                combined,
+            )
+        )
+        return not legal_signal
 
     def _generate_llm_case_brief(
         self,

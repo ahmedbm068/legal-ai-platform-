@@ -151,6 +151,54 @@ class CopilotResponse(BaseModel):
     jurisdiction: Optional[JurisdictionContext] = None
 
 
+class CopilotFeedbackCreateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    message_id: Optional[str] = Field(default=None, max_length=120)
+    case_id: Optional[int] = Field(default=None, ge=1)
+    document_id: Optional[int] = Field(default=None, ge=1)
+    prompt_text: str = Field(..., min_length=1, max_length=12000)
+    response_text: str = Field(..., min_length=1, max_length=16000)
+    parsed_intent: Optional[str] = Field(default=None, max_length=120)
+    confidence: Optional[str] = Field(default=None, max_length=24)
+    feedback_value: Literal["up", "down"]
+    comment: Optional[str] = Field(default=None, max_length=2000)
+    source_count: int = Field(default=0, ge=0)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CopilotFeedbackOut(BaseModel):
+    id: int
+    tenant_id: int
+    user_id: Optional[int] = None
+    case_id: Optional[int] = None
+    document_id: Optional[int] = None
+    message_id: Optional[str] = None
+    parsed_intent: Optional[str] = None
+    confidence: Optional[str] = None
+    feedback_value: Literal["up", "down"]
+    prompt_text: str
+    response_text: str
+    comment: Optional[str] = None
+    source_count: int
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class CopilotFeedbackWeeklyItem(BaseModel):
+    week_start: str
+    intent: str
+    up: int
+    down: int
+    total: int
+    up_rate: float
+
+
+class CopilotFeedbackWeeklySummaryResponse(BaseModel):
+    weeks: int
+    rows: List[CopilotFeedbackWeeklyItem] = Field(default_factory=list)
+
+
 class WorkflowStage(BaseModel):
     agent_name: str
     success: bool

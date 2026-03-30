@@ -34,6 +34,14 @@ interface ChatThread {
   updatedAt: string;
 }
 
+type FeedbackValue = "up" | "down";
+type FeedbackStatus = "idle" | "saving" | "submitted" | "error";
+
+interface MessageFeedbackState {
+  value: FeedbackValue;
+  status: FeedbackStatus;
+}
+
 const UI_STRINGS: Record<UiLanguage, Record<string, string>> = {
   en: {
     appTitle: "Legal Copilot",
@@ -175,6 +183,11 @@ const UI_BASE_COPY: Record<string, string> = {
   createAccount: "Create account",
   optimizePrompt: "Optimize prompt",
   optimizingPrompt: "Optimizing...",
+  feedbackHelpful: "Helpful",
+  feedbackNeedsWork: "Needs work",
+  feedbackSaving: "Saving feedback...",
+  feedbackSaved: "Feedback saved",
+  feedbackFailed: "Feedback failed",
   languageEnglish: "English",
   languageGerman: "Deutsch",
   languageArabic: "Arabic",
@@ -273,6 +286,11 @@ const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
     createAccount: "Konto erstellen",
     optimizePrompt: "Prompt optimieren",
     optimizingPrompt: "Wird optimiert...",
+    feedbackHelpful: "Hilfreich",
+    feedbackNeedsWork: "Verbessern",
+    feedbackSaving: "Feedback wird gespeichert...",
+    feedbackSaved: "Feedback gespeichert",
+    feedbackFailed: "Feedback fehlgeschlagen",
     languageEnglish: "Englisch",
     languageGerman: "Deutsch",
     languageArabic: "Arabisch",
@@ -368,6 +386,11 @@ const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
     createAccount: "إنشاء حساب",
     optimizePrompt: "تحسين الطلب",
     optimizingPrompt: "جارٍ التحسين...",
+    feedbackHelpful: "Helpful",
+    feedbackNeedsWork: "Needs work",
+    feedbackSaving: "Saving feedback...",
+    feedbackSaved: "Feedback saved",
+    feedbackFailed: "Feedback failed",
     languageEnglish: "الإنجليزية",
     languageGerman: "الألمانية",
     languageArabic: "العربية",
@@ -703,6 +726,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([buildWelcomeMessage()]);
   const [historyQuery, setHistoryQuery] = useState("");
   const [chatInput, setChatInput] = useState("");
+  const [messageFeedback, setMessageFeedback] = useState<Record<string, MessageFeedbackState>>({});
 
   const [activeSources, setActiveSources] = useState<SourceItem[]>([]);
   const [useExternalResearch, setUseExternalResearch] = useState(false);
@@ -973,6 +997,67 @@ export default function App() {
       title: t("newChat", "New chat"),
       messages: [buildWelcomeMessage(selectedCase?.title)],
     });
+  }
+
+  function findPromptForAssistantMessage(messageId: string): string {
+    const index = chatMessages.findIndex((item) => item.id === messageId);
+    if (index <= 0) return "";
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      const row = chatMessages[cursor];
+      if (row.role === "user" && row.content.trim()) {
+        return row.content.trim();
+      }
+    }
+    return "";
+  }
+
+  async function submitAssistantFeedback(message: ChatMessage, feedbackValue: FeedbackValue) {
+    if (!token || message.role !== "assistant") return;
+
+    setMessageFeedback((current) => ({
+      ...current,
+      [message.id]: {
+        value: feedbackValue,
+        status: "saving",
+      },
+    }));
+
+    try {
+      const promptText = findPromptForAssistantMessage(message.id) || "No prompt context available.";
+      await api.createCopilotFeedback(token, {
+        message_id: message.id,
+        case_id: selectedCaseId ?? null,
+        document_id: selectedDocumentId ?? null,
+        prompt_text: promptText,
+        response_text: message.meta?.rawAnswer?.trim() || message.content,
+        parsed_intent: message.meta?.parsedIntent ?? null,
+        confidence: message.meta?.confidence ?? null,
+        feedback_value: feedbackValue,
+        source_count: message.meta?.sources?.length ?? 0,
+        metadata: {
+          ui_language: uiLanguage,
+          has_sources: Boolean(message.meta?.sources?.length),
+          used_external_research: useExternalResearch,
+          workflow_mode: workflowFromPrompt,
+        },
+      });
+      setMessageFeedback((current) => ({
+        ...current,
+        [message.id]: {
+          value: feedbackValue,
+          status: "submitted",
+        },
+      }));
+    } catch (caught) {
+      setMessageFeedback((current) => ({
+        ...current,
+        [message.id]: {
+          value: feedbackValue,
+          status: "error",
+        },
+      }));
+      setError(caught instanceof Error ? caught.message : "Unable to save message feedback.");
+    }
   }
 
   async function translateSemantically(texts: string[], domain: "legal_ui" | "legal_content" | "general" = "legal_content") {
@@ -1349,6 +1434,7 @@ export default function App() {
             sources: response.sources,
             artifact: response.artifact || null,
             jurisdiction: response.jurisdiction || null,
+            rawAnswer: response.answer,
           },
         },
       ]);
@@ -1436,6 +1522,7 @@ export default function App() {
             confidence: "high",
             fallbackReason: null,
             sources: response.sources,
+            rawAnswer: response.verified_summary,
           },
         },
       ]);
@@ -1606,6 +1693,7 @@ export default function App() {
     setChatThreads([]);
     setActiveThreadId(null);
     setChatMessages([buildWelcomeMessage()]);
+    setMessageFeedback({});
     setHistoryQuery("");
     setActiveSources([]);
     clearArtifactWorkspace();
@@ -2135,6 +2223,29 @@ export default function App() {
                         <span>{inferAgentFromIntent(message.meta.parsedIntent)}</span>
                         <span>{message.meta.confidence || "n/a"}</span>
                         {message.meta.fallbackReason ? <span>{message.meta.fallbackReason}</span> : null}
+                      </div>
+                    ) : null}
+                    {message.role === "assistant" ? (
+                      <div className="message-feedback-row">
+                        <button
+                          className={`message-feedback-button ${messageFeedback[message.id]?.value === "up" ? "active" : ""}`}
+                          disabled={messageFeedback[message.id]?.status === "saving"}
+                          onClick={() => void submitAssistantFeedback(message, "up")}
+                          type="button"
+                        >
+                          👍 {t("feedbackHelpful", "Helpful")}
+                        </button>
+                        <button
+                          className={`message-feedback-button ${messageFeedback[message.id]?.value === "down" ? "active" : ""}`}
+                          disabled={messageFeedback[message.id]?.status === "saving"}
+                          onClick={() => void submitAssistantFeedback(message, "down")}
+                          type="button"
+                        >
+                          👎 {t("feedbackNeedsWork", "Needs work")}
+                        </button>
+                        {messageFeedback[message.id]?.status === "saving" ? <small>{t("feedbackSaving", "Saving feedback...")}</small> : null}
+                        {messageFeedback[message.id]?.status === "submitted" ? <small>{t("feedbackSaved", "Feedback saved")}</small> : null}
+                        {messageFeedback[message.id]?.status === "error" ? <small>{t("feedbackFailed", "Feedback failed")}</small> : null}
                       </div>
                     ) : null}
                   </div>

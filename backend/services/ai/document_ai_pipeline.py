@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.models.document import Document
 from backend.models.document_chunk import DocumentChunk
 from backend.models.document_entity import DocumentEntity
+from backend.core.config import settings
 from backend.services.ai.chunking_service import chunk_text
 from backend.services.ai.embedding_service import EmbeddingService
 from backend.services.ai.extraction_service import extract_text_from_file
@@ -56,7 +57,11 @@ class DocumentAIPipeline:
             pii_result = redact_pii(text)
             redacted_text = pii_result["redacted_text"]
             pii_items = pii_result["pii_items"]
-            chunks = chunk_text(redacted_text)
+            chunks = chunk_text(
+                redacted_text,
+                chunk_size=max(300, int(settings.CHUNK_SIZE)),
+                overlap=max(0, int(settings.CHUNK_OVERLAP)),
+            )
 
             document.redacted_text = redacted_text
 

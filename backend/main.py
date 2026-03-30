@@ -22,6 +22,7 @@ from backend.models.document import Document
 from backend.models.document_chunk import DocumentChunk
 from backend.models.document_entity import DocumentEntity
 from backend.models.generated_artifact_version import GeneratedArtifactVersion
+from backend.models.copilot_feedback import CopilotFeedback
 from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording

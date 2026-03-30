@@ -162,6 +162,38 @@ export interface CopilotResponse {
   jurisdiction?: JurisdictionContext | null;
 }
 
+export interface CopilotFeedback {
+  id: number;
+  tenant_id: number;
+  user_id: number | null;
+  case_id: number | null;
+  document_id: number | null;
+  message_id: string | null;
+  parsed_intent: string | null;
+  confidence: string | null;
+  feedback_value: "up" | "down";
+  prompt_text: string;
+  response_text: string;
+  comment: string | null;
+  source_count: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CopilotFeedbackWeeklyItem {
+  week_start: string;
+  intent: string;
+  up: number;
+  down: number;
+  total: number;
+  up_rate: number;
+}
+
+export interface CopilotFeedbackWeeklySummaryResponse {
+  weeks: number;
+  rows: CopilotFeedbackWeeklyItem[];
+}
+
 export interface ArtifactVersion {
   id: number;
   tenant_id: number;
@@ -293,5 +325,6 @@ export interface ChatMessage {
     sources?: SourceItem[];
     artifact?: ArtifactContext | null;
     jurisdiction?: JurisdictionContext | null;
+    rawAnswer?: string | null;
   };
 }

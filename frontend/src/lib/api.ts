@@ -7,6 +7,8 @@ import type {
   ConsultationFromTranscriptResponse,
   ConsultationRequest,
   CopilotResponse,
+  CopilotFeedback,
+  CopilotFeedbackWeeklySummaryResponse,
   DocumentItem,
   FullDocumentAnalysis,
   LLMTestResponse,
@@ -205,6 +207,33 @@ export const api = {
       method: "POST",
       token,
       body: { case_id: caseId, objective, top_k: topK },
+    }),
+
+  createCopilotFeedback: (
+    token: string,
+    payload: {
+      message_id?: string | null;
+      case_id?: number | null;
+      document_id?: number | null;
+      prompt_text: string;
+      response_text: string;
+      parsed_intent?: string | null;
+      confidence?: string | null;
+      feedback_value: "up" | "down";
+      comment?: string | null;
+      source_count?: number;
+      metadata?: Record<string, unknown>;
+    }
+  ) =>
+    request<CopilotFeedback>("/ai/feedback", {
+      method: "POST",
+      token,
+      body: payload,
+    }),
+
+  getCopilotFeedbackWeeklySummary: (token: string, weeks = 8) =>
+    request<CopilotFeedbackWeeklySummaryResponse>(`/ai/feedback/weekly-summary?weeks=${weeks}`, {
+      token,
     }),
 
   providerStatus: (token: string) =>

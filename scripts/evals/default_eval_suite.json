@@ -1,8 +1,10 @@
 [
   {
-    "id": "summary_case_paragraph_only",
+    "id": "summary_case_paragraph_only_01",
     "prompt": "Summarize case #{{case_id}}",
     "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
     "required_substrings": [
       "Document 1 (",
       "Document 2 ("
@@ -15,13 +17,112 @@
       "Recommended Next Steps:",
       "Practical Next Steps:"
     ],
+    "max_answer_chars": 2800,
     "use_external_research": false,
     "top_k": 5
   },
   {
-    "id": "summary_plus_risks_clean",
-    "prompt": "For case #{{case_id}}, provide a concise summary and identify potential risks, citing relevant evidence and outlining practical next steps.",
+    "id": "summary_case_paragraph_only_02",
+    "prompt": "Give me a concise case summary for case #{{case_id}} in paragraph form only.",
+    "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "forbidden_substrings": [
+      "Main Issues:",
+      "Legal Risks:",
+      "Risk Assessment:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_case_paragraph_only_03",
+    "prompt": "Make a resume of case #{{case_id}}.",
+    "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "forbidden_substrings": [
+      "Main Issues:",
+      "Key Dates:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_case_paragraph_only_04",
+    "prompt": "I need a short recap for case #{{case_id}}.",
+    "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_case_paragraph_only_05",
+    "prompt": "Provide a practical overview of case #{{case_id}}.",
+    "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_case_paragraph_only_06",
+    "prompt": "Summarize all documents in case #{{case_id}} with one paragraph per document.",
+    "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Document 1 (",
+      "Document 2 ("
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_case_paragraph_only_07",
+    "prompt": "Case #{{case_id}} summary only, no bullets.",
+    "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "forbidden_substrings": [
+      "Main Issues:",
+      "Risk Assessment:",
+      "Recommended Next Steps:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_case_paragraph_only_08",
+    "prompt": "brief synopsis for case #{{case_id}}",
+    "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_case_paragraph_only_09_no_risks",
+    "prompt": "Summarize case #{{case_id}}. Summary only, no risks and no dates.",
+    "expected_intent": "summarize_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "forbidden_substrings": [
+      "Main Issues:",
+      "Legal Risks:",
+      "Risk Assessment:",
+      "Key Dates:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_plus_risks_01",
+    "prompt": "For case #{{case_id}}, provide a concise summary and identify potential risks, citing relevant evidence and practical next steps.",
     "expected_intent": "summarize_and_analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
     "required_substrings": [
       "Summary:",
       "Risk Assessment:",
@@ -38,13 +139,341 @@
     "top_k": 5
   },
   {
-    "id": "single_risk_obeys_count",
-    "prompt": "Give me only one risk for case #{{case_id}}",
+    "id": "summary_plus_risks_02",
+    "prompt": "Summarize case #{{case_id}} and then analyze the legal risks.",
+    "expected_intent": "summarize_and_analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Summary:",
+      "Risk Assessment:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_plus_risks_03",
+    "prompt": "I want summary plus risk review for case #{{case_id}}.",
+    "expected_intent": "summarize_and_analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_plus_risks_04",
+    "prompt": "Case #{{case_id}}: concise brief + risk assessment + next legal steps.",
+    "expected_intent": "summarize_and_analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Risk Assessment:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_plus_risks_05",
+    "prompt": "For case #{{case_id}}, summarize and detect dangers.",
+    "expected_intent": "summarize_and_analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "summary_plus_risks_06",
+    "prompt": "Please provide a short case summary and risk mapping for case #{{case_id}}.",
+    "expected_intent": "summarize_and_analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "risk_only_01",
+    "prompt": "Analyze risks for case #{{case_id}}.",
     "expected_intent": "analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Detected legal risks for case"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "risk_only_02_single",
+    "prompt": "Give me only one risk for case #{{case_id}}.",
+    "expected_intent": "analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
     "required_substrings": [
       "Detected legal risks for case"
     ],
     "max_bullets": 1,
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "risk_only_03_three",
+    "prompt": "Top 3 risks for case #{{case_id}}.",
+    "expected_intent": "analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "max_bullets": 3,
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "risk_only_04",
+    "prompt": "What is the biggest legal exposure in case #{{case_id}}?",
+    "expected_intent": "analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "risk_only_05",
+    "prompt": "List 2 risks for case #{{case_id}}",
+    "expected_intent": "analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "max_bullets": 2,
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "deadlines_01",
+    "prompt": "List deadlines for case #{{case_id}}.",
+    "expected_intent": "list_deadlines_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Detected"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "deadlines_02",
+    "prompt": "Top 2 deadlines for case #{{case_id}}",
+    "expected_intent": "list_deadlines_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "max_bullets": 2,
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "deadlines_03",
+    "prompt": "Any due dates and notice periods in case #{{case_id}}?",
+    "expected_intent": "list_deadlines_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "deadlines_04",
+    "prompt": "Show me 3 deadlines in case #{{case_id}}",
+    "expected_intent": "list_deadlines_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "max_bullets": 3,
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "deadlines_05",
+    "prompt": "Deadline audit for case #{{case_id}}",
+    "expected_intent": "list_deadlines_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "timeline_01",
+    "prompt": "Build timeline for case #{{case_id}}.",
+    "expected_intent": "build_timeline_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "min_confidence": "medium",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "timeline_02",
+    "prompt": "Chronology of events in case #{{case_id}}",
+    "expected_intent": "build_timeline_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "timeline_03",
+    "prompt": "Create a chronological sequence for case #{{case_id}}.",
+    "expected_intent": "build_timeline_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "timeline_04",
+    "prompt": "case #{{case_id}} timeline please",
+    "expected_intent": "build_timeline_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "draft_email_01",
+    "prompt": "Draft client email for case #{{case_id}}.",
+    "expected_intent": "draft_client_email_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Subject:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "draft_email_02",
+    "prompt": "Prepare a client update email for case #{{case_id}}",
+    "expected_intent": "draft_client_email_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "draft_email_03",
+    "prompt": "Write a concise negotiation update mail for case #{{case_id}}.",
+    "expected_intent": "draft_client_email_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "compare_docs_01",
+    "prompt": "Compare documents in case #{{case_id}}.",
+    "expected_intent": "compare_case_documents",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "min_confidence": "medium",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "compare_docs_02",
+    "prompt": "Find contradictions across documents in case #{{case_id}}.",
+    "expected_intent": "compare_case_documents",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "compare_docs_03",
+    "prompt": "Document comparison for case #{{case_id}}",
+    "expected_intent": "compare_case_documents",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "booking_review_01",
+    "prompt": "Review booking status for case #{{case_id}}.",
+    "expected_intent": "review_booking_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "booking_review_02",
+    "prompt": "Do we have any consultation request for case #{{case_id}}?",
+    "expected_intent": "review_booking_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "optimize_prompt_01",
+    "prompt": "Optimize prompt: draft a client update about payment dispute for case #{{case_id}}",
+    "expected_intent": "optimize_prompt",
+    "expected_target_type": "case",
+    "expected_scope": "global",
+    "required_substrings": [
+      "Optimized prompt:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "ask_case_01",
+    "prompt": "What is the payment structure in case #{{case_id}}?",
+    "expected_intent": "ask_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "forbidden_substrings": [
+      "<CASE_ID>",
+      "What success looks like",
+      "Optimize prompt:"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "ask_case_02",
+    "prompt": "What evidence supports a breach argument in case #{{case_id}}?",
+    "expected_intent": "ask_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "ask_case_03",
+    "prompt": "Can you explain this case #{{case_id}} in plain legal terms?",
+    "expected_intent": "ask_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "memory_followup_01",
+    "prompt": "Analyze risks for case #{{case_id}}",
+    "expected_intent": "analyze_risks_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "memory_followup_02",
+    "prompt": "just one",
+    "expected_intent": "analyze_risks_case",
+    "expected_scope": "case",
+    "max_bullets": 1,
+    "conversation_history": [
+      {
+        "role": "assistant",
+        "content": "Detected legal risks for case #{{case_id}}: - Risk A - Risk B",
+        "parsed_intent": "analyze_risks_case",
+        "case_id": "{{case_id}}"
+      }
+    ],
     "use_external_research": false,
     "top_k": 5
   }

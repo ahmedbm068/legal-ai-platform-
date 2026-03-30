@@ -1,0 +1,1418 @@
+{
+  "generated_at_utc": "2026-03-30T15:23:25.529811+00:00",
+  "base_url": "http://127.0.0.1:8031",
+  "case_id": 15,
+  "suite_path": "scripts\\evals\\default_eval_suite.json",
+  "total": 43,
+  "passed": 43,
+  "failed": 0,
+  "pass_rate": 1.0,
+  "results": [
+    {
+      "id": "summary_case_paragraph_only_01",
+      "prompt": "Summarize case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 89499.97830000211,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Document 1 (",
+          "passed": true,
+          "detail": "must contain 'Document 1 ('"
+        },
+        {
+          "name": "contains:Document 2 (",
+          "passed": true,
+          "detail": "must contain 'Document 2 ('"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        },
+        {
+          "name": "not_contains:Recommended Next Steps:",
+          "passed": true,
+          "detail": "must not contain 'Recommended Next Steps:'"
+        },
+        {
+          "name": "not_contains:Practical Next Steps:",
+          "passed": true,
+          "detail": "must not contain 'Practical Next Steps:'"
+        },
+        {
+          "name": "max_answer_chars",
+          "passed": true,
+          "detail": "chars=808, max=2800"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_case_paragraph_only_02",
+      "prompt": "Give me a concise case summary for case #15 in paragraph form only.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 42275.344299996505,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_case_paragraph_only_03",
+      "prompt": "Make a resume of case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 232.43459999503102,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_case_paragraph_only_04",
+      "prompt": "I need a short recap for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 634.9220999982208,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_case_paragraph_only_05",
+      "prompt": "Provide a practical overview of case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 192.36850000015693,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_case_paragraph_only_06",
+      "prompt": "Summarize all documents in case #15 with one paragraph per document.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 223.47479999734787,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Document 1 (",
+          "passed": true,
+          "detail": "must contain 'Document 1 ('"
+        },
+        {
+          "name": "contains:Document 2 (",
+          "passed": true,
+          "detail": "must contain 'Document 2 ('"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_case_paragraph_only_07",
+      "prompt": "Case #15 summary only, no bullets.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 179.21340000611963,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        },
+        {
+          "name": "not_contains:Recommended Next Steps:",
+          "passed": true,
+          "detail": "must not contain 'Recommended Next Steps:'"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_case_paragraph_only_08",
+      "prompt": "brief synopsis for case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 265.4723000014201,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_case_paragraph_only_09_no_risks",
+      "prompt": "Summarize case #15. Summary only, no risks and no dates.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 187.96329999895534,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        }
+      ],
+      "answer_preview": "Case 15 (Eval Case 1410) currently includes 2 document(s). The file set mainly includes contract, legal_letter. The main parties across these documents are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova\n\nDocument 1 (eval_contract.pdf): This do"
+    },
+    {
+      "id": "summary_plus_risks_01",
+      "prompt": "For case #15, provide a concise summary and identify potential risks, citing relevant evidence and practical next steps.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 43978.63609999331,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Summary:",
+          "passed": true,
+          "detail": "must contain 'Summary:'"
+        },
+        {
+          "name": "contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must contain 'Risk Assessment:'"
+        },
+        {
+          "name": "contains:Practical Next Steps:",
+          "passed": true,
+          "detail": "must contain 'Practical Next Steps:'"
+        },
+        {
+          "name": "not_contains:<CASE_ID>",
+          "passed": true,
+          "detail": "must not contain '<CASE_ID>'"
+        },
+        {
+          "name": "not_contains:What success looks like",
+          "passed": true,
+          "detail": "must not contain 'What success looks like'"
+        },
+        {
+          "name": "not_contains:Optimize prompt:",
+          "passed": true,
+          "detail": "must not contain 'Optimize prompt:'"
+        },
+        {
+          "name": "not_contains:Sources appea",
+          "passed": true,
+          "detail": "must not contain 'Sources appea'"
+        },
+        {
+          "name": "not_contains:email for case #<",
+          "passed": true,
+          "detail": "must not contain 'email for case #<'"
+        }
+      ],
+      "answer_preview": "Case #15 summary and risk assessment:\n\nSummary:\nThe case involves a Master Service Agreement between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with a notice of breach and payment dispute. The main issues include termination rights triggered by material breach, payment terms, and dispute resolution.\n\nEvid"
+    },
+    {
+      "id": "summary_plus_risks_02",
+      "prompt": "Summarize case #15 and then analyze the legal risks.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 85756.93489999685,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Summary:",
+          "passed": true,
+          "detail": "must contain 'Summary:'"
+        },
+        {
+          "name": "contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must contain 'Risk Assessment:'"
+        }
+      ],
+      "answer_preview": "Case #15 summary and risk assessment:\n\nSummary:\nThe case involves a Master Service Agreement between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with a notice of breach and payment dispute. Atlas claims Nova missed SLA targets, while Nova disputes the material breach characterization and proposes correctiv"
+    },
+    {
+      "id": "summary_plus_risks_03",
+      "prompt": "I want summary plus risk review for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 87342.30530000059,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #15 summary and risk assessment:\n\nSummary:\nThe case involves a contract and a notice of breach and payment dispute between Atlas and Nova, with Nova disputing the material breach characterization and proposing corrective steps.\n\nEvidence basis:\n- eval_contract.pdf\n- eval_notice.pdf\n\nKey Dates:\n- Notice date: March"
+    },
+    {
+      "id": "summary_plus_risks_04",
+      "prompt": "Case #15: concise brief + risk assessment + next legal steps.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 86281.14110000024,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must contain 'Risk Assessment:'"
+        }
+      ],
+      "answer_preview": "Case #15 summary and risk assessment:\n\nSummary:\nThe parties are in dispute over termination rights triggered by a material breach, with Nova disputing the characterization of the breach and proposing corrective steps. The contract has a notice period and payment terms of net 30 from the invoice date.\n\nEvidence basis:\n-"
+    },
+    {
+      "id": "summary_plus_risks_05",
+      "prompt": "For case #15, summarize and detect dangers.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 85436.53769999946,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #15 summary and risk assessment:\n\nSummary:\nAtlas claims Nova missed SLA targets, while Nova disputes the material breach characterization and proposes corrective steps. The contract contains termination mechanics and payment terms, but no clear signature reference was detected.\n\nEvidence basis:\n- eval_contract.pdf"
+    },
+    {
+      "id": "summary_plus_risks_06",
+      "prompt": "Please provide a short case summary and risk mapping for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 86342.96349999931,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #15 summary and risk assessment:\n\nSummary:\nThe case involves a contract and a legal letter between Atlas and Nova, with Atlas claiming Nova missed SLA targets and Nova disputing the material breach characterization, proposing corrective steps instead.\n\nEvidence basis:\n- eval_contract.pdf\n- eval_notice.pdf\n\nKey Dat"
+    },
+    {
+      "id": "risk_only_01",
+      "prompt": "Analyze risks for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 86918.75480000454,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected legal risks for case",
+          "passed": true,
+          "detail": "must contain 'Detected legal risks for case'"
+        }
+      ],
+      "answer_preview": "Detected legal risks for case 15:\n\n- Unclear signature reference in the contract\n- Potential incomplete processing or limited legal context\n- Jurisdiction-specific risks related to due process and contract enforceability under Tunisian law\n- Termination rights triggered by material breach\n- Dispute over material breach"
+    },
+    {
+      "id": "risk_only_02_single",
+      "prompt": "Give me only one risk for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 86095.38080000493,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected legal risks for case",
+          "passed": true,
+          "detail": "must contain 'Detected legal risks for case'"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=1, max=1"
+        }
+      ],
+      "answer_preview": "Detected legal risks for case 15:\n\n- Unclear signature reference in contract text"
+    },
+    {
+      "id": "risk_only_03_three",
+      "prompt": "Top 3 risks for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 45440.80699999904,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=3, max=3"
+        }
+      ],
+      "answer_preview": "Detected legal risks for case 15:\n\n- Unclear signature reference in the contract text\n- Potential incomplete processing or limited legal context\n- Jurisdiction-specific review required for due process and procedural fairness"
+    },
+    {
+      "id": "risk_only_04",
+      "prompt": "What is the biggest legal exposure in case #15?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 1888.6018999983207,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Detected legal risks for case 15:\n\n- Unclear signature reference in the contract\n- Potential incomplete processing or limited legal context\n- Jurisdiction-specific review required for due process and procedural fairness\n- Contract enforceability under Tunisian mandatory local provisions\n- Termination rights triggered b"
+    },
+    {
+      "id": "risk_only_05",
+      "prompt": "List 2 risks for case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 2589.2315000019153,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=2, max=2"
+        }
+      ],
+      "answer_preview": "Detected legal risks for case 15:\n\n- Unclear signature reference in the contract text\n- Potential incomplete processing or limited legal context"
+    },
+    {
+      "id": "deadlines_01",
+      "prompt": "List deadlines for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "high",
+      "duration_ms": 366.00449999968987,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected",
+          "passed": true,
+          "detail": "must contain 'Detected'"
+        }
+      ],
+      "answer_preview": "Detected key deadlines for case 15:\n- March 29, 2026 (Notice date) - eval_notice.pdf\n- April 3, 2026 (Corrective action report due) - eval_notice.pdf"
+    },
+    {
+      "id": "deadlines_02",
+      "prompt": "Top 2 deadlines for case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "high",
+      "duration_ms": 699.7809999957099,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=2, max=2"
+        }
+      ],
+      "answer_preview": "Detected key deadlines for case 15:\n- March 29, 2026 (Notice date) - eval_notice.pdf\n- April 3, 2026 (Corrective action report due) - eval_notice.pdf"
+    },
+    {
+      "id": "deadlines_03",
+      "prompt": "Any due dates and notice periods in case #15?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "high",
+      "duration_ms": 313.58149999869056,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Detected key deadlines for case 15:\n- March 29, 2026 (Notice date) - eval_notice.pdf\n- April 3, 2026 (Corrective action report due) - eval_notice.pdf"
+    },
+    {
+      "id": "deadlines_04",
+      "prompt": "Show me 3 deadlines in case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "high",
+      "duration_ms": 727.8885999985505,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=2, max=3"
+        }
+      ],
+      "answer_preview": "Detected key deadlines for case 15:\n- March 29, 2026 (Notice date) - eval_notice.pdf\n- April 3, 2026 (Corrective action report due) - eval_notice.pdf"
+    },
+    {
+      "id": "deadlines_05",
+      "prompt": "Deadline audit for case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "high",
+      "duration_ms": 499.236399999063,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Detected key deadlines for case 15:\n- March 29, 2026 (Notice date) - eval_notice.pdf\n- April 3, 2026 (Corrective action report due) - eval_notice.pdf"
+    },
+    {
+      "id": "timeline_01",
+      "prompt": "Build timeline for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "build_timeline_case",
+      "confidence": "high",
+      "duration_ms": 1784.026699999231,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected build_timeline_case, got build_timeline_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "min_confidence",
+          "passed": true,
+          "detail": "expected >= medium, got high"
+        }
+      ],
+      "answer_preview": "Case timeline for case 15 - Eval Case 1410:\n- March 29, 2026 | Notice date | source: eval_notice.pdf\n- April 3, 2026 | Corrective action report due | source: eval_notice.pdf"
+    },
+    {
+      "id": "timeline_02",
+      "prompt": "Chronology of events in case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "build_timeline_case",
+      "confidence": "high",
+      "duration_ms": 856.9713000033516,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected build_timeline_case, got build_timeline_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case timeline for case 15 - Eval Case 1410:\n- March 29, 2026 | Notice date | source: eval_notice.pdf\n- April 3, 2026 | Corrective action report due | source: eval_notice.pdf"
+    },
+    {
+      "id": "timeline_03",
+      "prompt": "Create a chronological sequence for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "build_timeline_case",
+      "confidence": "high",
+      "duration_ms": 990.9109000000171,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected build_timeline_case, got build_timeline_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case timeline for case 15 - Eval Case 1410:\n- March 29, 2026 | Notice date | source: eval_notice.pdf\n- April 3, 2026 | Corrective action report due | source: eval_notice.pdf"
+    },
+    {
+      "id": "timeline_04",
+      "prompt": "case #15 timeline please",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "build_timeline_case",
+      "confidence": "high",
+      "duration_ms": 970.8683999997447,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected build_timeline_case, got build_timeline_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case timeline for case 15 - Eval Case 1410:\n- March 29, 2026 | Notice date | source: eval_notice.pdf\n- April 3, 2026 | Corrective action report due | source: eval_notice.pdf"
+    },
+    {
+      "id": "draft_email_01",
+      "prompt": "Draft client email for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "draft_client_email_case",
+      "confidence": "high",
+      "duration_ms": 1917.9657000058796,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected draft_client_email_case, got draft_client_email_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Subject:",
+          "passed": true,
+          "detail": "must contain 'Subject:'"
+        }
+      ],
+      "answer_preview": "Subject: Update on Case 15: Eval Case 1410\n\nWe are currently reviewing the documents submitted in relation to Case 15, Eval Case 1410, which involves a contractual dispute between Atlas Retail Group SARL and Nova Logistics Tunisia SARL in the jurisdiction of Tunisia. Our analysis is focused on the Master Service Agreem"
+    },
+    {
+      "id": "draft_email_02",
+      "prompt": "Prepare a client update email for case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "draft_client_email_case",
+      "confidence": "high",
+      "duration_ms": 1614.568099997996,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected draft_client_email_case, got draft_client_email_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Subject: Update on Case 15: Eval Case 1410\n\nWe are currently reviewing the documents related to Case 15, Eval Case 1410, which involves a Master Service Agreement between Atlas Retail Group SARL and Nova Logistics Tunisia SARL. The case file includes a contract and a notice of breach and payment dispute between the two"
+    },
+    {
+      "id": "draft_email_03",
+      "prompt": "Write a concise negotiation update mail for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "draft_client_email_case",
+      "confidence": "high",
+      "duration_ms": 2011.022899998352,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected draft_client_email_case, got draft_client_email_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Subject: Update on Eval Case 1410 (Case 15) in Tunisia\n\nWe are writing to provide a brief update on the current status of your case, Eval Case 1410 (Case 15), which is ongoing in the jurisdiction of Tunisia. Our team has reviewed the documents submitted, including the Master Service Agreement and the notice of breach a"
+    },
+    {
+      "id": "compare_docs_01",
+      "prompt": "Compare documents in case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "compare_case_documents",
+      "confidence": "high",
+      "duration_ms": 320.23380000464385,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected compare_case_documents, got compare_case_documents"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "min_confidence",
+          "passed": true,
+          "detail": "expected >= medium, got high"
+        }
+      ],
+      "answer_preview": "Comparison overview for case 15:\n- eval_contract.pdf: type=contract, dates=0, risks=3, summary=Overview:\nThis document is a contract or contract-related record. The main named parties are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL. The document includes termination or notice-r"
+    },
+    {
+      "id": "compare_docs_02",
+      "prompt": "Find contradictions across documents in case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "compare_case_documents",
+      "confidence": "high",
+      "duration_ms": 7837.9178999966825,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected compare_case_documents, got compare_case_documents"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Comparison overview for case 15:\n- eval_contract.pdf: type=contract, dates=0, risks=3, summary=Overview:\nThis document is a contract or contract-related record. The main named parties are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL. The document includes termination or notice-r"
+    },
+    {
+      "id": "compare_docs_03",
+      "prompt": "Document comparison for case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "compare_case_documents",
+      "confidence": "high",
+      "duration_ms": 409.4208999958937,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected compare_case_documents, got compare_case_documents"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Comparison overview for case 15:\n- eval_contract.pdf: type=contract, dates=0, risks=3, summary=Overview:\nThis document is a contract or contract-related record. The main named parties are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL. The document includes termination or notice-r"
+    },
+    {
+      "id": "booking_review_01",
+      "prompt": "Review booking status for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "review_booking_case",
+      "confidence": "low",
+      "duration_ms": 125.14699999883305,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected review_booking_case, got review_booking_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "No consultation booking details are available for this case yet."
+    },
+    {
+      "id": "booking_review_02",
+      "prompt": "Do we have any consultation request for case #15?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "review_booking_case",
+      "confidence": "low",
+      "duration_ms": 123.5575999962748,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected review_booking_case, got review_booking_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "No consultation booking details are available for this case yet."
+    },
+    {
+      "id": "optimize_prompt_01",
+      "prompt": "Optimize prompt: draft a client update about payment dispute for case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "optimize_prompt",
+      "confidence": "medium",
+      "duration_ms": 254.7134999986156,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected optimize_prompt, got optimize_prompt"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected global, got global"
+        },
+        {
+          "name": "contains:Optimized prompt:",
+          "passed": true,
+          "detail": "must contain 'Optimized prompt:'"
+        }
+      ],
+      "answer_preview": "Optimized prompt: For case #15, draft a client update payment dispute. Use concise legal language, cite evidence where available, and provide practical next steps.\n\nNotes: Normalized wording, corrected common typos, and added explicit legal task framing."
+    },
+    {
+      "id": "ask_case_01",
+      "prompt": "What is the payment structure in case #15?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "ask_case",
+      "confidence": "low",
+      "duration_ms": 9836.341399997764,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected ask_case, got ask_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:<CASE_ID>",
+          "passed": true,
+          "detail": "must not contain '<CASE_ID>'"
+        },
+        {
+          "name": "not_contains:What success looks like",
+          "passed": true,
+          "detail": "must not contain 'What success looks like'"
+        },
+        {
+          "name": "not_contains:Optimize prompt:",
+          "passed": true,
+          "detail": "must not contain 'Optimize prompt:'"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "ask_case_02",
+      "prompt": "What evidence supports a breach argument in case #15?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "ask_case",
+      "confidence": "low",
+      "duration_ms": 364.61550000240095,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected ask_case, got ask_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "ask_case_03",
+      "prompt": "Can you explain this case #15 in plain legal terms?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "ask_case",
+      "confidence": "low",
+      "duration_ms": 205.210399995849,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected ask_case, got ask_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "memory_followup_01",
+      "prompt": "Analyze risks for case #15",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "medium",
+      "duration_ms": 240.5700999952387,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Detected legal risks for case 15:\n\n- No clear signature reference was detected in the contract text\n- The extracted text is relatively short, which may indicate incomplete processing or limited legal context\n- Jurisdiction-specific review required: Due process and procedural fairness in dispute handling (Tunisia)\n- Jur"
+    },
+    {
+      "id": "memory_followup_02",
+      "prompt": "just one",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "medium",
+      "duration_ms": 314.97010000020964,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=1, max=1"
+        }
+      ],
+      "answer_preview": "Detected legal risks for case 15:\n\n- No clear signature reference was detected in the contract text"
+    }
+  ]
+}

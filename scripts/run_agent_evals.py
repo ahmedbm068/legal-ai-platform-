@@ -39,6 +39,9 @@ class EvalResult:
     answer_preview: str
 
 
+CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}
+
+
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -224,12 +227,12 @@ Nova disputes material breach characterization and proposes corrective steps.
             f"{base_url}/documents/upload?case_id={case_id}",
             token=token,
             files=files,
-            timeout_seconds=180,
+            timeout_seconds=360,
         )
         if status_code not in (200, 201):
             raise RuntimeError(f"upload {filename} failed: {status_code} {payload or raw_text}")
 
-    wait_deadline = time.time() + 90
+    wait_deadline = time.time() + 180
     while time.time() < wait_deadline:
         status_code, payload, raw_text = request_json(
             session,
@@ -339,6 +342,28 @@ def evaluate_prompt(
             )
         )
 
+    expected_target_type = str(rendered_spec.get("expected_target_type") or "").strip()
+    if expected_target_type:
+        got_target_type = str(payload.get("target_type") or "").strip()
+        assertions.append(
+            AssertionResult(
+                name="target_type_match",
+                passed=(got_target_type == expected_target_type),
+                detail=f"expected {expected_target_type}, got {got_target_type or 'none'}",
+            )
+        )
+
+    expected_scope = str(rendered_spec.get("expected_scope") or "").strip()
+    if expected_scope:
+        got_scope = str(payload.get("scope") or "").strip()
+        assertions.append(
+            AssertionResult(
+                name="scope_match",
+                passed=(got_scope == expected_scope),
+                detail=f"expected {expected_scope}, got {got_scope or 'none'}",
+            )
+        )
+
     for needle in rendered_spec.get("required_substrings", []) or []:
         needle_text = str(needle)
         assertions.append(
@@ -377,6 +402,18 @@ def evaluate_prompt(
                 name="max_answer_chars",
                 passed=len(answer) <= int(max_chars),
                 detail=f"chars={len(answer)}, max={int(max_chars)}",
+            )
+        )
+
+    min_confidence = str(rendered_spec.get("min_confidence") or "").strip().lower()
+    if min_confidence:
+        expected_level = CONFIDENCE_ORDER.get(min_confidence, 0)
+        got_level = CONFIDENCE_ORDER.get(confidence.lower(), 0)
+        assertions.append(
+            AssertionResult(
+                name="min_confidence",
+                passed=got_level >= expected_level and expected_level > 0,
+                detail=f"expected >= {min_confidence}, got {confidence or 'n/a'}",
             )
         )
 
@@ -478,6 +515,8 @@ def main() -> int:
     parser.add_argument("--email", default=None, help="Login email (required with --case-id when --token is not set)")
     parser.add_argument("--password", default="EvalPass!123", help="Login password (default: EvalPass!123)")
     parser.add_argument("--min-pass-rate", type=float, default=1.0, help="Fail if pass rate is below this value")
+    parser.add_argument("--limit", type=int, default=0, help="Run only the first N eval rows (0 = all).")
+    parser.add_argument("--ids", default="", help="Comma-separated eval ids to run.")
     parser.add_argument("--spawn-server", action="store_true", help="Spawn uvicorn for the run")
     parser.add_argument("--port", type=int, default=8031, help="Port for --spawn-server mode")
     parser.add_argument("--python-executable", default=sys.executable, help="Python executable for --spawn-server mode")
@@ -486,6 +525,14 @@ def main() -> int:
     suite_path = Path(args.suite)
     output_dir = Path(args.output_dir)
     suite_rows = load_suite(suite_path)
+    if args.ids.strip():
+        selected_ids = {item.strip() for item in args.ids.split(",") if item.strip()}
+        suite_rows = [row for row in suite_rows if str(row.get("id") or "").strip() in selected_ids]
+    if args.limit and args.limit > 0:
+        suite_rows = suite_rows[: args.limit]
+    if not suite_rows:
+        print("No eval rows selected after applying filters (--ids/--limit).", file=sys.stderr)
+        return 1
 
     base_url = args.base_url.rstrip("/")
     server_proc: subprocess.Popen[bytes] | None = None

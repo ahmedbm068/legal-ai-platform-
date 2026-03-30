@@ -137,6 +137,42 @@ If you want to evaluate your own existing case:
 .\venv\Scripts\python.exe scripts\run_agent_evals.py --case-id 11 --email you@example.com --password your-password
 ```
 
+Fast iteration mode (run a subset):
+
+```bash
+.\venv\Scripts\python.exe scripts\run_agent_evals.py --spawn-server --limit 6 --min-pass-rate 0
+```
+
+Current default eval suite size: `43` prompts (`scripts/evals/default_eval_suite.json`).
+
+## Regression Checks
+
+Run compile + smoke + eval gates in one command:
+
+```bash
+.\venv\Scripts\python.exe scripts\run_regression_checks.py --eval-base-url http://127.0.0.1:8000
+```
+
+Optional skips:
+
+```bash
+.\venv\Scripts\python.exe scripts\run_regression_checks.py --skip-smoke
+```
+
+## Feedback Loop (Thumbs Up/Down)
+
+The copilot UI now sends per-message feedback to `/ai/feedback` (thumbs up/down).
+Use this weekly report command to identify weak intents and tune prompts/agents:
+
+```bash
+.\venv\Scripts\python.exe scripts\generate_feedback_report.py --weeks 8
+```
+
+Output files are written to:
+
+- `advancement/feedback/feedback_report_<timestamp>.json`
+- `advancement/feedback/feedback_report_<timestamp>.md`
+
 ## Advancement Auto-Log
 
 On every GitHub push, a workflow auto-creates a markdown file in `advancement/` with what changed in that push.

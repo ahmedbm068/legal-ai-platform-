@@ -755,6 +755,35 @@ textarea {
   color: var(--ink-faint);
 }
 
+.message-feedback-row {
+  margin-top: 0.44rem;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.34rem;
+}
+
+.message-feedback-button {
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-muted);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.28rem 0.58rem;
+}
+
+.message-feedback-button.active {
+  border-color: color-mix(in srgb, var(--brand-soft) 52%, var(--border));
+  background: color-mix(in srgb, var(--brand-soft) 16%, var(--bg-elevated));
+  color: var(--ink);
+}
+
+.message-feedback-row small {
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+}
+
 .chatgpt-composer-dock {
   width: min(860px, calc(100% - 2rem));
   margin: 0 auto 1.1rem;
