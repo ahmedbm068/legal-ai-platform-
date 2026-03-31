@@ -569,6 +569,107 @@ function inferAgentFromIntent(intent?: string) {
   return "Copilot Core";
 }
 
+const AI_ENGINE_AGENTS: Array<{
+  name: string;
+  role: string;
+  intentHints: string[];
+  stageHints: string[];
+  activeNameHints: string[];
+}> = [
+  {
+    name: "PromptCorrectionAgent",
+    role: "Normalizes and clarifies legal prompts before orchestration.",
+    intentHints: ["validation_error", "request_error"],
+    stageHints: ["correction", "prompt_correction"],
+    activeNameHints: ["copilot core"],
+  },
+  {
+    name: "PromptOptimizerAgent",
+    role: "Optimizes prompt precision for legal retrieval quality.",
+    intentHints: ["optimize_prompt"],
+    stageHints: ["optimizer", "prompt_opt"],
+    activeNameHints: ["prompt optimizer"],
+  },
+  {
+    name: "RetrievalAgent",
+    role: "Runs grounded retrieval over chunks and web sources.",
+    intentHints: ["ask_", "summarize_"],
+    stageHints: ["retrieval", "search"],
+    activeNameHints: ["rag", "retrieval"],
+  },
+  {
+    name: "VerifierAgent",
+    role: "Checks evidence grounding and answer consistency.",
+    intentHints: ["agent_workflow"],
+    stageHints: ["verify", "verification"],
+    activeNameHints: ["verifier"],
+  },
+  {
+    name: "SummarizationAgent",
+    role: "Produces concise document-focused legal summaries.",
+    intentHints: ["summarize_document", "summarize_case"],
+    stageHints: ["summary", "summar"],
+    activeNameHints: ["summarization"],
+  },
+  {
+    name: "CaseReasoningAgent",
+    role: "Performs case-level risk, deadline, and action reasoning.",
+    intentHints: ["analyze_risks_case", "list_deadlines_case", "summarize_and_analyze_risks_case"],
+    stageHints: ["reason", "risk"],
+    activeNameHints: ["case reasoning"],
+  },
+  {
+    name: "TimelineAgent",
+    role: "Constructs legal event timelines and sequence outputs.",
+    intentHints: ["build_timeline_case"],
+    stageHints: ["timeline"],
+    activeNameHints: ["timeline"],
+  },
+  {
+    name: "BookingAgent",
+    role: "Handles scheduling and booking-intent review tasks.",
+    intentHints: ["review_booking_case"],
+    stageHints: ["booking", "schedule"],
+    activeNameHints: ["booking"],
+  },
+  {
+    name: "DocumentComparisonAgent",
+    role: "Compares clauses and contradictions across documents.",
+    intentHints: ["compare_case_documents"],
+    stageHints: ["comparison", "compare"],
+    activeNameHints: ["document comparison"],
+  },
+  {
+    name: "DraftingAgent",
+    role: "Creates versioned legal drafts and client communications.",
+    intentHints: ["draft_client_email_case"],
+    stageHints: ["draft", "email"],
+    activeNameHints: ["drafting"],
+  },
+  {
+    name: "IntakeAgent",
+    role: "Transforms intake inputs into structured legal records.",
+    intentHints: ["request_audio_upload", "request_document_upload"],
+    stageHints: ["intake", "consultation"],
+    activeNameHints: ["workspace action", "action runner"],
+  },
+];
+
+function summarizePreview(value?: string | null, max = 100) {
+  const cleaned = (value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "No data yet.";
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, max)}...`;
+}
+
+function confidenceToScore(confidence?: string | null) {
+  const value = (confidence || "").toLowerCase().trim();
+  if (value === "high") return 0.9;
+  if (value === "medium") return 0.74;
+  if (value === "low") return 0.58;
+  return 0.64;
+}
+
 function extractSourceUrl(source: SourceItem) {
   const match = source.snippet.match(/https?:\/\/[^\s)]+/i);
   return match ? match[0] : null;
@@ -843,6 +944,10 @@ export default function App() {
       null
     );
   }, [consultationRequests, selectedRecordingId]);
+  const latestUserMessage = useMemo(
+    () => [...chatMessages].reverse().find((item) => item.role === "user") ?? null,
+    [chatMessages]
+  );
   const latestAssistantMessage = useMemo(() => [...chatMessages].reverse().find((item) => item.role === "assistant") ?? null, [chatMessages]);
   const activeAgentName = inferAgentFromIntent(latestAssistantMessage?.meta?.parsedIntent);
   const externalResearchCount = useMemo(
@@ -897,6 +1002,249 @@ export default function App() {
       ).length,
     [voiceRecordings]
   );
+  const selectedCaseDocuments = useMemo(() => {
+    if (!selectedCase) return [];
+    return documents.filter((item) => item.case_id === selectedCase.id);
+  }, [documents, selectedCase]);
+  const selectedCaseConsultations = useMemo(() => {
+    if (!selectedCase) return [];
+    return consultationRequests.filter((item) => item.case_id === selectedCase.id);
+  }, [consultationRequests, selectedCase]);
+  const caseTimelineItems = useMemo(() => {
+    if (!selectedCase) return [];
+
+    const documentEvents = selectedCaseDocuments.map((item) => ({
+      id: `doc-${item.id}`,
+      title: `Document: ${item.filename}`,
+      detail: `Status ${item.processing_status}`,
+      date: item.upload_timestamp,
+    }));
+    const consultationEvents = selectedCaseConsultations.map((item) => ({
+      id: `consult-${item.id}`,
+      title: "Consultation request",
+      detail: `${item.urgency_level} urgency · ${item.status}`,
+      date: item.created_at,
+    }));
+    const recordingEvents = voiceRecordings
+      .filter((item) => item.case_id === selectedCase.id)
+      .map((item) => ({
+        id: `voice-${item.id}`,
+        title: `Voice note: ${item.filename}`,
+        detail: `Transcription ${item.transcription_status}`,
+        date: item.created_at,
+      }));
+
+    return [...documentEvents, ...consultationEvents, ...recordingEvents]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 7);
+  }, [selectedCase, selectedCaseConsultations, selectedCaseDocuments, voiceRecordings]);
+  const riskSignals = useMemo(() => {
+    if (!selectedCase) return ["Select a case to view risks."];
+
+    const rows: string[] = [];
+    const normalizedStatus = (selectedCase.status || "").toLowerCase();
+    if (["open", "in_progress", "new", "ready_for_review"].includes(normalizedStatus)) {
+      rows.push(`Case status is ${selectedCase.status.replace(/_/g, " ")} and still operational.`);
+    }
+
+    const pendingDocs = selectedCaseDocuments.filter(
+      (item) => (item.processing_status || "").toLowerCase() !== "completed"
+    ).length;
+    if (pendingDocs > 0) {
+      rows.push(`${pendingDocs} document(s) are still processing.`);
+    }
+
+    const pendingConsultations = selectedCaseConsultations.filter((item) =>
+      ["new", "submitted", "ready_for_review"].includes((item.status || "").toLowerCase())
+    ).length;
+    if (pendingConsultations > 0) {
+      rows.push(`${pendingConsultations} consultation request(s) await legal review.`);
+    }
+
+    if (rows.length === 0) rows.push("No immediate risk flags detected from current workspace telemetry.");
+    return rows;
+  }, [selectedCase, selectedCaseConsultations, selectedCaseDocuments]);
+  const evidenceReferences = useMemo(() => {
+    const scoped = activeSources.filter(
+      (source) =>
+        !selectedCaseId ||
+        source.case_id === null ||
+        source.case_id === selectedCaseId ||
+        source.document_id === selectedDocumentId
+    );
+    return scoped.slice(0, 6).map((source, index) => ({
+      id: `${source.document_id ?? "external"}-${index}`,
+      title: source.filename,
+      reference: source.chunk_index !== null ? `chunk ${source.chunk_index}` : "external",
+      snippet: summarizePreview(source.snippet, 110),
+    }));
+  }, [activeSources, selectedCaseId, selectedDocumentId]);
+  const missingInformation = useMemo(() => {
+    if (!selectedCase) return ["Select a case to evaluate missing information."];
+    const rows: string[] = [];
+
+    if (!(selectedCase.description || "").trim()) {
+      rows.push("Case description is missing.");
+    }
+    if (selectedCaseDocuments.length === 0) {
+      rows.push("No uploaded documents linked to this case.");
+    }
+    if (selectedCaseConsultations.length === 0) {
+      rows.push("No consultation request attached yet.");
+    }
+    if (!selectedDocumentAnalysis?.summary_short) {
+      rows.push("Document intelligence summary is not available.");
+    }
+    if (rows.length === 0) rows.push("No major information gaps detected.");
+    return rows;
+  }, [selectedCase, selectedCaseConsultations.length, selectedCaseDocuments.length, selectedDocumentAnalysis?.summary_short]);
+  const contradictionSignals = useMemo(() => {
+    if (!selectedCase) return ["Select a case to inspect contradictions."];
+
+    const rows: string[] = [];
+    const normalizedStatus = (selectedCase.status || "").toLowerCase();
+    const hasActiveConsultation = selectedCaseConsultations.some((item) =>
+      ["new", "submitted", "ready_for_review", "in_progress"].includes((item.status || "").toLowerCase())
+    );
+
+    if (normalizedStatus === "closed" && hasActiveConsultation) {
+      rows.push("Case marked closed while consultation requests are still active.");
+    }
+    if (selectedCaseDocuments.length === 0 && evidenceReferences.length > 0) {
+      rows.push("Evidence snippets exist but no case documents are currently listed.");
+    }
+    if (rows.length === 0) rows.push("No structural contradictions detected in current workspace state.");
+    return rows;
+  }, [selectedCase, selectedCaseConsultations, selectedCaseDocuments.length, evidenceReferences.length]);
+  const recommendedActions = useMemo(() => {
+    const rows: string[] = [];
+    if (!selectedCase) return ["Select a case to generate recommendations."];
+
+    if (selectedConsultationRequest?.issue_summary?.trim()) {
+      rows.push(`Address consultation issue: ${summarizePreview(selectedConsultationRequest.issue_summary, 82)}`);
+    }
+    if (riskSignals.some((item) => item.includes("processing") || item.includes("await"))) {
+      rows.push("Review pending uploads and follow up with the legal team.");
+    }
+    if (!useExternalResearch) {
+      rows.push("Enable web research for broader precedent coverage.");
+    }
+    if (!agentWorkflow) {
+      rows.push("Run full agent workflow to generate verified case summary.");
+    }
+    if (rows.length === 0) rows.push("Continue monitoring timeline updates and maintain current strategy.");
+    return rows.slice(0, 4);
+  }, [selectedCase, selectedConsultationRequest?.issue_summary, riskSignals, useExternalResearch, agentWorkflow]);
+  const flowActiveIndex = useMemo(() => {
+    const activeLower = activeAgentName.toLowerCase();
+    const stageKeyJoined = Object.keys(agentWorkflow?.stages || {}).join(" ").toLowerCase();
+
+    if (!latestUserMessage && !chatInput.trim()) return 0;
+    if (!copilotLoading && !workflowLoading && latestAssistantMessage) return 6;
+    if (activeLower.includes("prompt optimizer")) return 2;
+    if (activeLower.includes("rag") || activeLower.includes("retrieval")) return 3;
+    if (
+      activeLower.includes("case reasoning") ||
+      activeLower.includes("timeline") ||
+      activeLower.includes("booking") ||
+      activeLower.includes("comparison") ||
+      activeLower.includes("drafting")
+    ) {
+      return 4;
+    }
+    if (activeLower.includes("verifier") || stageKeyJoined.includes("verify")) return 5;
+    if (copilotLoading || workflowLoading) return 1;
+    return 0;
+  }, [activeAgentName, agentWorkflow?.stages, chatInput, copilotLoading, latestAssistantMessage, latestUserMessage, workflowLoading]);
+  const flowSteps = useMemo(() => {
+    const rows = [
+      {
+        label: "User Prompt",
+        detail: summarizePreview(latestUserMessage?.content || chatInput || workflowObjective || "Awaiting user prompt.", 96),
+      },
+      {
+        label: "Correction",
+        detail: "PromptCorrectionAgent sanitizes legal scope and intent.",
+      },
+      {
+        label: "Optimization",
+        detail: "PromptOptimizerAgent tunes retrieval and reasoning directives.",
+      },
+      {
+        label: "Retrieval",
+        detail: `RetrievalAgent gathers evidence (top_k=${activeRetrievalConfig.topK}).`,
+      },
+      {
+        label: "Reasoning",
+        detail: "Case and specialist agents synthesize legal conclusions.",
+      },
+      {
+        label: "Verification",
+        detail: "VerifierAgent validates grounding before answer release.",
+      },
+      {
+        label: "Final Answer",
+        detail: summarizePreview(
+          latestAssistantMessage?.content || agentWorkflow?.verified_summary || "Waiting for verified answer.",
+          96
+        ),
+      },
+    ];
+
+    return rows.map((row, index) => ({
+      ...row,
+      state: index < flowActiveIndex ? "done" : index === flowActiveIndex ? "active" : "idle",
+    }));
+  }, [activeRetrievalConfig.topK, agentWorkflow?.verified_summary, chatInput, flowActiveIndex, latestAssistantMessage?.content, latestUserMessage?.content, workflowObjective]);
+  const aiEngineCards = useMemo(() => {
+    const activeIntent = (latestAssistantMessage?.meta?.parsedIntent || "").toLowerCase();
+    const activeName = activeAgentName.toLowerCase();
+    const stageRows = Object.entries(agentWorkflow?.stages || {});
+    const inputPreview = summarizePreview(
+      chatInput.trim() || latestUserMessage?.content || workflowObjective || "No recent input available.",
+      88
+    );
+    const defaultOutput = summarizePreview(
+      latestAssistantMessage?.content || agentWorkflow?.verified_summary || "No output produced yet.",
+      88
+    );
+
+    return AI_ENGINE_AGENTS.map((agent) => {
+      const stage = stageRows.find(([key]) =>
+        agent.stageHints.some((hint) => key.toLowerCase().includes(hint))
+      )?.[1];
+
+      const intentMatch = agent.intentHints.some((hint) => activeIntent.includes(hint));
+      const nameMatch = agent.activeNameHints.some((hint) => activeName.includes(hint));
+
+      let status: "active" | "idle" | "processing" = "idle";
+      if (workflowLoading || copilotLoading) {
+        if (intentMatch || nameMatch || (stage && !stage.success && !stage.error)) {
+          status = "processing";
+        }
+      } else if (stage?.success || intentMatch || nameMatch) {
+        status = "active";
+      }
+
+      const stageOutput = stage?.trace?.length
+        ? stage.trace[stage.trace.length - 1]
+        : null;
+      const confidence = stage?.success
+        ? 0.9
+        : intentMatch || nameMatch
+          ? confidenceToScore(latestAssistantMessage?.meta?.confidence)
+          : 0.56;
+
+      return {
+        name: agent.name,
+        role: agent.role,
+        status,
+        inputPreview,
+        outputPreview: summarizePreview(stageOutput || defaultOutput, 92),
+        confidence,
+      };
+    });
+  }, [activeAgentName, agentWorkflow?.stages, agentWorkflow?.verified_summary, chatInput, copilotLoading, latestAssistantMessage, latestUserMessage?.content, workflowLoading, workflowObjective]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -2454,63 +2802,212 @@ export default function App() {
           </article>
         </section>
 
-        <section className="chatgpt-canvas">
-          {inConversationMode ? (
-            <div className="message-stream message-stream-chatgpt">
-              {chatMessages.map((message) => (
-                <article key={message.id} className={`message ${message.role}`}>
-                  <div className="message-avatar">{message.role === "assistant" ? "AI" : t("you", "You")}</div>
-                  <div className="message-card">
-                    <p>{message.role === "assistant" ? localizedText(message.content, "legal_content") : message.content}</p>
-                    {message.meta ? (
-                      <div className="message-meta">
-                        <span>{inferAgentFromIntent(message.meta.parsedIntent)}</span>
-                        <span>{message.meta.confidence || "n/a"}</span>
-                        {message.meta.actionCategory ? <span>{message.meta.actionCategory}</span> : null}
-                        {message.meta.actionStatus ? <span>{message.meta.actionStatus}</span> : null}
-                        {message.meta.permissionDenied ? <span>permission denied</span> : null}
-                        {message.meta.fallbackReason ? <span>{message.meta.fallbackReason}</span> : null}
+        <section className="legal-os-grid">
+          <div className="legal-os-primary">
+            <section className="chatgpt-canvas">
+              {inConversationMode ? (
+                <div className="message-stream message-stream-chatgpt">
+                  {chatMessages.map((message) => (
+                    <article key={message.id} className={`message ${message.role}`}>
+                      <div className="message-avatar">{message.role === "assistant" ? "AI" : t("you", "You")}</div>
+                      <div className="message-card">
+                        <p>{message.role === "assistant" ? localizedText(message.content, "legal_content") : message.content}</p>
+                        {message.meta ? (
+                          <div className="message-meta">
+                            <span>{inferAgentFromIntent(message.meta.parsedIntent)}</span>
+                            <span>{message.meta.confidence || "n/a"}</span>
+                            {message.meta.actionCategory ? <span>{message.meta.actionCategory}</span> : null}
+                            {message.meta.actionStatus ? <span>{message.meta.actionStatus}</span> : null}
+                            {message.meta.permissionDenied ? <span>permission denied</span> : null}
+                            {message.meta.fallbackReason ? <span>{message.meta.fallbackReason}</span> : null}
+                          </div>
+                        ) : null}
+                        {message.meta?.steps?.length ? (
+                          <div className="message-meta message-steps">
+                            <span>{message.meta.steps.slice(0, 3).join(" | ")}</span>
+                          </div>
+                        ) : null}
+                        {message.role === "assistant" ? (
+                          <div className="message-feedback-row">
+                            <button
+                              className={`message-feedback-button ${messageFeedback[message.id]?.value === "up" ? "active" : ""}`}
+                              disabled={messageFeedback[message.id]?.status === "saving"}
+                              onClick={() => void submitAssistantFeedback(message, "up")}
+                              type="button"
+                            >
+                              👍 {t("feedbackHelpful", "Helpful")}
+                            </button>
+                            <button
+                              className={`message-feedback-button ${messageFeedback[message.id]?.value === "down" ? "active" : ""}`}
+                              disabled={messageFeedback[message.id]?.status === "saving"}
+                              onClick={() => void submitAssistantFeedback(message, "down")}
+                              type="button"
+                            >
+                              👎 {t("feedbackNeedsWork", "Needs work")}
+                            </button>
+                            {messageFeedback[message.id]?.status === "saving" ? <small>{t("feedbackSaving", "Saving feedback...")}</small> : null}
+                            {messageFeedback[message.id]?.status === "submitted" ? <small>{t("feedbackSaved", "Feedback saved")}</small> : null}
+                            {messageFeedback[message.id]?.status === "error" ? <small>{t("feedbackFailed", "Feedback failed")}</small> : null}
+                          </div>
+                        ) : null}
                       </div>
-                    ) : null}
-                    {message.meta?.steps?.length ? (
-                      <div className="message-meta message-steps">
-                        <span>{message.meta.steps.slice(0, 3).join(" | ")}</span>
-                      </div>
-                    ) : null}
-                    {message.role === "assistant" ? (
-                      <div className="message-feedback-row">
-                        <button
-                          className={`message-feedback-button ${messageFeedback[message.id]?.value === "up" ? "active" : ""}`}
-                          disabled={messageFeedback[message.id]?.status === "saving"}
-                          onClick={() => void submitAssistantFeedback(message, "up")}
-                          type="button"
-                        >
-                          👍 {t("feedbackHelpful", "Helpful")}
-                        </button>
-                        <button
-                          className={`message-feedback-button ${messageFeedback[message.id]?.value === "down" ? "active" : ""}`}
-                          disabled={messageFeedback[message.id]?.status === "saving"}
-                          onClick={() => void submitAssistantFeedback(message, "down")}
-                          type="button"
-                        >
-                          👎 {t("feedbackNeedsWork", "Needs work")}
-                        </button>
-                        {messageFeedback[message.id]?.status === "saving" ? <small>{t("feedbackSaving", "Saving feedback...")}</small> : null}
-                        {messageFeedback[message.id]?.status === "submitted" ? <small>{t("feedbackSaved", "Feedback saved")}</small> : null}
-                        {messageFeedback[message.id]?.status === "error" ? <small>{t("feedbackFailed", "Feedback failed")}</small> : null}
-                      </div>
-                    ) : null}
+                    </article>
+                  ))}
+                  {copilotLoading ? <div className="loading-bar">{t("processing", "Thinking...")}</div> : null}
+                </div>
+              ) : (
+                <div className="chatgpt-home-hero">
+                  <h1>{t("askCopilot", "Ask copilot")}</h1>
+                  <p>{semanticTranslationBusy ? `${t("smartTranslation", "Smart translation")}...` : t("alwaysReady", "Always ready to support legal work.")}</p>
+                </div>
+              )}
+            </section>
+          </div>
+
+          <aside className="legal-os-side">
+            <article className="legal-panel">
+              <div className="legal-panel-head">
+                <h3>Case Intelligence</h3>
+                <span>{selectedCase ? selectedCase.title : "No case selected"}</span>
+              </div>
+
+              <div className="intelligence-grid">
+                <section className="intelligence-subpanel">
+                  <h4>Summary</h4>
+                  <p>
+                    {localizedText(
+                      selectedDocumentAnalysis?.summary_short ||
+                        selectedCase?.description ||
+                        "No case summary available. Upload documents or run workflow to enrich intelligence.",
+                      "legal_content"
+                    )}
+                  </p>
+                </section>
+
+                <section className="intelligence-subpanel">
+                  <h4>Risks</h4>
+                  <ul>
+                    {riskSignals.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </section>
+
+                <section className="intelligence-subpanel">
+                  <h4>Evidence</h4>
+                  {evidenceReferences.length > 0 ? (
+                    <div className="evidence-mini-list">
+                      {evidenceReferences.map((item) => (
+                        <article key={item.id}>
+                          <strong>{item.title}</strong>
+                          <small>{item.reference}</small>
+                          <p>{localizedText(item.snippet, "legal_content")}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p>No evidence references loaded yet.</p>
+                  )}
+                </section>
+
+                <section className="intelligence-subpanel">
+                  <h4>Missing information</h4>
+                  <ul>
+                    {missingInformation.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </section>
+
+                <section className="intelligence-subpanel">
+                  <h4>Contradictions</h4>
+                  <ul>
+                    {contradictionSignals.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </section>
+
+                <section className="intelligence-subpanel">
+                  <h4>Timeline</h4>
+                  {caseTimelineItems.length ? (
+                    <div className="timeline-mini-list">
+                      {caseTimelineItems.map((item) => (
+                        <article key={item.id}>
+                          <strong>{item.title}</strong>
+                          <small>{formatUiDate(item.date)}</small>
+                          <p>{item.detail}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p>No timeline events available yet.</p>
+                  )}
+                </section>
+
+                <section className="intelligence-subpanel">
+                  <h4>Recommended actions</h4>
+                  <ul>
+                    {recommendedActions.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </section>
+              </div>
+            </article>
+
+            <article className="legal-panel">
+              <div className="legal-panel-head">
+                <h3>Agent Flow Visualization</h3>
+                <span>User prompt to verified answer</span>
+              </div>
+
+              <div className="agent-flow-track">
+                {flowSteps.map((step, index) => (
+                  <div key={step.label} className={`flow-step ${step.state}`}>
+                    <div className="flow-index">{index + 1}</div>
+                    <div>
+                      <strong>{step.label}</strong>
+                      <small>{step.detail}</small>
+                    </div>
                   </div>
-                </article>
-              ))}
-              {copilotLoading ? <div className="loading-bar">{t("processing", "Thinking...")}</div> : null}
-            </div>
-          ) : (
-            <div className="chatgpt-home-hero">
-              <h1>{t("askCopilot", "Ask copilot")}</h1>
-              <p>{semanticTranslationBusy ? `${t("smartTranslation", "Smart translation")}...` : t("alwaysReady", "Always ready to support legal work.")}</p>
-            </div>
-          )}
+                ))}
+              </div>
+            </article>
+
+            <article className="legal-panel ai-engine-panel">
+              <div className="legal-panel-head">
+                <h3>AI Engine Panel</h3>
+                <span>Agent transparency and traceability</span>
+              </div>
+
+              <div className="ai-agent-list">
+                {aiEngineCards.map((agent) => (
+                  <article key={agent.name} className="ai-agent-card">
+                    <header>
+                      <strong>{agent.name}</strong>
+                      <span className={`agent-status ${agent.status}`}>{agent.status}</span>
+                    </header>
+                    <p>{agent.role}</p>
+                    <div className="agent-io">
+                      <small>Input</small>
+                      <span>{agent.inputPreview}</span>
+                    </div>
+                    <div className="agent-io">
+                      <small>Output</small>
+                      <span>{agent.outputPreview}</span>
+                    </div>
+                    <div className="agent-confidence">
+                      <div className="agent-confidence-bar">
+                        <span style={{ width: `${Math.round(agent.confidence * 100)}%` }} />
+                      </div>
+                      <small>{Math.round(agent.confidence * 100)}% confidence</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </article>
+          </aside>
         </section>
 
         <footer className={`chatgpt-composer-dock ${copilotLoading ? "loading" : ""}`}>
