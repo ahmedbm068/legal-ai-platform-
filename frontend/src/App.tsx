@@ -25,6 +25,14 @@ const CASE_REFERENCE_PATTERN = /\bcase\s*#?\s*(\d+)\b/i;
 const WRITE_ACTION_ROLES = new Set(["admin", "lawyer"]);
 
 type UiLanguage = "en" | "de" | "ar";
+type RetrievalPreset = "low" | "medium" | "high" | "extra_high";
+
+const RETRIEVAL_PRESET_CONFIG: Record<RetrievalPreset, { topK: number; range: string }> = {
+  low: { topK: 3, range: "1-3" },
+  medium: { topK: 5, range: "4-7" },
+  high: { topK: 8, range: "8-10" },
+  extra_high: { topK: 10, range: "8-10" },
+};
 
 interface ChatThread {
   id: string;
@@ -128,6 +136,15 @@ const UI_BASE_COPY: Record<string, string> = {
   on: "On",
   off: "Off",
   retrieval: "Retrieval",
+  retrievalReasoning: "Reasoning",
+  reasoningLow: "Low",
+  reasoningMedium: "Medium",
+  reasoningHigh: "High",
+  reasoningExtraHigh: "Extra High",
+  reasoningGuideLow: "Low value (1-3): faster but less complete answers.",
+  reasoningGuideMedium: "Medium value (4-7): balanced speed and accuracy.",
+  reasoningGuideHigh: "High value (8-10): deeper coverage, slower and sometimes noisy.",
+  reasoningGuideExtraHigh: "Extra High: maximum retrieval depth for the most complete pass.",
   logout: "Logout",
   noClient: "No client",
   selectCaseFromSidebar: "Select a case from the sidebar",
@@ -232,6 +249,15 @@ const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
     on: "An",
     off: "Aus",
     retrieval: "Abruf",
+    retrievalReasoning: "Reasoning",
+    reasoningLow: "Low",
+    reasoningMedium: "Medium",
+    reasoningHigh: "High",
+    reasoningExtraHigh: "Extra High",
+    reasoningGuideLow: "Niedrig (1-3): schneller, aber weniger vollstaendig.",
+    reasoningGuideMedium: "Mittel (4-7): gutes Gleichgewicht aus Tempo und Genauigkeit.",
+    reasoningGuideHigh: "Hoch (8-10): umfassender, aber langsamer und teils verrauscht.",
+    reasoningGuideExtraHigh: "Extra Hoch: maximale Retrieval-Tiefe fuer kritische Analysen.",
     logout: "Abmelden",
     noClient: "Kein Mandant",
     selectCaseFromSidebar: "Waehle einen Fall in der Seitenleiste",
@@ -530,6 +556,8 @@ function buildWelcomeMessage(caseTitle?: string): ChatMessage {
 
 function inferAgentFromIntent(intent?: string) {
   if (!intent) return "Copilot Core";
+  if (intent === "create_case" || intent === "create_client" || intent === "update_case_status" || intent === "create_case_appointment") return "Agent Action Runner";
+  if (intent === "request_document_upload" || intent === "request_audio_upload") return "Workspace Action Router";
   if (intent === "optimize_prompt") return "Prompt Optimizer Agent";
   if (intent === "build_timeline_case") return "Timeline Agent";
   if (intent === "review_booking_case") return "Booking Agent";
@@ -732,7 +760,8 @@ export default function App() {
   const [activeSources, setActiveSources] = useState<SourceItem[]>([]);
   const [useExternalResearch, setUseExternalResearch] = useState(false);
   const [workflowFromPrompt, setWorkflowFromPrompt] = useState(false);
-  const [retrievalDepth, setRetrievalDepth] = useState(5);
+  const [retrievalPreset, setRetrievalPreset] = useState<RetrievalPreset>("medium");
+  const [retrievalDepth, setRetrievalDepth] = useState(RETRIEVAL_PRESET_CONFIG.medium.topK);
   const [workflowObjective, setWorkflowObjective] = useState("");
 
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -843,6 +872,13 @@ export default function App() {
   }, [latestAssistantMessage, selectedCase]);
   const normalizedUserRole = (user?.role || "assistant").toLowerCase();
   const canRunOperationalActions = WRITE_ACTION_ROLES.has(normalizedUserRole);
+  const activeRetrievalConfig = RETRIEVAL_PRESET_CONFIG[retrievalPreset];
+  const retrievalGuidanceByPreset: Record<RetrievalPreset, string> = {
+    low: t("reasoningGuideLow", "Low value (1-3): faster but less complete answers."),
+    medium: t("reasoningGuideMedium", "Medium value (4-7): balanced speed and accuracy."),
+    high: t("reasoningGuideHigh", "High value (8-10): deeper coverage, slower and sometimes noisy."),
+    extra_high: t("reasoningGuideExtraHigh", "Extra High: maximum retrieval depth for the most complete pass."),
+  };
   const pendingDocumentCount = useMemo(
     () => documents.filter((item) => (item.processing_status || "").toLowerCase() !== "completed").length,
     [documents]
@@ -875,6 +911,13 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const nextTopK = RETRIEVAL_PRESET_CONFIG[retrievalPreset].topK;
+    if (nextTopK !== retrievalDepth) {
+      setRetrievalDepth(nextTopK);
+    }
+  }, [retrievalDepth, retrievalPreset]);
 
   useEffect(() => {
     if (!canRunOperationalActions && workflowFromPrompt) {
@@ -1173,6 +1216,98 @@ export default function App() {
     }
   }
 
+  async function refreshWorkspaceEntities(currentToken: string) {
+    const [caseList, clientList] = await Promise.all([
+      api.listCases(currentToken),
+      api.listClients(currentToken),
+    ]);
+    setCases(caseList);
+    setClients(clientList);
+    return { caseList, clientList };
+  }
+
+  async function applyStructuredUiTriggers(response: {
+    parsed_intent?: string;
+    structured_result?: Record<string, unknown>;
+  }) {
+    if (!token) return;
+    const payload = response.structured_result;
+    if (!payload || typeof payload !== "object") return;
+
+    const triggers = Array.isArray(payload.ui_triggers)
+      ? (payload.ui_triggers as Array<Record<string, unknown>>)
+      : [];
+    if (triggers.length === 0) return;
+
+    let shouldRefreshCases = false;
+    let shouldRefreshClients = false;
+    let shouldOpenDocumentUpload = false;
+    let shouldOpenAudioUpload = false;
+    let caseToSelect: number | null = null;
+
+    for (const trigger of triggers) {
+      const type = String(trigger?.type || "").trim();
+      if (!type) continue;
+
+      if (type === "refresh_cases") {
+        shouldRefreshCases = true;
+        continue;
+      }
+      if (type === "refresh_clients") {
+        shouldRefreshClients = true;
+        continue;
+      }
+      if (type === "refresh_workspace") {
+        shouldRefreshCases = true;
+        shouldRefreshClients = true;
+        continue;
+      }
+      if (type === "select_case") {
+        const candidateCaseId = Number(trigger.case_id);
+        if (Number.isInteger(candidateCaseId) && candidateCaseId > 0) {
+          caseToSelect = candidateCaseId;
+        }
+        continue;
+      }
+      if (type === "open_upload") {
+        const target = String(trigger.target || "").toLowerCase();
+        if (target === "document") {
+          shouldOpenDocumentUpload = true;
+        } else if (target === "audio") {
+          shouldOpenAudioUpload = true;
+        }
+      }
+    }
+
+    let refreshedCaseList = cases;
+    if (shouldRefreshCases || shouldRefreshClients) {
+      try {
+        const refreshed = await refreshWorkspaceEntities(token);
+        refreshedCaseList = refreshed.caseList;
+      } catch {
+        // Keep the chat flow stable; request errors are already surfaced in the assistant response.
+      }
+    }
+
+    if (!caseToSelect && payload.case && typeof payload.case === "object") {
+      const candidateId = Number((payload.case as Record<string, unknown>).id);
+      if (Number.isInteger(candidateId) && candidateId > 0) {
+        caseToSelect = candidateId;
+      }
+    }
+
+    if (caseToSelect && refreshedCaseList.some((item) => item.id === caseToSelect)) {
+      await selectCase(token, caseToSelect, refreshedCaseList);
+    }
+
+    if (shouldOpenDocumentUpload) {
+      documentUploadInputRef.current?.click();
+    }
+    if (shouldOpenAudioUpload) {
+      audioUploadInputRef.current?.click();
+    }
+  }
+
   async function selectCase(
     currentToken: string,
     caseId: number,
@@ -1424,12 +1559,19 @@ export default function App() {
       }
 
       if (workflowFromPrompt) {
-        if (!selectedCaseId) {
-          setError("Select a case first to run workflow mode.");
+        const crudLikePrompt = /\b(create|add|upload|attach|update|change|set|schedule|book)\b[\s\S]{0,80}\b(case|client|document|audio|voice|status|appointment|consultation)\b/i.test(
+          input
+        );
+        if (crudLikePrompt) {
+          // Keep workflow mode enabled, but allow explicit action commands to go through agent routing.
+        } else {
+          if (!selectedCaseId) {
+            setError("Select a case first to run workflow mode.");
+            return;
+          }
+          await runAgentWorkflow(input);
           return;
         }
-        await runAgentWorkflow(input);
-        return;
       }
 
       const conversationHistory = chatMessages.slice(-18).map((item) => ({
@@ -1474,6 +1616,7 @@ export default function App() {
         },
       ]);
       setActiveSources(response.sources);
+      await applyStructuredUiTriggers(response);
 
       if (response.permission_denied) {
         setError(response.answer);
@@ -2248,10 +2391,31 @@ export default function App() {
             >
               <SidebarIcon icon="toggle" />
             </button>
-            <label className="range-control">
-              {t("retrieval", "Retrieval")}
-              <input type="range" min={3} max={10} value={retrievalDepth} onChange={(event) => setRetrievalDepth(Number(event.target.value))} />
-              <span>{retrievalDepth}</span>
+            <label className="reasoning-control">
+              <span>{t("retrievalReasoning", "Reasoning")}</span>
+              <select
+                value={retrievalPreset}
+                onChange={(event) => {
+                  const preset = event.target.value as RetrievalPreset;
+                  setRetrievalPreset(preset);
+                  setRetrievalDepth(RETRIEVAL_PRESET_CONFIG[preset].topK);
+                }}
+              >
+                <option value="low">
+                  {t("reasoningLow", "Low")} ({RETRIEVAL_PRESET_CONFIG.low.range})
+                </option>
+                <option value="medium">
+                  {t("reasoningMedium", "Medium")} ({RETRIEVAL_PRESET_CONFIG.medium.range})
+                </option>
+                <option value="high">
+                  {t("reasoningHigh", "High")} ({RETRIEVAL_PRESET_CONFIG.high.range})
+                </option>
+                <option value="extra_high">
+                  {t("reasoningExtraHigh", "Extra High")} ({RETRIEVAL_PRESET_CONFIG.extra_high.range})
+                </option>
+              </select>
+              <small>{retrievalGuidanceByPreset[retrievalPreset]}</small>
+              <strong>top_k={activeRetrievalConfig.topK}</strong>
             </label>
             <select value={uiLanguage} onChange={(event) => setUiLanguage(event.target.value as UiLanguage)}>
               <option value="en">{t("languageEnglish", "English")}</option>

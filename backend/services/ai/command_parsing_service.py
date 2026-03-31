@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 class CommandParsingService:
     CASE_PATTERN = re.compile(r"\bcase\s*#?\s*(\d+)\b", re.IGNORECASE)
     DOCUMENT_PATTERN = re.compile(r"\bdocument\s*#?\s*(\d+)\b", re.IGNORECASE)
+    CLIENT_ID_PATTERN = re.compile(r"\bclient\s*#?\s*(\d+)\b", re.IGNORECASE)
     RISK_COUNT_PATTERN = re.compile(
         r"\b(?:top\s+|only\s+|just\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+risks?\b",
         re.IGNORECASE,
@@ -63,6 +64,18 @@ class CommandParsingService:
         r"\b(open|in\s+progress|in_progress|closed|archived)\b",
         re.IGNORECASE,
     )
+    CASE_TITLE_PATTERN = re.compile(
+        r"\b(?:case\s+(?:called|named)|(?:create|add)\s+(?:a\s+)?(?:new\s+)?case(?:\s+(?:called|named|titled))?)\s*[:\-]?\s*['\"]?([^\"'\n,]{2,180})",
+        re.IGNORECASE,
+    )
+    CLIENT_NAME_PATTERN = re.compile(
+        r"\bclient\b(?:\s*(?:is|=|named|called))?\s*[:\-]?\s*['\"]?([^\"'\n,]{2,160})",
+        re.IGNORECASE,
+    )
+    CASE_DESCRIPTION_PATTERN = re.compile(
+        r"\b(?:description|desc)\b(?:\s*(?:is|=|:))?\s*['\"]?([^\"'\n]{4,1200})",
+        re.IGNORECASE,
+    )
     LIST_CASE_KEYWORDS = [
         "list cases",
         "show cases",
@@ -92,6 +105,43 @@ class CommandParsingService:
         "booking requests",
         "meeting requests",
     ]
+    CREATE_CASE_KEYWORDS = [
+        "create case",
+        "create a case",
+        "create new case",
+        "create a new case",
+        "add case",
+        "add a case",
+        "add new case",
+        "add a new case",
+        "open new case",
+        "open a new case",
+    ]
+    CREATE_CLIENT_KEYWORDS = [
+        "create client",
+        "create a client",
+        "add client",
+        "add a client",
+        "new client",
+        "register client",
+    ]
+    DOCUMENT_UPLOAD_KEYWORDS = [
+        "upload document",
+        "add document",
+        "attach document",
+        "upload file",
+        "attach file",
+        "upload pdf",
+    ]
+    AUDIO_UPLOAD_KEYWORDS = [
+        "upload audio",
+        "add audio",
+        "upload voice",
+        "upload voice note",
+        "record voice",
+        "record audio",
+        "add voice note",
+    ]
     CREATE_APPOINTMENT_KEYWORDS = [
         "create appointment",
         "schedule appointment",
@@ -117,9 +167,11 @@ class CommandParsingService:
 
         case_match = self.CASE_PATTERN.search(original_message)
         document_match = self.DOCUMENT_PATTERN.search(original_message)
+        client_id_match = self.CLIENT_ID_PATTERN.search(original_message)
 
         case_id = int(case_match.group(1)) if case_match else None
         document_id = int(document_match.group(1)) if document_match else None
+        requested_client_id = int(client_id_match.group(1)) if client_id_match else None
 
         target_type: Optional[str] = None
         target_id: Optional[int] = None
@@ -134,6 +186,10 @@ class CommandParsingService:
         intent, confidence = self._detect_intent(lowered=lowered, target_type=target_type)
         clean_query = self._clean_query(original_message)
         requested_case_status = self._extract_case_status(lowered=lowered, intent=intent)
+        requested_case_title = self._extract_case_title(original_message=original_message, lowered=lowered, intent=intent)
+        requested_client_name = self._extract_client_name(original_message=original_message, lowered=lowered, intent=intent)
+        requested_case_description = self._extract_case_description(original_message=original_message, lowered=lowered, intent=intent)
+        requested_jurisdiction_country = self._extract_jurisdiction_country(lowered=lowered, intent=intent)
         requested_count = self._extract_requested_count(
             lowered=lowered,
             intent=intent,
@@ -148,11 +204,28 @@ class CommandParsingService:
             "document_id": document_id,
             "clean_query": clean_query,
             "requested_case_status": requested_case_status,
+            "requested_case_title": requested_case_title,
+            "requested_case_description": requested_case_description,
+            "requested_client_id": requested_client_id,
+            "requested_client_name": requested_client_name,
+            "requested_jurisdiction_country": requested_jurisdiction_country,
             "requested_count": requested_count,
             "confidence": confidence
         }
 
     def _detect_intent(self, lowered: str, target_type: Optional[str]) -> tuple[str, str]:
+        if self._contains_any(lowered, self.CREATE_CASE_KEYWORDS):
+            return "create_case", "high"
+
+        if self._contains_any(lowered, self.CREATE_CLIENT_KEYWORDS):
+            return "create_client", "high"
+
+        if self._contains_any(lowered, self.DOCUMENT_UPLOAD_KEYWORDS):
+            return "request_document_upload", "high"
+
+        if self._contains_any(lowered, self.AUDIO_UPLOAD_KEYWORDS):
+            return "request_audio_upload", "high"
+
         if self._contains_any(lowered, self.LIST_CLIENT_KEYWORDS):
             return "list_clients", "high"
 
@@ -348,6 +421,106 @@ class CommandParsingService:
         normalized = match.group(1).strip().lower().replace(" ", "_")
         if normalized in {"open", "in_progress", "closed", "archived"}:
             return normalized
+        return None
+
+    def _extract_case_title(
+        self,
+        *,
+        original_message: str,
+        lowered: str,
+        intent: str,
+    ) -> Optional[str]:
+        if intent != "create_case":
+            return None
+
+        match = self.CASE_TITLE_PATTERN.search(original_message)
+        if match:
+            candidate = match.group(1).strip()
+            candidate = re.split(
+                r"\s+\b(?:for|with|and|description|client|in|status)\b",
+                candidate,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip(" .,:;!?-\"'")
+            if len(candidate) >= 2:
+                return candidate[:180]
+
+        fallback = original_message
+        fallback = re.sub(
+            r"\b(?:yo|hey|pls|plz|please|can you|could you|would you)\b",
+            "",
+            fallback,
+            flags=re.IGNORECASE,
+        )
+        fallback = re.sub(
+            r"\b(?:create|add|open)\s+(?:a\s+)?(?:new\s+)?case\b",
+            "",
+            fallback,
+            flags=re.IGNORECASE,
+        )
+        fallback = re.sub(
+            r"\b(?:for|with)\s+client\b.*$",
+            "",
+            fallback,
+            flags=re.IGNORECASE,
+        )
+        fallback = re.sub(r"\s+", " ", fallback).strip(" .,:;!?-\"'")
+        if len(fallback) >= 2:
+            return fallback[:180]
+        return None
+
+    def _extract_client_name(
+        self,
+        *,
+        original_message: str,
+        lowered: str,
+        intent: str,
+    ) -> Optional[str]:
+        if intent not in {"create_case", "create_client"}:
+            return None
+
+        match = self.CLIENT_NAME_PATTERN.search(original_message)
+        if match:
+            candidate = match.group(1).strip()
+            candidate = re.split(
+                r"\s+\b(?:and|with|for|description|email|phone|address|status)\b",
+                candidate,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0].strip(" .,:;!?-\"'")
+            if len(candidate) >= 2:
+                return candidate[:160]
+        return None
+
+    def _extract_case_description(
+        self,
+        *,
+        original_message: str,
+        lowered: str,
+        intent: str,
+    ) -> Optional[str]:
+        if intent != "create_case":
+            return None
+
+        match = self.CASE_DESCRIPTION_PATTERN.search(original_message)
+        if match:
+            candidate = match.group(1).strip().strip(" .,:;!?-\"'")
+            if len(candidate) >= 4:
+                return candidate[:1200]
+
+        if "random description" in lowered or "any description" in lowered:
+            return "__AUTO_DESCRIPTION__"
+
+        return None
+
+    def _extract_jurisdiction_country(self, *, lowered: str, intent: str) -> Optional[str]:
+        if intent not in {"create_case", "update_case_status", "ask_case", "analyze_risks_case", "summarize_case"}:
+            return None
+
+        if any(keyword in lowered for keyword in ["germany", "deutschland", "german", "deutsch"]):
+            return "germany"
+        if any(keyword in lowered for keyword in ["tunisia", "tunisian", "tunisie", "tunis"]):
+            return "tunisia"
         return None
 
 

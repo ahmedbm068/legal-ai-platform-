@@ -31,11 +31,23 @@ from backend.services.ai.summarization_service import summarization_service
 class CopilotService:
     READ_ONLY_ROLES = {"admin", "lawyer", "assistant"}
     CASE_WRITE_ROLES = {"admin", "lawyer"}
+    CRUD_INTENTS = {
+        "create_case",
+        "create_client",
+        "create_case_appointment",
+        "update_case_status",
+        "request_document_upload",
+        "request_audio_upload",
+    }
     ACTION_CATEGORY_BY_INTENT = {
+        "create_case": "crud",
+        "create_client": "crud",
         "list_cases": "query",
         "list_clients": "query",
         "list_case_documents": "query",
         "list_case_appointments": "query",
+        "request_document_upload": "crud",
+        "request_audio_upload": "crud",
         "create_case_appointment": "crud",
         "update_case_status": "crud",
         "optimize_prompt": "analysis",
@@ -115,6 +127,24 @@ class CopilotService:
             },
         }
 
+    def _agent_mode_required_response(self, *, action: str) -> Dict[str, Any]:
+        return {
+            "answer": (
+                f"Action '{action}' was detected but not executed. "
+                "Enable Agent Mode to run write operations like create/update/upload actions."
+            ),
+            "used_fallback": True,
+            "fallback_reason": "agent_mode_required",
+            "confidence": "high",
+            "scope": "global",
+            "sources": [],
+            "action_status": "requires_agent_mode",
+            "structured_result": {
+                "action": action,
+                "requires_agent_mode": True,
+            },
+        }
+
     @staticmethod
     def _normalize_status_value(value: str | None) -> str | None:
         normalized = str(value or "").strip().lower().replace(" ", "_")
@@ -132,7 +162,7 @@ class CopilotService:
     ) -> Dict[str, Any]:
         next_parsed = dict(parsed)
 
-        if intent in {"list_cases", "list_clients"}:
+        if intent in {"list_cases", "list_clients", "create_case", "create_client"}:
             return next_parsed
 
         if next_parsed.get("case_id") is None and isinstance(workspace_case_id, int):
@@ -219,6 +249,8 @@ class CopilotService:
         history_context: Dict[str, Any],
     ) -> Dict[str, Any]:
         updated = dict(parsed)
+        if updated.get("intent") in {"create_case", "create_client"}:
+            return updated
 
         if updated.get("case_id") is None and isinstance(history_context.get("last_case_id"), int):
             updated["case_id"] = history_context["last_case_id"]
@@ -289,6 +321,8 @@ class CopilotService:
             parsed = command_parsing_service.parse(corrected_message)
             # Guardrail: keep strong raw case intents if correction pass accidentally dilutes intent.
             strong_case_intents = {
+                "create_case",
+                "create_client",
                 "summarize_and_analyze_risks_case",
                 "summarize_case",
                 "analyze_risks_case",
@@ -299,6 +333,8 @@ class CopilotService:
                 "compare_case_documents",
                 "list_case_documents",
                 "list_case_appointments",
+                "request_document_upload",
+                "request_audio_upload",
                 "create_case_appointment",
                 "update_case_status",
                 "list_cases",
@@ -328,6 +364,26 @@ class CopilotService:
         ]
 
         handlers = {
+            "create_case": lambda: self._create_case_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role=normalized_role,
+                requested_case_title=parsed.get("requested_case_title"),
+                requested_case_description=parsed.get("requested_case_description"),
+                requested_client_id=parsed.get("requested_client_id"),
+                requested_client_name=parsed.get("requested_client_name"),
+                requested_jurisdiction_country=parsed.get("requested_jurisdiction_country"),
+                workspace_case_id=workspace_case_id,
+                raw_message=parsed.get("raw_message") or message,
+            ),
+            "create_client": lambda: self._create_client_action(
+                db=db,
+                tenant_id=tenant_id,
+                user_role=normalized_role,
+                requested_client_name=parsed.get("requested_client_name"),
+                raw_message=parsed.get("raw_message") or message,
+            ),
             "list_cases": lambda: self._list_cases(
                 db=db,
                 tenant_id=tenant_id,
@@ -345,6 +401,16 @@ class CopilotService:
                 db=db,
                 tenant_id=tenant_id,
                 case_id=parsed["case_id"],
+            ),
+            "request_document_upload": lambda: self._request_document_upload_action(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed.get("case_id"),
+            ),
+            "request_audio_upload": lambda: self._request_audio_upload_action(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=parsed.get("case_id"),
             ),
             "create_case_appointment": lambda: self._create_case_appointment(
                 db=db,
@@ -465,7 +531,10 @@ class CopilotService:
             ),
         }
 
-        result = handlers.get(intent, self._unsupported_intent_response)()
+        if intent in self.CRUD_INTENTS and not agent_mode:
+            result = self._agent_mode_required_response(action=intent)
+        else:
+            result = handlers.get(intent, self._unsupported_intent_response)()
         action_category = self.ACTION_CATEGORY_BY_INTENT.get(intent, "analysis")
         action_status = str(result.pop("action_status", "")).strip() or ("fallback" if result.get("used_fallback") else "completed")
         permission_denied = bool(result.pop("permission_denied", False))
@@ -496,6 +565,435 @@ class CopilotService:
             "confidence": "low",
             "scope": "global",
             "sources": []
+        }
+
+    @staticmethod
+    def _normalize_lookup_text(value: str | None) -> str:
+        return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+    def _find_client_by_name(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        requested_client_name: str,
+    ) -> Optional[Client]:
+        needle = self._normalize_lookup_text(requested_client_name)
+        if not needle:
+            return None
+
+        rows = (
+            db.query(Client)
+            .filter(
+                Client.tenant_id == tenant_id,
+                Client.deleted_at.is_(None),
+            )
+            .order_by(Client.created_at.desc(), Client.id.desc())
+            .limit(400)
+            .all()
+        )
+        if not rows:
+            return None
+
+        for row in rows:
+            if self._normalize_lookup_text(row.name) == needle:
+                return row
+
+        for row in rows:
+            normalized_name = self._normalize_lookup_text(row.name)
+            if needle in normalized_name or normalized_name in needle:
+                return row
+
+        return None
+
+    @staticmethod
+    def _build_default_case_description(*, case_title: str, raw_message: str) -> str:
+        lowered = str(raw_message or "").lower()
+        if "random description" in lowered or "any description" in lowered:
+            templates = [
+                f"{case_title}: Initial legal intake created via agent mode. Documents and evidence collection to follow.",
+                f"{case_title}: New matter opened for legal review. Scope, deadlines, and risk assessment pending document upload.",
+                f"{case_title}: Client matter created from copilot action for structured legal analysis and workflow tracking.",
+            ]
+            index = sum(ord(char) for char in case_title) % len(templates)
+            return templates[index]
+
+        return "Case created by Copilot agent mode action."
+
+    def _extract_client_name_from_message_fallback(self, *, raw_message: str) -> Optional[str]:
+        match = re.search(
+            r"\bclient\b(?:\s*(?:is|named|called|=))?\s*[:\-]?\s*['\"]?([^\"'\n,]{2,160})",
+            raw_message,
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        candidate = match.group(1).strip()
+        candidate = re.split(
+            r"\s+\b(?:and|with|for|description|status)\b",
+            candidate,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip(" .,:;!?-\"'")
+        return candidate[:160] if len(candidate) >= 2 else None
+
+    def _resolve_case_creation_client(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        requested_client_id: Optional[int],
+        requested_client_name: Optional[str],
+        workspace_case_id: Optional[int],
+    ) -> tuple[Optional[Client], bool]:
+        if isinstance(requested_client_id, int):
+            existing_by_id = (
+                db.query(Client)
+                .filter(
+                    Client.id == requested_client_id,
+                    Client.tenant_id == tenant_id,
+                    Client.deleted_at.is_(None),
+                )
+                .first()
+            )
+            if existing_by_id:
+                return existing_by_id, False
+
+        if requested_client_name:
+            existing_by_name = self._find_client_by_name(
+                db=db,
+                tenant_id=tenant_id,
+                requested_client_name=requested_client_name,
+            )
+            if existing_by_name:
+                return existing_by_name, False
+
+            client = Client(
+                name=requested_client_name[:160],
+                tenant_id=tenant_id,
+            )
+            db.add(client)
+            db.flush()
+            return client, True
+
+        if isinstance(workspace_case_id, int):
+            workspace_case = (
+                db.query(Case)
+                .filter(
+                    Case.id == workspace_case_id,
+                    Case.tenant_id == tenant_id,
+                    Case.deleted_at.is_(None),
+                )
+                .first()
+            )
+            if workspace_case:
+                workspace_client = (
+                    db.query(Client)
+                    .filter(
+                        Client.id == workspace_case.client_id,
+                        Client.tenant_id == tenant_id,
+                        Client.deleted_at.is_(None),
+                    )
+                    .first()
+                )
+                if workspace_client:
+                    return workspace_client, False
+
+        latest_client = (
+            db.query(Client)
+            .filter(
+                Client.tenant_id == tenant_id,
+                Client.deleted_at.is_(None),
+            )
+            .order_by(Client.created_at.desc(), Client.id.desc())
+            .first()
+        )
+        if latest_client:
+            return latest_client, False
+        return None, False
+
+    def _create_client_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        user_role: str,
+        requested_client_name: Optional[str],
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="create_client")
+
+        client_name = (requested_client_name or self._extract_client_name_from_message_fallback(raw_message=raw_message) or "").strip()
+        if not client_name:
+            return {
+                "answer": "I can create a client, but I need the client name. Example: create client named Acme Logistics.",
+                "used_fallback": True,
+                "fallback_reason": "Missing client name",
+                "confidence": "medium",
+                "scope": "tenant",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"action": "create_client", "missing_fields": ["client_name"]},
+            }
+
+        existing_client = self._find_client_by_name(
+            db=db,
+            tenant_id=tenant_id,
+            requested_client_name=client_name,
+        )
+        if existing_client:
+            return {
+                "answer": f"Client already exists: #{existing_client.id} {existing_client.name}.",
+                "used_fallback": False,
+                "fallback_reason": None,
+                "confidence": "high",
+                "scope": "tenant",
+                "sources": [],
+                "action_status": "completed",
+                "structured_result": {
+                    "action": "create_client",
+                    "created": False,
+                    "client": {
+                        "id": existing_client.id,
+                        "name": existing_client.name,
+                        "email": existing_client.email,
+                        "phone": existing_client.phone,
+                    },
+                    "ui_triggers": [
+                        {"type": "refresh_clients"},
+                    ],
+                },
+            }
+
+        client = Client(
+            name=client_name[:160],
+            tenant_id=tenant_id,
+        )
+        db.add(client)
+        db.commit()
+        db.refresh(client)
+
+        return {
+            "answer": f"Created new client #{client.id}: {client.name}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "create_client",
+                "created": True,
+                "client": {
+                    "id": client.id,
+                    "name": client.name,
+                    "email": client.email,
+                    "phone": client.phone,
+                },
+                "ui_triggers": [
+                    {"type": "refresh_clients"},
+                ],
+            },
+        }
+
+    def _create_case_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        user_id: Optional[int],
+        user_role: str,
+        requested_case_title: Optional[str],
+        requested_case_description: Optional[str],
+        requested_client_id: Optional[int],
+        requested_client_name: Optional[str],
+        requested_jurisdiction_country: Optional[str],
+        workspace_case_id: Optional[int],
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="create_case")
+
+        if not user_id:
+            return {
+                "answer": "I could not resolve the current user for case assignment.",
+                "used_fallback": True,
+                "fallback_reason": "Missing user id",
+                "confidence": "low",
+                "scope": "tenant",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"action": "create_case"},
+            }
+
+        case_title = (requested_case_title or "").strip()
+        if not case_title:
+            case_title = f"New legal matter {re.sub(r'[^0-9]', '', str(user_id)) or 'case'}"
+        case_title = case_title[:200]
+
+        client, client_created = self._resolve_case_creation_client(
+            db=db,
+            tenant_id=tenant_id,
+            requested_client_id=requested_client_id,
+            requested_client_name=requested_client_name,
+            workspace_case_id=workspace_case_id,
+        )
+        if not client:
+            return {
+                "answer": "I could not resolve a client for the new case. Include a client name, for example: create case called Payment Dispute for client Atlas.",
+                "used_fallback": True,
+                "fallback_reason": "Missing client context",
+                "confidence": "medium",
+                "scope": "tenant",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"action": "create_case", "missing_fields": ["client"]},
+            }
+
+        case_description = (requested_case_description or "").strip()
+        if case_description == "__AUTO_DESCRIPTION__":
+            case_description = self._build_default_case_description(case_title=case_title, raw_message=raw_message)
+        if not case_description:
+            case_description = self._build_default_case_description(case_title=case_title, raw_message=raw_message)
+        case_description = case_description[:4000]
+
+        jurisdiction_country = "germany" if str(requested_jurisdiction_country or "").strip().lower() == "germany" else "tunisia"
+
+        new_case = Case(
+            title=case_title,
+            description=case_description,
+            status="open",
+            jurisdiction_country=jurisdiction_country,
+            tenant_id=tenant_id,
+            lawyer_id=user_id,
+            client_id=client.id,
+        )
+        db.add(new_case)
+        db.commit()
+        db.refresh(new_case)
+
+        return {
+            "answer": (
+                f"Created case #{new_case.id}: {new_case.title} for client {client.name}. "
+                f"Jurisdiction: {new_case.jurisdiction_country}. Status: {new_case.status}."
+            ),
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "create_case",
+                "case": {
+                    "id": new_case.id,
+                    "title": new_case.title,
+                    "status": new_case.status,
+                    "jurisdiction_country": new_case.jurisdiction_country,
+                    "client_id": new_case.client_id,
+                },
+                "client": {
+                    "id": client.id,
+                    "name": client.name,
+                    "created": client_created,
+                },
+                "ui_triggers": [
+                    {"type": "refresh_cases"},
+                    {"type": "refresh_clients"},
+                    {"type": "select_case", "case_id": new_case.id},
+                ],
+            },
+        }
+
+    def _request_document_upload_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+    ) -> Dict[str, Any]:
+        case: Optional[Case] = None
+        if case_id is not None:
+            case = (
+                db.query(Case)
+                .filter(
+                    Case.id == case_id,
+                    Case.tenant_id == tenant_id,
+                    Case.deleted_at.is_(None),
+                )
+                .first()
+            )
+
+        if case:
+            answer = f"Ready to upload a document for case #{case.id} ({case.title})."
+        else:
+            answer = "Ready to upload a document. Select a case if you want it linked automatically."
+
+        return {
+            "answer": answer,
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "global" if case is None else "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "request_document_upload",
+                "case_id": case.id if case else None,
+                "ui_triggers": [
+                    {
+                        "type": "open_upload",
+                        "target": "document",
+                        "case_id": case.id if case else None,
+                    }
+                ],
+            },
+        }
+
+    def _request_audio_upload_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+    ) -> Dict[str, Any]:
+        case: Optional[Case] = None
+        if case_id is not None:
+            case = (
+                db.query(Case)
+                .filter(
+                    Case.id == case_id,
+                    Case.tenant_id == tenant_id,
+                    Case.deleted_at.is_(None),
+                )
+                .first()
+            )
+
+        if case:
+            answer = f"Ready to upload an audio note for case #{case.id} ({case.title})."
+        else:
+            answer = "Ready to upload an audio note. Select a case first for better routing."
+
+        return {
+            "answer": answer,
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "global" if case is None else "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "request_audio_upload",
+                "case_id": case.id if case else None,
+                "ui_triggers": [
+                    {
+                        "type": "open_upload",
+                        "target": "audio",
+                        "case_id": case.id if case else None,
+                    }
+                ],
+            },
         }
 
     def _list_cases(self, *, db: Session, tenant_id: int) -> Dict[str, Any]:
