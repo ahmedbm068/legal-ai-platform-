@@ -440,17 +440,17 @@ textarea {
   margin-top: 0.7rem;
 }
 
-.sidebar-section > summary {
+.sidebar-section>summary {
   font-weight: 700;
   cursor: pointer;
   list-style: none;
 }
 
-.sidebar-section > summary::-webkit-details-marker {
+.sidebar-section>summary::-webkit-details-marker {
   display: none;
 }
 
-.sidebar-section > h4 {
+.sidebar-section>h4 {
   margin: 0 0 0.48rem;
   font-size: 0.93rem;
 }
@@ -878,7 +878,7 @@ textarea {
   font-size: 0.8rem;
 }
 
-.ai-agent-card > p {
+.ai-agent-card>p {
   margin: 0;
   color: var(--ink-soft);
   font-size: 0.74rem;
@@ -948,7 +948,7 @@ textarea {
   background: var(--bg-elevated);
 }
 
-.agent-confidence-bar > span {
+.agent-confidence-bar>span {
   display: block;
   height: 100%;
   border-radius: 999px;
@@ -1350,9 +1350,11 @@ textarea {
   0% {
     opacity: 0.56;
   }
+
   50% {
     opacity: 1;
   }
+
   100% {
     opacity: 0.56;
   }
@@ -1362,9 +1364,11 @@ textarea {
   0% {
     transform: scale(1);
   }
+
   50% {
     transform: scale(1.004);
   }
+
   100% {
     transform: scale(1);
   }
@@ -1375,24 +1379,30 @@ textarea {
     --sidebar-width: 296px;
     grid-template-columns: 296px minmax(0, 1fr);
   }
+
   .chatgpt-shell.sidebar-collapsed {
     --sidebar-width: 82px;
     grid-template-columns: 82px minmax(0, 1fr);
   }
+
   .chatgpt-topbar {
     padding-inline: 0.78rem;
   }
+
   .legal-os-grid {
     grid-template-columns: 1fr;
   }
+
   .legal-os-side {
     max-height: none;
     overflow: visible;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
   .intelligence-grid {
     grid-template-columns: 1fr;
   }
+
   .ai-agent-list {
     max-height: none;
   }
@@ -1403,34 +1413,43 @@ textarea {
     --sidebar-width: 0px;
     --chat-center-shift: 0px;
   }
+
   .auth-panel {
     grid-template-columns: 1fr;
   }
+
   .workspace-entry-top {
     flex-direction: column;
   }
+
   .workspace-entry-grid {
     grid-template-columns: 1fr;
   }
+
   .chatgpt-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
   }
+
   .chatgpt-sidebar {
     max-height: 38vh;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
+
   .topbar-actions {
     flex-wrap: wrap;
     justify-content: flex-end;
   }
+
   .lawyer-kpi-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
   .legal-os-grid {
     padding-inline: 0.72rem;
   }
+
   .legal-os-side {
     grid-template-columns: 1fr;
   }
@@ -1440,13 +1459,16 @@ textarea {
   .chatgpt-composer {
     grid-template-columns: auto 1fr;
   }
+
   .composer-action-group {
     grid-column: 1 / -1;
     justify-self: end;
   }
+
   .message {
     grid-template-columns: auto 1fr;
   }
+
   .lawyer-kpi-strip {
     grid-template-columns: 1fr;
   }

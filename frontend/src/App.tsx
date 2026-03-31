@@ -576,84 +576,84 @@ const AI_ENGINE_AGENTS: Array<{
   stageHints: string[];
   activeNameHints: string[];
 }> = [
-  {
-    name: "PromptCorrectionAgent",
-    role: "Normalizes and clarifies legal prompts before orchestration.",
-    intentHints: ["validation_error", "request_error"],
-    stageHints: ["correction", "prompt_correction"],
-    activeNameHints: ["copilot core"],
-  },
-  {
-    name: "PromptOptimizerAgent",
-    role: "Optimizes prompt precision for legal retrieval quality.",
-    intentHints: ["optimize_prompt"],
-    stageHints: ["optimizer", "prompt_opt"],
-    activeNameHints: ["prompt optimizer"],
-  },
-  {
-    name: "RetrievalAgent",
-    role: "Runs grounded retrieval over chunks and web sources.",
-    intentHints: ["ask_", "summarize_"],
-    stageHints: ["retrieval", "search"],
-    activeNameHints: ["rag", "retrieval"],
-  },
-  {
-    name: "VerifierAgent",
-    role: "Checks evidence grounding and answer consistency.",
-    intentHints: ["agent_workflow"],
-    stageHints: ["verify", "verification"],
-    activeNameHints: ["verifier"],
-  },
-  {
-    name: "SummarizationAgent",
-    role: "Produces concise document-focused legal summaries.",
-    intentHints: ["summarize_document", "summarize_case"],
-    stageHints: ["summary", "summar"],
-    activeNameHints: ["summarization"],
-  },
-  {
-    name: "CaseReasoningAgent",
-    role: "Performs case-level risk, deadline, and action reasoning.",
-    intentHints: ["analyze_risks_case", "list_deadlines_case", "summarize_and_analyze_risks_case"],
-    stageHints: ["reason", "risk"],
-    activeNameHints: ["case reasoning"],
-  },
-  {
-    name: "TimelineAgent",
-    role: "Constructs legal event timelines and sequence outputs.",
-    intentHints: ["build_timeline_case"],
-    stageHints: ["timeline"],
-    activeNameHints: ["timeline"],
-  },
-  {
-    name: "BookingAgent",
-    role: "Handles scheduling and booking-intent review tasks.",
-    intentHints: ["review_booking_case"],
-    stageHints: ["booking", "schedule"],
-    activeNameHints: ["booking"],
-  },
-  {
-    name: "DocumentComparisonAgent",
-    role: "Compares clauses and contradictions across documents.",
-    intentHints: ["compare_case_documents"],
-    stageHints: ["comparison", "compare"],
-    activeNameHints: ["document comparison"],
-  },
-  {
-    name: "DraftingAgent",
-    role: "Creates versioned legal drafts and client communications.",
-    intentHints: ["draft_client_email_case"],
-    stageHints: ["draft", "email"],
-    activeNameHints: ["drafting"],
-  },
-  {
-    name: "IntakeAgent",
-    role: "Transforms intake inputs into structured legal records.",
-    intentHints: ["request_audio_upload", "request_document_upload"],
-    stageHints: ["intake", "consultation"],
-    activeNameHints: ["workspace action", "action runner"],
-  },
-];
+    {
+      name: "PromptCorrectionAgent",
+      role: "Normalizes and clarifies legal prompts before orchestration.",
+      intentHints: ["validation_error", "request_error"],
+      stageHints: ["correction", "prompt_correction"],
+      activeNameHints: ["copilot core"],
+    },
+    {
+      name: "PromptOptimizerAgent",
+      role: "Optimizes prompt precision for legal retrieval quality.",
+      intentHints: ["optimize_prompt"],
+      stageHints: ["optimizer", "prompt_opt"],
+      activeNameHints: ["prompt optimizer"],
+    },
+    {
+      name: "RetrievalAgent",
+      role: "Runs grounded retrieval over chunks and web sources.",
+      intentHints: ["ask_", "summarize_"],
+      stageHints: ["retrieval", "search"],
+      activeNameHints: ["rag", "retrieval"],
+    },
+    {
+      name: "VerifierAgent",
+      role: "Checks evidence grounding and answer consistency.",
+      intentHints: ["agent_workflow"],
+      stageHints: ["verify", "verification"],
+      activeNameHints: ["verifier"],
+    },
+    {
+      name: "SummarizationAgent",
+      role: "Produces concise document-focused legal summaries.",
+      intentHints: ["summarize_document", "summarize_case"],
+      stageHints: ["summary", "summar"],
+      activeNameHints: ["summarization"],
+    },
+    {
+      name: "CaseReasoningAgent",
+      role: "Performs case-level risk, deadline, and action reasoning.",
+      intentHints: ["analyze_risks_case", "list_deadlines_case", "summarize_and_analyze_risks_case"],
+      stageHints: ["reason", "risk"],
+      activeNameHints: ["case reasoning"],
+    },
+    {
+      name: "TimelineAgent",
+      role: "Constructs legal event timelines and sequence outputs.",
+      intentHints: ["build_timeline_case"],
+      stageHints: ["timeline"],
+      activeNameHints: ["timeline"],
+    },
+    {
+      name: "BookingAgent",
+      role: "Handles scheduling and booking-intent review tasks.",
+      intentHints: ["review_booking_case"],
+      stageHints: ["booking", "schedule"],
+      activeNameHints: ["booking"],
+    },
+    {
+      name: "DocumentComparisonAgent",
+      role: "Compares clauses and contradictions across documents.",
+      intentHints: ["compare_case_documents"],
+      stageHints: ["comparison", "compare"],
+      activeNameHints: ["document comparison"],
+    },
+    {
+      name: "DraftingAgent",
+      role: "Creates versioned legal drafts and client communications.",
+      intentHints: ["draft_client_email_case"],
+      stageHints: ["draft", "email"],
+      activeNameHints: ["drafting"],
+    },
+    {
+      name: "IntakeAgent",
+      role: "Transforms intake inputs into structured legal records.",
+      intentHints: ["request_audio_upload", "request_document_upload"],
+      stageHints: ["intake", "consultation"],
+      activeNameHints: ["workspace action", "action runner"],
+    },
+  ];
 
 function summarizePreview(value?: string | null, max = 100) {
   const cleaned = (value || "").replace(/\s+/g, " ").trim();
@@ -2470,243 +2470,243 @@ export default function App() {
           </div>
         ) : (
           <>
-        <div className="sidebar-brand">
-          <div className="brand-mark">LA</div>
-          <div>
-            <strong>{t("appTitle", "Legal Copilot")}</strong>
-            <small>{user.name}</small>
-          </div>
-          <button
-            className="sidebar-toggle"
-            onClick={() => setSidebarCollapsed(true)}
-            title={t("collapseSidebar", "Collapse sidebar")}
-            type="button"
-          >
-            <SidebarIcon icon="toggle" />
-          </button>
-        </div>
+            <div className="sidebar-brand">
+              <div className="brand-mark">LA</div>
+              <div>
+                <strong>{t("appTitle", "Legal Copilot")}</strong>
+                <small>{user.name}</small>
+              </div>
+              <button
+                className="sidebar-toggle"
+                onClick={() => setSidebarCollapsed(true)}
+                title={t("collapseSidebar", "Collapse sidebar")}
+                type="button"
+              >
+                <SidebarIcon icon="toggle" />
+              </button>
+            </div>
 
-        <button className="primary-button sidebar-new-chat" onClick={startNewChat} type="button">
-          {t("newChat", "New chat")}
-        </button>
+            <button className="primary-button sidebar-new-chat" onClick={startNewChat} type="button">
+              {t("newChat", "New chat")}
+            </button>
 
-        <input
-          placeholder={t("searchChats", "Search chats")}
-          value={historyQuery}
-          onChange={(event) => setHistoryQuery(event.target.value)}
-        />
+            <input
+              placeholder={t("searchChats", "Search chats")}
+              value={historyQuery}
+              onChange={(event) => setHistoryQuery(event.target.value)}
+            />
 
-        <div className="sidebar-section">
-          <h4>{t("chatHistory", "Chat history")}</h4>
-          <div className="history-list">
-            {filteredThreads.length > 0 ? (
-              filteredThreads.map((thread) => (
+            <div className="sidebar-section">
+              <h4>{t("chatHistory", "Chat history")}</h4>
+              <div className="history-list">
+                {filteredThreads.length > 0 ? (
+                  filteredThreads.map((thread) => (
+                    <button
+                      key={thread.id}
+                      className={`history-item ${activeThreadId === thread.id ? "active" : ""}`}
+                      onClick={() => openThread(thread.id)}
+                      type="button"
+                    >
+                      <strong>{thread.title}</strong>
+                      <small>{formatUiDate(thread.updatedAt)}</small>
+                    </button>
+                  ))
+                ) : (
+                  <small className="muted">{t("noHistory", "No chats yet")}</small>
+                )}
+              </div>
+            </div>
+
+            <details className="sidebar-section" open>
+              <summary>{t("cases", "Cases")}</summary>
+              <div className="case-list compact-list">
+                {cases.map((item) => (
+                  <button
+                    key={item.id}
+                    className={`case-card ${selectedCaseId === item.id ? "selected" : ""}`}
+                    onClick={() => {
+                      setWorkspaceClientId(item.client_id);
+                      setWorkspaceCaseId(item.id);
+                      token && void selectCase(token, item.id);
+                    }}
+                    type="button"
+                  >
+                    <strong>{item.title}</strong>
+                    <small>{formatJurisdictionCountry(item.jurisdiction_country)}</small>
+                  </button>
+                ))}
+              </div>
+            </details>
+
+            <details className="sidebar-section" open>
+              <summary>{t("features", "Features")}</summary>
+              <div className="quick-ingest-actions">
+                <button className="secondary-button" onClick={() => documentUploadInputRef.current?.click()} type="button">
+                  {uploading ? t("uploading", "Uploading...") : t("uploadPdf", "Upload PDF")}
+                </button>
+                <button className="secondary-button" onClick={() => audioUploadInputRef.current?.click()} type="button">
+                  {voiceUploading ? t("uploading", "Uploading...") : t("uploadAudio", "Upload audio")}
+                </button>
+                <button className="secondary-button" onClick={() => void (recordingAudio ? stopRecording() : startRecording())} type="button">
+                  {recordingAudio ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
+                </button>
                 <button
-                  key={thread.id}
-                  className={`history-item ${activeThreadId === thread.id ? "active" : ""}`}
-                  onClick={() => openThread(thread.id)}
+                  className="secondary-button"
+                  disabled={!selectedCaseId || workflowLoading || !canRunOperationalActions}
+                  onClick={() => void runAgentWorkflow()}
                   type="button"
                 >
-                  <strong>{thread.title}</strong>
-                  <small>{formatUiDate(thread.updatedAt)}</small>
+                  {!canRunOperationalActions
+                    ? "Run workflow (lawyer/admin only)"
+                    : workflowLoading
+                      ? t("running", "Running...")
+                      : t("runWorkflow", "Run workflow")}
                 </button>
-              ))
-            ) : (
-              <small className="muted">{t("noHistory", "No chats yet")}</small>
-            )}
-          </div>
-        </div>
+                <label className="toggle-control">
+                  <input checked={useExternalResearch} onChange={(event) => setUseExternalResearch(event.target.checked)} type="checkbox" />
+                  {t("webResearch", "Web research")}
+                </label>
+              </div>
+            </details>
 
-        <details className="sidebar-section" open>
-          <summary>{t("cases", "Cases")}</summary>
-          <div className="case-list compact-list">
-            {cases.map((item) => (
-              <button
-                key={item.id}
-                className={`case-card ${selectedCaseId === item.id ? "selected" : ""}`}
-                onClick={() => {
-                  setWorkspaceClientId(item.client_id);
-                  setWorkspaceCaseId(item.id);
-                  token && void selectCase(token, item.id);
-                }}
-                type="button"
-              >
-                <strong>{item.title}</strong>
-                <small>{formatJurisdictionCountry(item.jurisdiction_country)}</small>
-              </button>
-            ))}
-          </div>
-        </details>
+            <details className="sidebar-section">
+              <summary>{t("documents", "Documents")}</summary>
+              <div className="document-list">
+                {documents.map((document) => (
+                  <button
+                    key={document.id}
+                    className={`document-card ${selectedDocumentId === document.id ? "selected" : ""}`}
+                    onClick={() => token && void selectDocument(token, document.id)}
+                    type="button"
+                  >
+                    <strong>{document.filename}</strong>
+                    <small>
+                      {formatBytes(document.file_size)} - {localizedText(document.processing_status, "general")}
+                    </small>
+                  </button>
+                ))}
+              </div>
+              {selectedDocumentAnalysis ? (
+                <div className="analysis-block">
+                  <h4>{t("documentIntelligence", "Document intelligence")}</h4>
+                  <p>{localizedText(selectedDocumentAnalysis.summary_short, "legal_content") || t("noSummaryYet", "No summary available yet.")}</p>
+                </div>
+              ) : null}
+            </details>
 
-        <details className="sidebar-section" open>
-          <summary>{t("features", "Features")}</summary>
-          <div className="quick-ingest-actions">
-            <button className="secondary-button" onClick={() => documentUploadInputRef.current?.click()} type="button">
-              {uploading ? t("uploading", "Uploading...") : t("uploadPdf", "Upload PDF")}
-            </button>
-            <button className="secondary-button" onClick={() => audioUploadInputRef.current?.click()} type="button">
-              {voiceUploading ? t("uploading", "Uploading...") : t("uploadAudio", "Upload audio")}
-            </button>
-            <button className="secondary-button" onClick={() => void (recordingAudio ? stopRecording() : startRecording())} type="button">
-              {recordingAudio ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
-            </button>
-            <button
-              className="secondary-button"
-              disabled={!selectedCaseId || workflowLoading || !canRunOperationalActions}
-              onClick={() => void runAgentWorkflow()}
-              type="button"
-            >
-              {!canRunOperationalActions
-                ? "Run workflow (lawyer/admin only)"
-                : workflowLoading
-                  ? t("running", "Running...")
-                  : t("runWorkflow", "Run workflow")}
-            </button>
-            <label className="toggle-control">
-              <input checked={useExternalResearch} onChange={(event) => setUseExternalResearch(event.target.checked)} type="checkbox" />
-              {t("webResearch", "Web research")}
-            </label>
-          </div>
-        </details>
+            <details className="sidebar-section">
+              <summary>{t("voiceIntake", "Voice and intake")}</summary>
+              <div className="voice-recording-list">
+                {voiceRecordings.map((recording) => (
+                  <button
+                    key={recording.id}
+                    className={`document-card ${selectedRecordingId === recording.id ? "selected" : ""}`}
+                    onClick={() => setSelectedRecordingId(recording.id)}
+                    type="button"
+                  >
+                    <strong>{recording.filename}</strong>
+                    <small>{localizedText(recording.transcription_status, "general")}</small>
+                  </button>
+                ))}
+              </div>
+              {selectedRecording ? (
+                <div className="analysis-block">
+                  <p>{localizedText(getRecordingTranscriptDisplay(selectedRecording), "legal_content")}</p>
+                  <button
+                    className="secondary-button"
+                    disabled={
+                      intakeBuilding ||
+                      selectedRecording.transcription_status !== "completed" ||
+                      !selectedRecording.transcript_text
+                    }
+                    onClick={() => void buildConsultationFromSelectedRecording()}
+                    type="button"
+                  >
+                    {intakeBuilding ? t("buildingIntake", "Building...") : t("createIntakeRequest", "Create intake request")}
+                  </button>
+                </div>
+              ) : null}
+              {selectedConsultationRequest ? (
+                <div className="analysis-block">
+                  <h4>{t("consultation", "Consultation")}</h4>
+                  <p>{localizedText(selectedConsultationRequest.issue_summary, "legal_content")}</p>
+                </div>
+              ) : null}
+            </details>
 
-        <details className="sidebar-section">
-          <summary>{t("documents", "Documents")}</summary>
-          <div className="document-list">
-            {documents.map((document) => (
-              <button
-                key={document.id}
-                className={`document-card ${selectedDocumentId === document.id ? "selected" : ""}`}
-                onClick={() => token && void selectDocument(token, document.id)}
-                type="button"
-              >
-                <strong>{document.filename}</strong>
-                <small>
-                  {formatBytes(document.file_size)} - {localizedText(document.processing_status, "general")}
-                </small>
-              </button>
-            ))}
-          </div>
-          {selectedDocumentAnalysis ? (
-            <div className="analysis-block">
-              <h4>{t("documentIntelligence", "Document intelligence")}</h4>
-              <p>{localizedText(selectedDocumentAnalysis.summary_short, "legal_content") || t("noSummaryYet", "No summary available yet.")}</p>
-            </div>
-          ) : null}
-        </details>
+            {artifactContext ? (
+              <details className="sidebar-section" open>
+                <summary>{t("drafts", "Versioned drafts")}</summary>
+                <div className="artifact-toolbar">
+                  <button
+                    className="secondary-button"
+                    disabled={artifactLoading || !token || !artifactContext}
+                    onClick={() => token && artifactContext && void loadArtifactVersionsForContext(token, artifactContext)}
+                    type="button"
+                  >
+                    {artifactLoading ? "Refreshing..." : t("refreshVersions", "Refresh versions")}
+                  </button>
+                </div>
+                <textarea className="artifact-editor" value={artifactEditorContent} onChange={(event) => setArtifactEditorContent(event.target.value)} />
+                <div className="artifact-actions">
+                  <input
+                    value={artifactInstruction}
+                    onChange={(event) => setArtifactInstruction(event.target.value)}
+                    placeholder={t("improvingPromptPlaceholder", "Tell the agent what to improve.")}
+                  />
+                  <button
+                    className="secondary-button"
+                    disabled={artifactSaving || !artifactInstruction.trim()}
+                    onClick={() => void reviseArtifactWithAgent()}
+                    type="button"
+                  >
+                    {t("reviseWithAgent", "Revise with agent")}
+                  </button>
+                  <button
+                    className="primary-button"
+                    disabled={artifactSaving || !artifactEditorContent.trim()}
+                    onClick={() => void saveManualArtifactEdit()}
+                    type="button"
+                  >
+                    {t("saveVersion", "Save version")}
+                  </button>
+                </div>
+                <div className="artifact-version-list">
+                  {artifactVersions.map((version) => (
+                    <button
+                      key={version.id}
+                      className={`artifact-version-card ${artifactContext.selected_version_id === version.id ? "selected" : ""}`}
+                      onClick={() => void selectArtifactVersion(version.id)}
+                      type="button"
+                    >
+                      <strong>V{version.version_number}</strong>
+                      <small>{version.source_kind.replace("_", " ")}</small>
+                    </button>
+                  ))}
+                </div>
+              </details>
+            ) : null}
 
-        <details className="sidebar-section">
-          <summary>{t("voiceIntake", "Voice and intake")}</summary>
-          <div className="voice-recording-list">
-            {voiceRecordings.map((recording) => (
-              <button
-                key={recording.id}
-                className={`document-card ${selectedRecordingId === recording.id ? "selected" : ""}`}
-                onClick={() => setSelectedRecordingId(recording.id)}
-                type="button"
-              >
-                <strong>{recording.filename}</strong>
-                <small>{localizedText(recording.transcription_status, "general")}</small>
-              </button>
-            ))}
-          </div>
-          {selectedRecording ? (
-            <div className="analysis-block">
-              <p>{localizedText(getRecordingTranscriptDisplay(selectedRecording), "legal_content")}</p>
-              <button
-                className="secondary-button"
-                disabled={
-                  intakeBuilding ||
-                  selectedRecording.transcription_status !== "completed" ||
-                  !selectedRecording.transcript_text
-                }
-                onClick={() => void buildConsultationFromSelectedRecording()}
-                type="button"
-              >
-                {intakeBuilding ? t("buildingIntake", "Building...") : t("createIntakeRequest", "Create intake request")}
-              </button>
-            </div>
-          ) : null}
-          {selectedConsultationRequest ? (
-            <div className="analysis-block">
-              <h4>{t("consultation", "Consultation")}</h4>
-              <p>{localizedText(selectedConsultationRequest.issue_summary, "legal_content")}</p>
-            </div>
-          ) : null}
-        </details>
-
-        {artifactContext ? (
-          <details className="sidebar-section" open>
-            <summary>{t("drafts", "Versioned drafts")}</summary>
-            <div className="artifact-toolbar">
-              <button
-                className="secondary-button"
-                disabled={artifactLoading || !token || !artifactContext}
-                onClick={() => token && artifactContext && void loadArtifactVersionsForContext(token, artifactContext)}
-                type="button"
-              >
-                {artifactLoading ? "Refreshing..." : t("refreshVersions", "Refresh versions")}
-              </button>
-            </div>
-            <textarea className="artifact-editor" value={artifactEditorContent} onChange={(event) => setArtifactEditorContent(event.target.value)} />
-            <div className="artifact-actions">
-              <input
-                value={artifactInstruction}
-                onChange={(event) => setArtifactInstruction(event.target.value)}
-                placeholder={t("improvingPromptPlaceholder", "Tell the agent what to improve.")}
-              />
-              <button
-                className="secondary-button"
-                disabled={artifactSaving || !artifactInstruction.trim()}
-                onClick={() => void reviseArtifactWithAgent()}
-                type="button"
-              >
-                {t("reviseWithAgent", "Revise with agent")}
-              </button>
-              <button
-                className="primary-button"
-                disabled={artifactSaving || !artifactEditorContent.trim()}
-                onClick={() => void saveManualArtifactEdit()}
-                type="button"
-              >
-                {t("saveVersion", "Save version")}
-              </button>
-            </div>
-            <div className="artifact-version-list">
-              {artifactVersions.map((version) => (
-                <button
-                  key={version.id}
-                  className={`artifact-version-card ${artifactContext.selected_version_id === version.id ? "selected" : ""}`}
-                  onClick={() => void selectArtifactVersion(version.id)}
-                  type="button"
-                >
-                  <strong>V{version.version_number}</strong>
-                  <small>{version.source_kind.replace("_", " ")}</small>
-                </button>
-              ))}
-            </div>
-          </details>
-        ) : null}
-
-        <details className="sidebar-section">
-          <summary>{t("evidence", "Evidence")}</summary>
-          <div className="source-list">
-            {activeSources.slice(0, 8).map((source, index) => (
-              <article key={`${source.document_id ?? "external"}-${index}`} className="source-card">
-                <strong>{source.filename}</strong>
-                <p>{localizedText(source.snippet, "legal_content")}</p>
-              </article>
-            ))}
-          </div>
-          {activeJurisdiction?.constitutional_references?.length ? (
-            <div className="source-actions">
-              {activeJurisdiction.constitutional_references.map((url) => (
-                <a key={url} className="ghost-link" href={url} rel="noreferrer" target="_blank">
-                  {t("constitutionSource", "Constitution source")}
-                </a>
-              ))}
-            </div>
-          ) : null}
-        </details>
+            <details className="sidebar-section">
+              <summary>{t("evidence", "Evidence")}</summary>
+              <div className="source-list">
+                {activeSources.slice(0, 8).map((source, index) => (
+                  <article key={`${source.document_id ?? "external"}-${index}`} className="source-card">
+                    <strong>{source.filename}</strong>
+                    <p>{localizedText(source.snippet, "legal_content")}</p>
+                  </article>
+                ))}
+              </div>
+              {activeJurisdiction?.constitutional_references?.length ? (
+                <div className="source-actions">
+                  {activeJurisdiction.constitutional_references.map((url) => (
+                    <a key={url} className="ghost-link" href={url} rel="noreferrer" target="_blank">
+                      {t("constitutionSource", "Constitution source")}
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </details>
           </>
         )}
 
@@ -2877,8 +2877,8 @@ export default function App() {
                   <p>
                     {localizedText(
                       selectedDocumentAnalysis?.summary_short ||
-                        selectedCase?.description ||
-                        "No case summary available. Upload documents or run workflow to enrich intelligence.",
+                      selectedCase?.description ||
+                      "No case summary available. Upload documents or run workflow to enrich intelligence.",
                       "legal_content"
                     )}
                   </p>
