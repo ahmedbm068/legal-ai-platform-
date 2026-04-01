@@ -1,0 +1,3 @@
+epoch,steps,Accuracy,Accuracy_Threshold,F1,F1_Threshold,Precision,Recall,Average_Precision
+1.0,1,1.0,-6.47418,1.0,-6.47418,1.0,1.0,1.0
+1.0,1,1.0,-6.47418,1.0,-6.47418,1.0,1.0,1.0

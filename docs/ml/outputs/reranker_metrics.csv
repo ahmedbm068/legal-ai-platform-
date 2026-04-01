@@ -1,0 +1,11 @@
+split,metric,baseline,trained,delta
+dev,nDCG@10,1.0,1.0,0.0
+dev,MRR,1.0,1.0,0.0
+dev,Recall@1,1.0,1.0,0.0
+dev,Recall@3,1.0,1.0,0.0
+dev,Recall@5,1.0,1.0,0.0
+test,nDCG@10,1.0,1.0,0.0
+test,MRR,1.0,1.0,0.0
+test,Recall@1,1.0,1.0,0.0
+test,Recall@3,1.0,1.0,0.0
+test,Recall@5,1.0,1.0,0.0

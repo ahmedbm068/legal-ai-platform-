@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from backend.core.deps import get_db, get_current_user
+from backend.core.permissions import apply_tenant_scope
 from backend.models.user import User
 from backend.models.document import Document
 from backend.models.document_entity import DocumentEntity
@@ -28,14 +29,8 @@ def get_tenant_document_or_404(
     document_id: int,
     current_user: User
 ) -> Document:
-    document = (
-        db.query(Document)
-        .filter(
-            Document.id == document_id,
-            Document.tenant_id == current_user.tenant_id
-        )
-        .first()
-    )
+    document_query = db.query(Document).filter(Document.id == document_id)
+    document = apply_tenant_scope(document_query, Document.tenant_id, current_user).first()
 
     if not document:
         raise HTTPException(

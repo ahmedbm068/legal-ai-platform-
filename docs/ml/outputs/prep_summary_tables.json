@@ -1,0 +1,96 @@
+{
+  "split_summary": [
+    {
+      "split": "dev",
+      "rows": 3,
+      "queries": 1,
+      "positives": 1,
+      "negatives": 2,
+      "positive_rate": 0.3333
+    },
+    {
+      "split": "test",
+      "rows": 3,
+      "queries": 1,
+      "positives": 1,
+      "negatives": 2,
+      "positive_rate": 0.3333
+    },
+    {
+      "split": "train",
+      "rows": 6,
+      "queries": 2,
+      "positives": 2,
+      "negatives": 4,
+      "positive_rate": 0.3333
+    }
+  ],
+  "missing_by_column": [
+    {
+      "column": "query_id",
+      "missing_or_empty_rows": 0
+    },
+    {
+      "column": "query",
+      "missing_or_empty_rows": 0
+    },
+    {
+      "column": "candidate_text",
+      "missing_or_empty_rows": 0
+    },
+    {
+      "column": "label",
+      "missing_or_empty_rows": 0
+    },
+    {
+      "column": "split",
+      "missing_or_empty_rows": 0
+    },
+    {
+      "column": "source",
+      "missing_or_empty_rows": 0
+    }
+  ],
+  "query_distribution": {
+    "queries_total": 4,
+    "candidates_per_query": {
+      "min": 3.0,
+      "median": 3.0,
+      "p95": 3.0,
+      "max": 3.0
+    },
+    "positives_per_query": {
+      "min": 1.0,
+      "median": 1.0,
+      "p95": 1.0,
+      "max": 1.0
+    }
+  },
+  "prep_stats": {
+    "rows_total": 12,
+    "queries_total": 4,
+    "positive_rate_overall": 0.333333,
+    "avg_candidates_per_query": 3.0,
+    "avg_positives_per_query": 1.0,
+    "query_words_p50": 7.0,
+    "query_words_p95": 10.0,
+    "candidate_words_p50": 9.5,
+    "candidate_words_p95": 11.0,
+    "duplicate_query_candidate": 0,
+    "duplicate_query_id_candidate": 0,
+    "duplicate_full_rows": 0,
+    "figures": [
+      "docs/ml/outputs/figures/prep_01_rows_per_split.png",
+      "docs/ml/outputs/figures/prep_02_label_distribution.png",
+      "docs/ml/outputs/figures/prep_03_positive_rate_per_split.png",
+      "docs/ml/outputs/figures/prep_04_query_length_words.png",
+      "docs/ml/outputs/figures/prep_05_candidate_length_words.png",
+      "docs/ml/outputs/figures/prep_06_candidates_per_query.png",
+      "docs/ml/outputs/figures/prep_07_positives_per_query.png",
+      "docs/ml/outputs/figures/prep_08_top_sources.png",
+      "docs/ml/outputs/figures/prep_09_missing_values.png",
+      "docs/ml/outputs/figures/prep_10_duplicate_diagnostics.png",
+      "docs/ml/outputs/figures/prep_11_split_label_composition.png"
+    ]
+  }
+}

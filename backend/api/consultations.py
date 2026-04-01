@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.api.consultation_schema import ConsultationFromTranscriptResponse, ConsultationRequestOut
+from backend.core.permissions import apply_tenant_scope
 from backend.core.deps import get_current_user, get_db
 from backend.models.case import Case
 from backend.models.consultation_request import ConsultationRequest
@@ -14,15 +15,11 @@ router = APIRouter(prefix="/consultations", tags=["Consultations"])
 
 
 def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Case:
-    case = (
-        db.query(Case)
-        .filter(
-            Case.id == case_id,
-            Case.tenant_id == current_user.tenant_id,
-            Case.deleted_at.is_(None)
-        )
-        .first()
+    case_query = db.query(Case).filter(
+        Case.id == case_id,
+        Case.deleted_at.is_(None)
     )
+    case = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -31,14 +28,8 @@ def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Cas
 
 
 def get_tenant_recording_or_404(db: Session, recording_id: int, current_user: User) -> VoiceRecording:
-    recording = (
-        db.query(VoiceRecording)
-        .filter(
-            VoiceRecording.id == recording_id,
-            VoiceRecording.tenant_id == current_user.tenant_id
-        )
-        .first()
-    )
+    recording_query = db.query(VoiceRecording).filter(VoiceRecording.id == recording_id)
+    recording = apply_tenant_scope(recording_query, VoiceRecording.tenant_id, current_user).first()
 
     if not recording:
         raise HTTPException(status_code=404, detail="Voice recording not found")
@@ -54,15 +45,10 @@ def list_case_consultation_requests(
 ):
     get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
-    return (
-        db.query(ConsultationRequest)
-        .filter(
-            ConsultationRequest.case_id == case_id,
-            ConsultationRequest.tenant_id == current_user.tenant_id
-        )
-        .order_by(ConsultationRequest.created_at.desc(), ConsultationRequest.id.desc())
-        .all()
-    )
+    query = db.query(ConsultationRequest).filter(ConsultationRequest.case_id == case_id)
+    return apply_tenant_scope(query, ConsultationRequest.tenant_id, current_user).order_by(
+        ConsultationRequest.created_at.desc(), ConsultationRequest.id.desc()
+    ).all()
 
 
 @router.post("/from-recording/{recording_id}", response_model=ConsultationFromTranscriptResponse)
@@ -86,18 +72,19 @@ def build_consultation_request_from_recording(
     payload = agent_result.payload
 
     consultation = (
-        db.query(ConsultationRequest)
-        .filter(
-            ConsultationRequest.voice_recording_id == recording.id,
-            ConsultationRequest.tenant_id == current_user.tenant_id
-        )
-        .first()
+        apply_tenant_scope(
+            db.query(ConsultationRequest).filter(
+                ConsultationRequest.voice_recording_id == recording.id
+            ),
+            ConsultationRequest.tenant_id,
+            current_user,
+        ).first()
     )
 
     if not consultation:
         consultation = ConsultationRequest(
             case_id=recording.case_id,
-            tenant_id=current_user.tenant_id,
+            tenant_id=recording.tenant_id,
             voice_recording_id=recording.id,
             issue_summary=payload["issue_summary"],
         )

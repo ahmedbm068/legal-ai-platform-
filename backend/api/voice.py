@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.core.config import settings
 from backend.api.voice_schema import VoiceRecordingOut, VoiceUploadResponse
 from backend.core.deps import get_current_user, get_db
+from backend.core.permissions import apply_tenant_scope
 from backend.models.case import Case
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
@@ -75,15 +76,11 @@ def sanitize_recording(recording: VoiceRecording) -> bool:
 
 
 def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Case:
-    case = (
-        db.query(Case)
-        .filter(
-            Case.id == case_id,
-            Case.tenant_id == current_user.tenant_id,
-            Case.deleted_at.is_(None)
-        )
-        .first()
+    case_query = db.query(Case).filter(
+        Case.id == case_id,
+        Case.deleted_at.is_(None)
     )
+    case = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -92,14 +89,8 @@ def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Cas
 
 
 def get_tenant_recording_or_404(db: Session, recording_id: int, current_user: User) -> VoiceRecording:
-    recording = (
-        db.query(VoiceRecording)
-        .filter(
-            VoiceRecording.id == recording_id,
-            VoiceRecording.tenant_id == current_user.tenant_id
-        )
-        .first()
-    )
+    recording_query = db.query(VoiceRecording).filter(VoiceRecording.id == recording_id)
+    recording = apply_tenant_scope(recording_query, VoiceRecording.tenant_id, current_user).first()
 
     if not recording:
         raise HTTPException(status_code=404, detail="Voice recording not found")
@@ -115,15 +106,10 @@ def list_case_recordings(
 ):
     get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
-    recordings = (
-        db.query(VoiceRecording)
-        .filter(
-            VoiceRecording.case_id == case_id,
-            VoiceRecording.tenant_id == current_user.tenant_id
-        )
-        .order_by(VoiceRecording.created_at.desc(), VoiceRecording.id.desc())
-        .all()
-    )
+    query = db.query(VoiceRecording).filter(VoiceRecording.case_id == case_id)
+    recordings = apply_tenant_scope(query, VoiceRecording.tenant_id, current_user).order_by(
+        VoiceRecording.created_at.desc(), VoiceRecording.id.desc()
+    ).all()
 
     changed = False
     for recording in recordings:
@@ -160,7 +146,7 @@ def upload_voice_recording(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
+    case = get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -204,7 +190,7 @@ def upload_voice_recording(
         file_size=file_size,
         transcription_status="processing",
         case_id=case_id,
-        tenant_id=current_user.tenant_id,
+        tenant_id=case.tenant_id,
         uploaded_by_user_id=current_user.id,
     )
 

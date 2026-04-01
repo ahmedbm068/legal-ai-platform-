@@ -71,7 +71,7 @@ def _bm25_score(
 
 def search_chunks_lexically(
     db: Session,
-    tenant_id: int,
+    tenant_id: Optional[int],
     query: str,
     top_k: int = 5,
     case_id: Optional[int] = None,
@@ -81,12 +81,10 @@ def search_chunks_lexically(
     if not normalized_query:
         return []
 
-    rows_query = (
-        db.query(DocumentChunk, Document)
-        .join(Document, Document.id == DocumentChunk.document_id)
-        .filter(DocumentChunk.tenant_id == tenant_id)
-        .filter(Document.tenant_id == tenant_id)
-    )
+    rows_query = db.query(DocumentChunk, Document).join(Document, Document.id == DocumentChunk.document_id)
+
+    if tenant_id is not None:
+        rows_query = rows_query.filter(DocumentChunk.tenant_id == tenant_id).filter(Document.tenant_id == tenant_id)
 
     if case_id is not None:
         rows_query = rows_query.filter(DocumentChunk.case_id == case_id)
@@ -163,7 +161,7 @@ def search_chunks_lexically(
 
 def lexical_search_documents(
     db: Session,
-    tenant_id: int,
+    tenant_id: Optional[int],
     query: str,
     top_k: int = 5,
     case_id: Optional[int] = None,

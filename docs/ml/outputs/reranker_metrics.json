@@ -1,0 +1,164 @@
+{
+  "generated_at_utc": "2026-03-31T20:19:59.492685+00:00",
+  "data_file": "C:\\Users\\ahmed\\Desktop\\pfe.2\\legal-ai-platform\\docs\\ml\\data\\reranker_pairs.csv",
+  "rows_total": 12,
+  "queries_total": 4,
+  "split_counts": [
+    {
+      "split": "dev",
+      "rows": 3,
+      "queries": 1
+    },
+    {
+      "split": "test",
+      "rows": 3,
+      "queries": 1
+    },
+    {
+      "split": "train",
+      "rows": 6,
+      "queries": 2
+    }
+  ],
+  "prep_stats": {
+    "rows_total": 12,
+    "queries_total": 4,
+    "positive_rate_overall": 0.333333,
+    "avg_candidates_per_query": 3.0,
+    "avg_positives_per_query": 1.0,
+    "query_words_p50": 7.0,
+    "query_words_p95": 10.0,
+    "candidate_words_p50": 9.5,
+    "candidate_words_p95": 11.0,
+    "duplicate_query_candidate": 0,
+    "duplicate_query_id_candidate": 0,
+    "duplicate_full_rows": 0,
+    "figures": [
+      "docs/ml/outputs/figures/prep_01_rows_per_split.png",
+      "docs/ml/outputs/figures/prep_02_label_distribution.png",
+      "docs/ml/outputs/figures/prep_03_positive_rate_per_split.png",
+      "docs/ml/outputs/figures/prep_04_query_length_words.png",
+      "docs/ml/outputs/figures/prep_05_candidate_length_words.png",
+      "docs/ml/outputs/figures/prep_06_candidates_per_query.png",
+      "docs/ml/outputs/figures/prep_07_positives_per_query.png",
+      "docs/ml/outputs/figures/prep_08_top_sources.png",
+      "docs/ml/outputs/figures/prep_09_missing_values.png",
+      "docs/ml/outputs/figures/prep_10_duplicate_diagnostics.png",
+      "docs/ml/outputs/figures/prep_11_split_label_composition.png"
+    ]
+  },
+  "prep_report_markdown": "docs/ml/outputs/prep_report.md",
+  "prep_tables_json": "docs/ml/outputs/prep_summary_tables.json",
+  "baseline": {
+    "dev": {
+      "queries": 1,
+      "rows": 3,
+      "nDCG@10": 1.0,
+      "MRR": 1.0,
+      "Recall@1": 1.0,
+      "Recall@3": 1.0,
+      "Recall@5": 1.0
+    },
+    "test": {
+      "queries": 1,
+      "rows": 3,
+      "nDCG@10": 1.0,
+      "MRR": 1.0,
+      "Recall@1": 1.0,
+      "Recall@3": 1.0,
+      "Recall@5": 1.0
+    }
+  },
+  "trained": {
+    "dev": {
+      "queries": 1,
+      "rows": 3,
+      "nDCG@10": 1.0,
+      "MRR": 1.0,
+      "Recall@1": 1.0,
+      "Recall@3": 1.0,
+      "Recall@5": 1.0
+    },
+    "test": {
+      "queries": 1,
+      "rows": 3,
+      "nDCG@10": 1.0,
+      "MRR": 1.0,
+      "Recall@1": 1.0,
+      "Recall@3": 1.0,
+      "Recall@5": 1.0
+    }
+  },
+  "comparison": [
+    {
+      "split": "dev",
+      "metric": "nDCG@10",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "dev",
+      "metric": "MRR",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "dev",
+      "metric": "Recall@1",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "dev",
+      "metric": "Recall@3",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "dev",
+      "metric": "Recall@5",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "test",
+      "metric": "nDCG@10",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "test",
+      "metric": "MRR",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "test",
+      "metric": "Recall@1",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "test",
+      "metric": "Recall@3",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    },
+    {
+      "split": "test",
+      "metric": "Recall@5",
+      "baseline": 1.0,
+      "trained": 1.0,
+      "delta": 0.0
+    }
+  ]
+}

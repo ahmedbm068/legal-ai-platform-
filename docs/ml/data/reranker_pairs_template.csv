@@ -1,0 +1,13 @@
+query_id,query,candidate_text,label,split,source,case_id,document_id,chunk_id
+q_0001,What is the notice period before termination in case 15?,The agreement requires a written notice 30 days before termination.,1,,eval_suite,15,101,1001
+q_0001,What is the notice period before termination in case 15?,Invoices must be paid within 15 days from receipt.,0,,eval_suite,15,101,1002
+q_0001,What is the notice period before termination in case 15?,A breach notice was sent but no termination clause is quoted.,0,,eval_suite,15,102,1003
+q_0002,List payment delay penalties in case 16.,Late payment triggers a 2 percent monthly penalty after due date.,1,,real_chat,16,110,1101
+q_0002,List payment delay penalties in case 16.,The contract identifies the governing law as Tunisian law.,0,,real_chat,16,110,1102
+q_0002,List payment delay penalties in case 16.,Warehouse service levels are monitored weekly.,0,,real_chat,16,111,1103
+q_0101,What deadline is set for curing breach?,The breaching party has 10 business days to cure after notice.,1,,eval_suite,17,120,1201
+q_0101,What deadline is set for curing breach?,The client requested a meeting next Tuesday at 3 PM.,0,,eval_suite,17,121,1202
+q_0101,What deadline is set for curing breach?,General obligations are listed without explicit timeline.,0,,eval_suite,17,121,1203
+q_0201,Who carries liability for delivery delays?,The vendor remains liable for damages caused by delayed delivery.,1,,real_chat,18,130,1301
+q_0201,Who carries liability for delivery delays?,Payment terms are net 30 from invoice date.,0,,real_chat,18,130,1302
+q_0201,Who carries liability for delivery delays?,A background section describes company history only.,0,,real_chat,18,131,1303

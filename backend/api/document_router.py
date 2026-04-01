@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from backend.core.config import settings
 from backend.core.deps import get_db, get_current_user
+from backend.core.permissions import apply_tenant_scope
 from backend.models.case import Case
 from backend.models.document import Document
 from backend.models.user import User
@@ -22,15 +23,11 @@ pipeline = DocumentAIPipeline()
 
 
 def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Case:
-    case = (
-        db.query(Case)
-        .filter(
-            Case.id == case_id,
-            Case.tenant_id == current_user.tenant_id,
-            Case.deleted_at.is_(None)
-        )
-        .first()
+    case_query = db.query(Case).filter(
+        Case.id == case_id,
+        Case.deleted_at.is_(None)
     )
+    case = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -39,14 +36,8 @@ def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Cas
 
 
 def get_tenant_document_or_404(db: Session, document_id: int, current_user: User) -> Document:
-    document = (
-        db.query(Document)
-        .filter(
-            Document.id == document_id,
-            Document.tenant_id == current_user.tenant_id
-        )
-        .first()
-    )
+    document_query = db.query(Document).filter(Document.id == document_id)
+    document = apply_tenant_scope(document_query, Document.tenant_id, current_user).first()
 
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -62,15 +53,10 @@ def list_case_documents(
 ):
     get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
-    return (
-        db.query(Document)
-        .filter(
-            Document.case_id == case_id,
-            Document.tenant_id == current_user.tenant_id
-        )
-        .order_by(Document.upload_timestamp.desc(), Document.id.desc())
-        .all()
-    )
+    query = db.query(Document).filter(Document.case_id == case_id)
+    return apply_tenant_scope(query, Document.tenant_id, current_user).order_by(
+        Document.upload_timestamp.desc(), Document.id.desc()
+    ).all()
 
 
 @router.get("/{document_id}", response_model=DocumentOut)
@@ -89,7 +75,7 @@ def upload_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
+    case = get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -125,7 +111,7 @@ def upload_document(
         file_size=file_size,
         file_type=normalized_content_type or "application/pdf",
         case_id=case_id,
-        tenant_id=current_user.tenant_id,
+        tenant_id=case.tenant_id,
         processing_status="pending"
     )
 

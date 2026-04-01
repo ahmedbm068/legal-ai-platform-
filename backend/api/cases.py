@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
-from backend.core.permissions import require_roles
+from backend.core.permissions import apply_tenant_scope, is_admin, require_roles
 from backend.core.deps import get_db, get_current_user
 from backend.core.enums import UserRole
 from backend.models.case import Case
@@ -21,14 +21,16 @@ def create_case(
 ):
     require_roles(current_user, [UserRole.admin, UserRole.lawyer])
 
-    client = db.query(Client).filter(
+    client_query = db.query(Client).filter(
         Client.id == case_data.client_id,
-        Client.tenant_id == current_user.tenant_id,
         Client.deleted_at.is_(None)
-    ).first()
+    )
+    client = apply_tenant_scope(client_query, Client.tenant_id, current_user).first()
 
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+
+    resolved_tenant_id = client.tenant_id if is_admin(current_user) else current_user.tenant_id
 
     new_case = Case(
         title=case_data.title,
@@ -37,7 +39,7 @@ def create_case(
         jurisdiction_country=case_data.jurisdiction_country.value
         if hasattr(case_data.jurisdiction_country, "value")
         else str(case_data.jurisdiction_country),
-        tenant_id=current_user.tenant_id,
+        tenant_id=resolved_tenant_id,
         lawyer_id=current_user.id,
         client_id=case_data.client_id
     )
@@ -54,10 +56,8 @@ def list_cases(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return db.query(Case).filter(
-        Case.tenant_id == current_user.tenant_id,
-        Case.deleted_at.is_(None)
-    ).all()
+    query = db.query(Case).filter(Case.deleted_at.is_(None))
+    return apply_tenant_scope(query, Case.tenant_id, current_user).all()
 
 
 @router.get("/{case_id}", response_model=CaseOut)
@@ -66,11 +66,11 @@ def get_case(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    case = db.query(Case).filter(
+    query = db.query(Case).filter(
         Case.id == case_id,
-        Case.tenant_id == current_user.tenant_id,
         Case.deleted_at.is_(None)
-    ).first()
+    )
+    case = apply_tenant_scope(query, Case.tenant_id, current_user).first()
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -87,11 +87,11 @@ def update_case(
 ):
     require_roles(current_user, [UserRole.admin, UserRole.lawyer])
 
-    case = db.query(Case).filter(
+    case_query = db.query(Case).filter(
         Case.id == case_id,
-        Case.tenant_id == current_user.tenant_id,
         Case.deleted_at.is_(None)
-    ).first()
+    )
+    case = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -103,16 +103,18 @@ def update_case(
         )
 
     if case_data.client_id is not None:
-        client = db.query(Client).filter(
+        client_query = db.query(Client).filter(
             Client.id == case_data.client_id,
-            Client.tenant_id == current_user.tenant_id,
             Client.deleted_at.is_(None)
-        ).first()
+        )
+        client = apply_tenant_scope(client_query, Client.tenant_id, current_user).first()
 
         if not client:
             raise HTTPException(status_code=404, detail="Client not found")
 
         case.client_id = case_data.client_id
+        if is_admin(current_user):
+            case.tenant_id = client.tenant_id
 
     if case_data.title is not None:
         case.title = case_data.title
@@ -144,11 +146,11 @@ def delete_case(
 ):
     require_roles(current_user, [UserRole.admin, UserRole.lawyer])
 
-    case = db.query(Case).filter(
+    query = db.query(Case).filter(
         Case.id == case_id,
-        Case.tenant_id == current_user.tenant_id,
         Case.deleted_at.is_(None)
-    ).first()
+    )
+    case = apply_tenant_scope(query, Case.tenant_id, current_user).first()
 
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
