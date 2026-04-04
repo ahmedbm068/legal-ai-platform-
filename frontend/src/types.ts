@@ -1,4 +1,4 @@
-export type UserRole = "admin" | "lawyer" | "assistant";
+﻿export type UserRole = "admin" | "lawyer" | "assistant";
 export type CaseStatus = "open" | "in_progress" | "closed" | "archived";
 export type JurisdictionCountry = "tunisia" | "germany";
 
@@ -49,8 +49,8 @@ export interface DocumentItem {
   upload_timestamp: string;
   case_id: number;
   tenant_id: number;
-  extracted_text: string | null;
-  redacted_text: string | null;
+  extracted_text?: string | null;
+  redacted_text?: string | null;
 }
 
 export interface EntityOut {
@@ -147,57 +147,179 @@ export interface SourceItem {
   snippet: string;
 }
 
-export interface CopilotResponse {
-  message: string;
-  parsed_intent: string;
-  target_type: string | null;
-  target_id: number | null;
-  agent_mode?: boolean;
-  action_category?: string;
-  action_status?: string | null;
-  permission_denied?: boolean;
-  steps?: string[];
-  structured_result?: Record<string, unknown>;
-  answer: string;
-  used_fallback: boolean;
-  fallback_reason: string | null;
-  confidence: string;
-  scope: string;
-  sources: SourceItem[];
-  artifact?: ArtifactContext | null;
-  jurisdiction?: JurisdictionContext | null;
+export interface CitationItem {
+  label: string;
+  document_id?: number | null;
+  case_id?: number | null;
+  snippet: string;
 }
 
-export interface CopilotFeedback {
+export interface CacheMetadata {
+  key?: string | null;
+  hit: boolean;
+  backend: string;
+}
+
+export interface BackgroundJobItem {
+  id: string;
+  job_type: string;
+  queue_name: string;
+  status: string;
+  tenant_id?: number | null;
+  case_id?: number | null;
+  document_id?: number | null;
+  voice_recording_id?: number | null;
+  consultation_request_id?: number | null;
+  attempts: number;
+  max_attempts: number;
+  error?: string | null;
+  created_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface CopilotAttachment {
+  client_id: string;
+  name: string;
+  mime_type: string;
+  kind: "image" | "stored_asset";
+  data_url?: string | null;
+  asset_id?: number | null;
+  page_order?: number | null;
+}
+
+export interface VisionField {
+  label: string;
+  value: string;
+}
+
+export interface VisionCitationItem {
+  label: string;
+  asset_id?: number | null;
+  page_order?: number | null;
+  snippet: string;
+}
+
+export interface VisionAuthenticityReview {
+  risk_score: number;
+  confidence: string;
+  signals: string[];
+  limitations: string[];
+  analysis_text: string;
+}
+
+export interface VisionResult {
+  task_kind: string;
+  summary: string;
+  answer: string;
+  extracted_text: string;
+  detected_language?: string | null;
+  confidence: string;
+  fields: VisionField[];
+  citations: VisionCitationItem[];
+  authenticity_review?: VisionAuthenticityReview | null;
+}
+
+export interface CaseImageAsset {
   id: number;
   tenant_id: number;
-  user_id: number | null;
-  case_id: number | null;
-  document_id: number | null;
-  message_id: string | null;
-  parsed_intent: string | null;
-  confidence: string | null;
-  feedback_value: "up" | "down";
-  prompt_text: string;
-  response_text: string;
-  comment: string | null;
-  source_count: number;
-  metadata: Record<string, unknown>;
+  case_id: number;
+  batch_id?: number | null;
+  filename: string;
+  storage_path: string;
+  mime_type: string;
+  file_size: number;
+  page_order?: number | null;
+  source_scope: string;
+  processing_status: string;
+  processing_error?: string | null;
+  extracted_text?: string | null;
+  detected_language?: string | null;
+  ocr_confidence?: number | null;
+  created_by_user_id?: number | null;
   created_at: string;
+  updated_at: string;
 }
 
-export interface CopilotFeedbackWeeklyItem {
-  week_start: string;
-  intent: string;
-  up: number;
-  down: number;
-  total: number;
-  up_rate: number;
+export interface ImageDocumentBatch {
+  id: number;
+  tenant_id: number;
+  case_id: number;
+  title: string;
+  status: string;
+  processing_error?: string | null;
+  asset_count: number;
+  generate_document: boolean;
+  run_authenticity_check: boolean;
+  ocr_provider?: string | null;
+  generated_document_id?: number | null;
+  created_by_user_id?: number | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
 }
 
-export interface CopilotFeedbackWeeklySummaryResponse {
-  weeks: number;
-  rows: CopilotFeedbackWeeklyItem[];
+export interface ReviewTableRow {
+  document_id: number;
+  filename: string;
+  processing_status: string;
+  summary_status: string;
+  document_type?: string | null;
+  document_type_confidence?: number | null;
+  parties: string[];
+  important_dates: string[];
+  legal_risks: string[];
+  recommended_actions: string[];
+  source_kind: string;
+}
+
+export interface CaseReviewTable {
+  case_id: number;
+  row_count: number;
+  rows: ReviewTableRow[];
+}
+
+export interface PromptLibraryEntry {
+  id: number;
+  tenant_id: number;
+  created_by_user_id?: number | null;
+  title: string;
+  prompt_text: string;
+  description?: string | null;
+  category?: string | null;
+  is_favorite: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EvidenceAnalysisReview {
+  id: number;
+  tenant_id: number;
+  case_id: number;
+  image_asset_id?: number | null;
+  image_batch_id?: number | null;
+  created_by_user_id?: number | null;
+  reviewed_by_user_id?: number | null;
+  status: string;
+  review_decision?: string | null;
+  risk_score: number;
+  confidence: string;
+  analysis_text: string;
+  signals: string[];
+  limitations: string[];
+  evidence: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  reviewed_at?: string | null;
+}
+
+export interface ImageBatchUploadResponse {
+  batch: ImageDocumentBatch;
+  job?: BackgroundJobItem;
+}
+
+export interface EvidenceReviewListResponse {
+  reviews: EvidenceAnalysisReview[];
 }
 
 export interface ArtifactVersion {
@@ -234,6 +356,68 @@ export interface JurisdictionContext {
   risk_focus_areas: string[];
 }
 
+export interface CopilotResponse {
+  message: string;
+  parsed_intent: string;
+  target_type: string | null;
+  target_id: number | null;
+  mode?: "default" | "legal_search";
+  agent_mode?: boolean;
+  action_category?: string;
+  action_status?: string | null;
+  permission_denied?: boolean;
+  steps?: string[];
+  structured_result?: Record<string, unknown>;
+  answer: string;
+  used_fallback: boolean;
+  fallback_reason: string | null;
+  confidence: string;
+  scope: string;
+  sources: SourceItem[];
+  citations?: CitationItem[];
+  execution_trace?: Array<Record<string, unknown>>;
+  cache?: CacheMetadata;
+  job_id?: string | null;
+  case_snapshot_version?: number | null;
+  artifact?: ArtifactContext | null;
+  jurisdiction?: JurisdictionContext | null;
+  vision_result?: VisionResult | null;
+  saved_asset_ids?: number[];
+  review_record_id?: number | null;
+}
+
+export interface CopilotFeedback {
+  id: number;
+  tenant_id: number;
+  user_id: number | null;
+  case_id: number | null;
+  document_id: number | null;
+  message_id: string | null;
+  parsed_intent: string | null;
+  confidence: string | null;
+  feedback_value: "up" | "down";
+  prompt_text: string;
+  response_text: string;
+  comment: string | null;
+  source_count: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CopilotFeedbackWeeklyItem {
+  week_start: string;
+  intent: string;
+  up: number;
+  down: number;
+  total: number;
+  up_rate: number;
+}
+
+export interface CopilotFeedbackWeeklySummaryResponse {
+  weeks: number;
+  rows: CopilotFeedbackWeeklyItem[];
+}
+
 export interface ArtifactVersionListResponse {
   artifact_type: "document_summary" | "case_email";
   case_id: number | null;
@@ -268,6 +452,8 @@ export interface AgentWorkflowResponse {
   verified_summary: string;
   client_email: string;
   sources: SourceItem[];
+  citations?: CitationItem[];
+  case_snapshot_version?: number | null;
   stages: Record<string, WorkflowStage>;
   stage_outputs: Record<string, Record<string, unknown>>;
 }
@@ -279,6 +465,10 @@ export interface ProviderStatusResponse {
   summary_model: string | null;
   key_present: boolean;
   provider_name: string;
+  vision_available: boolean;
+  vision_provider_name: string | null;
+  vision_model: string | null;
+  vision_reason_unavailable: string | null;
 }
 
 export interface LLMTestResponse {
@@ -295,6 +485,23 @@ export interface SemanticTranslateResponse {
   used_fallback: boolean;
 }
 
+export interface PromptOptimizationResponse {
+  optimized_prompt: string;
+  notes?: string | null;
+  strategy: string;
+  used_llm: boolean;
+  target_type?: string | null;
+  target_id?: number | null;
+}
+
+export interface VoiceTranscriptionResponse {
+  success: boolean;
+  transcript_text: string;
+  transcript_source?: string | null;
+  transcript_language?: string | null;
+  error?: string | null;
+}
+
 export interface UploadedDocumentResponse {
   document: DocumentItem;
   ai_processing: {
@@ -307,11 +514,13 @@ export interface UploadedDocumentResponse {
     text_length?: number | null;
     error?: string | null;
   };
+  job?: BackgroundJobItem;
 }
 
 export interface UploadedVoiceRecordingResponse {
   recording: VoiceRecording;
   message: string;
+  job?: BackgroundJobItem;
 }
 
 export interface ConsultationFromTranscriptResponse {
@@ -334,8 +543,21 @@ export interface ChatMessage {
     steps?: string[];
     structuredResult?: Record<string, unknown>;
     sources?: SourceItem[];
+    citations?: CitationItem[];
+    executionTrace?: Array<Record<string, unknown>>;
+    cache?: CacheMetadata;
+    jobId?: string | null;
+    caseSnapshotVersion?: number | null;
     artifact?: ArtifactContext | null;
     jurisdiction?: JurisdictionContext | null;
+    visionResult?: VisionResult | null;
+    savedAssetIds?: number[];
+    reviewRecordId?: number | null;
+    attachments?: Array<{
+      clientId: string;
+      name: string;
+      mimeType: string;
+    }>;
     rawAnswer?: string | null;
   };
 }

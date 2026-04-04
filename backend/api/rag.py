@@ -7,17 +7,24 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from backend.core.deps import get_db, get_current_user
+from backend.core.enums import UserRole
+from backend.core.permissions import require_roles
 from backend.models.case import Case
 from backend.models.copilot_feedback import CopilotFeedback
 from backend.models.document import Document
 from backend.models.generated_artifact_version import GeneratedArtifactVersion
 from backend.models.user import User
-from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
-from backend.services.ai.agent_workflow_service import AgentWorkflowService
+from backend.services.jobs.job_queue_service import background_job_service
+from backend.services.use_cases.ingestion_use_case import ingestion_use_case
 from backend.services.ai.artifact_versioning_service import artifact_versioning_service
-from backend.services.ai.rag_service import RagService
-from backend.services.ai.copilot_service import CopilotService
+from backend.services.ai.agents.prompt_optimizer_agent import prompt_optimizer_agent
 from backend.services.ai.llm_gateway import llm_gateway
+from backend.services.ai.runtime_services import (
+    agent_workflow_service,
+    copilot_orchestration_service,
+    rag_service,
+    shared_document_pipeline,
+)
 from backend.api.rag_schema import (
     AskRequest,
     AskResponse,
@@ -35,6 +42,8 @@ from backend.api.rag_schema import (
     LLMTestResponse,
     SemanticTranslateRequest,
     SemanticTranslateResponse,
+    PromptOptimizationRequest,
+    PromptOptimizationResponse,
     ArtifactVersionListResponse,
     ArtifactVersionManualEditRequest,
     ArtifactVersionAgentReviseRequest,
@@ -43,14 +52,6 @@ from backend.api.rag_schema import (
 
 
 router = APIRouter(prefix="/ai", tags=["AI"])
-
-pipeline = DocumentAIPipeline()
-rag_service = RagService(
-    vector_store=pipeline.vector_store,
-    embedding_service=pipeline.embedding_service
-)
-copilot_service = CopilotService(rag_service=rag_service)
-agent_workflow_service = AgentWorkflowService(rag_service=rag_service)
 
 
 def _parse_json_payload(raw_text: str) -> dict | None:
@@ -120,7 +121,59 @@ def process_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    return pipeline.process_document(document, db)
+    job = background_job_service.enqueue(
+        db=db,
+        job_type="document_process",
+        payload={"document_id": document.id},
+        tenant_id=current_user.tenant_id,
+        case_id=document.case_id,
+        document_id=document.id,
+        queue_name="documents",
+    )
+    return {
+        "message": "Document processing has been queued.",
+        "job": background_job_service.to_public_payload(job),
+    }
+
+
+@router.get("/jobs/{job_id}")
+def get_background_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    job = background_job_service.get_job(db=db, job_id=job_id)
+    if not job or job.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+    return background_job_service.to_public_payload(job)
+
+
+@router.post("/cases/{case_id}/snapshot/refresh")
+def refresh_case_snapshot(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    case = (
+        db.query(Case)
+        .filter(
+            Case.id == case_id,
+            Case.tenant_id == current_user.tenant_id,
+            Case.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found.")
+
+    return {
+        "message": "Case snapshot refresh queued.",
+        "job": ingestion_use_case.enqueue_case_snapshot_refresh(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            case_id=case.id,
+        ),
+    }
 
 
 @router.post("/search", response_model=SearchResponse)
@@ -161,7 +214,7 @@ def copilot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return copilot_service.handle_message(
+    return copilot_orchestration_service.run(
         db=db,
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
@@ -169,11 +222,79 @@ def copilot(
         message=data.message,
         top_k=data.top_k,
         use_external_research=data.use_external_research,
+        mode=data.mode,
+        legal_search_multilingual_output=data.legal_search_multilingual_output,
         agent_mode=data.agent_mode,
         workspace_case_id=data.workspace_case_id,
         workspace_document_id=data.workspace_document_id,
         conversation_history=[item.model_dump() for item in data.conversation_history],
+        attachments=[item.model_dump() for item in data.attachments],
+        save_attachments_to_case=data.save_attachments_to_case,
+        attachment_case_id=data.attachment_case_id,
     )
+
+
+@router.post("/optimize-prompt", response_model=PromptOptimizationResponse)
+def optimize_prompt(
+    data: PromptOptimizationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    target_type: str | None = None
+    target_id: int | None = None
+
+    if data.workspace_document_id is not None:
+        document = (
+            db.query(Document)
+            .filter(
+                Document.id == data.workspace_document_id,
+                Document.tenant_id == current_user.tenant_id,
+            )
+            .first()
+        )
+        if not document:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+        target_type = "document"
+        target_id = document.id
+    elif data.workspace_case_id is not None:
+        case = (
+            db.query(Case)
+            .filter(
+                Case.id == data.workspace_case_id,
+                Case.tenant_id == current_user.tenant_id,
+                Case.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if not case:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found.")
+        target_type = "case"
+        target_id = case.id
+
+    optimized = prompt_optimizer_agent.optimize_query(
+        raw_query=data.prompt,
+        intent="optimize_prompt",
+        target_type=target_type,
+        target_id=target_id,
+        allow_llm=False,
+    )
+
+    optimized_prompt = (
+        str(optimized.payload.get("optimized_query") or "").strip()
+        if optimized.success
+        else ""
+    )
+    if not optimized_prompt:
+        optimized_prompt = data.prompt.strip()
+
+    return {
+        "optimized_prompt": optimized_prompt,
+        "notes": optimized.payload.get("notes") if optimized.success else (optimized.error or "Prompt optimization failed."),
+        "strategy": str(optimized.payload.get("strategy") or "heuristic") if optimized.success else "fallback",
+        "used_llm": bool(optimized.payload.get("used_llm")) if optimized.success else False,
+        "target_type": target_type,
+        "target_id": target_id,
+    }
 
 
 @router.post("/feedback", response_model=CopilotFeedbackOut, status_code=status.HTTP_201_CREATED)
@@ -477,6 +598,7 @@ def run_agent_workflow(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     return agent_workflow_service.run_case_workflow(
         db=db,
         tenant_id=current_user.tenant_id,
@@ -498,6 +620,10 @@ def provider_status(
         "summary_model": llm_gateway.summary_model,
         "key_present": bool(llm_gateway.api_key),
         "provider_name": llm_gateway.provider_name,
+        "vision_available": llm_gateway.vision_available,
+        "vision_provider_name": llm_gateway.vision_provider_name,
+        "vision_model": llm_gateway.resolve_model("vision") if llm_gateway.vision_available else None,
+        "vision_reason_unavailable": llm_gateway.vision_reason_unavailable,
     }
 
 

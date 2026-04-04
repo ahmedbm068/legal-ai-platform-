@@ -1,58 +1,61 @@
-from pathlib import Path
+﻿from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from backend.api.document_schema import (
+    DocumentListItemOut,
+    DocumentOut,
+    DocumentUploadResponse,
+    ImageBatchDetailResponse,
+    ImageBatchUploadResponse,
+    ImageDocumentBatchOut,
+)
 from backend.core.config import settings
-from backend.core.deps import get_db, get_current_user
+from backend.core.deps import get_current_user, get_db
 from backend.core.permissions import apply_tenant_scope
 from backend.models.case import Case
 from backend.models.document import Document
+from backend.models.image_document_batch import ImageDocumentBatch
 from backend.models.user import User
-from backend.api.document_schema import DocumentListItemOut, DocumentOut, DocumentUploadResponse
-from backend.services.storage_service import upload_file
-from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
+from backend.services.ai.image_document_service import image_document_service
+from backend.services.use_cases.ingestion_use_case import ingestion_use_case
 
 
-router = APIRouter(
-    prefix="/documents",
-    tags=["Documents"]
-)
-
-pipeline = DocumentAIPipeline()
+router = APIRouter(prefix="/documents", tags=["Documents"])
 
 
 def get_tenant_case_or_404(db: Session, case_id: int, current_user: User) -> Case:
-    case_query = db.query(Case).filter(
-        Case.id == case_id,
-        Case.deleted_at.is_(None)
-    )
+    case_query = db.query(Case).filter(Case.id == case_id, Case.deleted_at.is_(None))
     case = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
-
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
-
     return case
 
 
 def get_tenant_document_or_404(db: Session, document_id: int, current_user: User) -> Document:
     document_query = db.query(Document).filter(Document.id == document_id)
     document = apply_tenant_scope(document_query, Document.tenant_id, current_user).first()
-
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-
     return document
+
+
+def get_tenant_image_batch_or_404(db: Session, batch_id: int, current_user: User) -> ImageDocumentBatch:
+    query = db.query(ImageDocumentBatch).filter(ImageDocumentBatch.id == batch_id)
+    batch = apply_tenant_scope(query, ImageDocumentBatch.tenant_id, current_user).first()
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image batch not found.")
+    return batch
 
 
 @router.get("/case/{case_id}", response_model=list[DocumentListItemOut])
 def list_case_documents(
     case_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
-
     query = db.query(Document).filter(Document.case_id == case_id)
     return apply_tenant_scope(query, Document.tenant_id, current_user).order_by(
         Document.upload_timestamp.desc(), Document.id.desc()
@@ -63,17 +66,18 @@ def list_case_documents(
 def get_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     return get_tenant_document_or_404(db=db, document_id=document_id, current_user=current_user)
 
 
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
 def upload_document(
+    background_tasks: BackgroundTasks,
     case_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     case = get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
@@ -82,47 +86,103 @@ def upload_document(
 
     normalized_content_type = (file.content_type or "").split(";")[0].strip().lower()
     extension = Path(file.filename).suffix.lower()
-
     if normalized_content_type != "application/pdf" and extension != ".pdf":
-        raise HTTPException(
-            status_code=400,
-            detail="Only PDF files are supported for this endpoint"
-        )
-
-    filename = file.filename.strip()
+        raise HTTPException(status_code=400, detail="Only PDF files are supported for this endpoint")
 
     file.file.seek(0, 2)
     file_size = file.file.tell()
     file.file.seek(0)
-
     max_file_size = max(1, int(settings.DOCUMENT_UPLOAD_MAX_MB)) * 1024 * 1024
-
     if file_size > max_file_size:
         raise HTTPException(
             status_code=400,
-            detail=f"File too large. Maximum allowed size is {settings.DOCUMENT_UPLOAD_MAX_MB} MB."
+            detail=f"File too large. Maximum allowed size is {settings.DOCUMENT_UPLOAD_MAX_MB} MB.",
         )
 
-    storage_path = upload_file(file.file, filename)
-
-    new_doc = Document(
-        filename=filename,
-        storage_path=storage_path,
-        file_size=file_size,
-        file_type=normalized_content_type or "application/pdf",
-        case_id=case_id,
-        tenant_id=case.tenant_id,
-        processing_status="pending"
+    new_doc, job_payload = ingestion_use_case.create_document_upload(
+        db=db,
+        case=case,
+        file=file,
+        background_tasks=background_tasks,
     )
-
-    db.add(new_doc)
-    db.commit()
-    db.refresh(new_doc)
-
-    ai_result = pipeline.process_document(new_doc, db)
-    db.refresh(new_doc)
-
-    return {
-        "document": new_doc,
-        "ai_processing": ai_result
+    ai_result = {
+        "success": True,
+        "message": "Document accepted for processing. Extraction and indexing will continue asynchronously.",
+        "status": "queued",
+        "chunks_count": None,
+        "entities_extracted": None,
+        "pii_items_count": None,
+        "text_length": None,
+        "error": None,
     }
+    return {"document": new_doc, "ai_processing": ai_result, "job": job_payload}
+
+
+@router.post("/upload-images", response_model=ImageBatchUploadResponse, status_code=status.HTTP_201_CREATED)
+def upload_image_batch(
+    background_tasks: BackgroundTasks,
+    case_id: int,
+    files: list[UploadFile] = File(...),
+    title: str | None = Form(default=None),
+    generate_document: bool = Form(default=True),
+    run_authenticity_check: bool = Form(default=False),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    case = get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one image is required.")
+    if len(files) > max(1, int(settings.IMAGE_BATCH_MAX_FILES)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Too many images. Maximum allowed is {settings.IMAGE_BATCH_MAX_FILES}.",
+        )
+
+    max_file_size = max(1, int(settings.IMAGE_UPLOAD_MAX_MB)) * 1024 * 1024
+    for file in files:
+        if not file.filename:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Every image file must have a filename.")
+        image_document_service._validate_upload(filename=file.filename, content_type=file.content_type)
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
+        if file_size > max_file_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Image '{file.filename}' exceeds the {settings.IMAGE_UPLOAD_MAX_MB} MB limit.",
+            )
+
+    batch, job = ingestion_use_case.create_image_batch_upload(
+        db=db,
+        case=case,
+        files=files,
+        title=title,
+        generate_document=generate_document,
+        run_authenticity_check=run_authenticity_check,
+        created_by_user_id=current_user.id,
+        background_tasks=background_tasks,
+    )
+    return {"batch": batch, "job": job}
+
+
+@router.get("/case/{case_id}/image-batches", response_model=list[ImageDocumentBatchOut])
+def list_case_image_batches(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
+    query = db.query(ImageDocumentBatch).filter(ImageDocumentBatch.case_id == case_id)
+    return apply_tenant_scope(query, ImageDocumentBatch.tenant_id, current_user).order_by(
+        ImageDocumentBatch.created_at.desc(), ImageDocumentBatch.id.desc()
+    ).all()
+
+
+@router.get("/image-batches/{batch_id}", response_model=ImageBatchDetailResponse)
+def get_image_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    batch = get_tenant_image_batch_or_404(db=db, batch_id=batch_id, current_user=current_user)
+    return image_document_service.to_batch_detail_payload(db=db, batch=batch)

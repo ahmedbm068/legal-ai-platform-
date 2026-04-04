@@ -162,8 +162,10 @@ ORDER_OR_REFERENCE_PATTERN = re.compile(
 
 @lru_cache(maxsize=1)
 def _get_nlp():
-    import spacy
-    return spacy.load("en_core_web_sm")
+    import importlib
+
+    spacy_module = importlib.import_module("spacy")
+    return spacy_module.load("en_core_web_sm")
 
 
 def _clean_entity_value(value: str) -> str:
@@ -426,12 +428,52 @@ def _normalize_for_dedup(label: str, value: str) -> tuple[str, str]:
     return label, cleaned.lower()
 
 
+def _extract_entities_without_spacy(text: str) -> list[dict]:
+    entities: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    def _append(label: str, value: str, start_char: int, end_char: int) -> None:
+        cleaned_value = _strip_role_suffixes(_clean_entity_value(value))
+        if not _is_valid_entity(label, cleaned_value):
+            return
+
+        key = _normalize_for_dedup(label, cleaned_value)
+        if key in seen:
+            return
+        seen.add(key)
+
+        entities.append({
+            "label": label,
+            "value": cleaned_value,
+            "start_char": start_char,
+            "end_char": end_char,
+        })
+
+    for match in DATE_PATTERN.finditer(text):
+        _append("DATE", match.group(0), match.start(), match.end())
+
+    for match in MONEY_PATTERN.finditer(text):
+        _append("MONEY", match.group(0), match.start(), match.end())
+
+    org_pattern = re.compile(
+        r"\b([A-Z][A-Za-z0-9&.'\-]*(?:\s+[A-Z][A-Za-z0-9&.'\-]*){0,4})\s+(SARL|LLC|LTD|INC|GMBH|SA|SAS|BV|PLC|CORP|CORPORATION|COMPANY)\b"
+    )
+    for match in org_pattern.finditer(text):
+        _append("ORG", match.group(0), match.start(), match.end())
+
+    return entities
+
+
 def extract_entities(text: str) -> list[dict]:
     if not text or not text.strip():
         return []
 
-    nlp = _get_nlp()
-    doc = nlp(text)
+    try:
+        nlp = _get_nlp()
+        doc = nlp(text)
+    except Exception:
+        # Keep document processing alive when spaCy/runtime model is missing.
+        return _extract_entities_without_spacy(text)
 
     entities: list[dict] = []
     seen: set[tuple[str, str]] = set()

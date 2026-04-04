@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from backend.api.client_portal_schema import (
     ClientPortalAccountOut,
+    ClientPortalAssistantRequest,
+    ClientPortalAssistantResponse,
     ClientPortalActivityItem,
     ClientPortalCaseItem,
     ClientPortalConsultationItem,
@@ -28,7 +30,7 @@ from backend.api.client_portal_schema import (
     ClientPortalToken,
 )
 from backend.core.hashing import hash_password, verify_password
-from backend.core.jwt_handler import ALGORITHM, SECRET_KEY, create_access_token
+from backend.core.jwt_handler import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY as STAFF_SECRET_KEY
 from backend.core.config import settings
 from backend.database.database import SessionLocal
 from backend.models.case import Case
@@ -41,10 +43,11 @@ from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
 from backend.services.auth_rate_limiter import RateLimitConfig, auth_rate_limiter
-from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
+from backend.services.ai.runtime_services import copilot_orchestration_service
+from backend.services.jobs.job_queue_service import background_job_service
 from backend.services.client_portal_mail_service import client_portal_mail_service
-from backend.services.storage_service import upload_file
-from backend.services.voice_processing_service import process_voice_recording
+from backend.services.use_cases.ingestion_use_case import ingestion_use_case
+from backend.api.voice import is_supported_audio_upload
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 
@@ -52,7 +55,6 @@ router = APIRouter(prefix="/portal", tags=["Client Portal"])
 logger = logging.getLogger(__name__)
 
 security = HTTPBearer(auto_error=False)
-pipeline = DocumentAIPipeline()
 PASSWORD_POLICY_REGEX = re.compile(r"^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{10,}$")
 portal_login_code_limit = RateLimitConfig.safe(
     max_attempts=settings.PORTAL_LOGIN_MAX_ATTEMPTS,
@@ -64,6 +66,12 @@ portal_verify_code_limit = RateLimitConfig.safe(
     window_seconds=settings.PORTAL_VERIFY_WINDOW_SECONDS,
     block_seconds=settings.PORTAL_VERIFY_BLOCK_SECONDS,
 )
+PORTAL_TOKEN_AUDIENCE = "client_portal"
+DOCUMENT_DONE_STATUSES = {"processed", "completed"}
+
+
+def is_document_done(status_value: str | None) -> bool:
+    return (status_value or "").strip().lower() in DOCUMENT_DONE_STATUSES
 
 
 def normalize_case_title(client_name: str, issue_summary: str) -> str:
@@ -91,7 +99,12 @@ def get_current_portal_account(
     token = credentials.credentials
 
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.PORTAL_SECRET_KEY or STAFF_SECRET_KEY,
+            algorithms=[ALGORITHM],
+            audience=PORTAL_TOKEN_AUDIENCE,
+        )
         account_id = payload.get("sub")
         token_type = payload.get("account_type")
 
@@ -118,12 +131,23 @@ def find_tenant_lawyer(db: Session, tenant_id: int) -> User | None:
     )
 
 
-def get_default_tenant(db: Session) -> Tenant:
-    tenant = db.query(Tenant).order_by(Tenant.id.asc()).first()
+def get_portal_tenant_or_404(db: Session, tenant_slug: str) -> Tenant:
+    normalized_slug = (tenant_slug or "").strip().lower()
+    if settings.PORTAL_REQUIRE_TENANT_SLUG and not normalized_slug:
+        raise HTTPException(status_code=400, detail="tenant_slug is required.")
+
+    tenant = (
+        db.query(Tenant)
+        .filter(
+            Tenant.slug == normalized_slug,
+            Tenant.portal_access_enabled.is_(True),
+        )
+        .first()
+    )
     if not tenant:
         raise HTTPException(
-            status_code=400,
-            detail="No tenant is configured for the platform yet.",
+            status_code=404,
+            detail="Tenant not found or portal access is disabled.",
         )
     return tenant
 
@@ -149,13 +173,18 @@ def get_client_ip(request: Request) -> str | None:
 
 
 def issue_portal_token(account: ClientPortalAccount) -> dict[str, str]:
-    access_token = create_access_token(
-        data={
+    expire_at = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = jwt.encode(
+        {
             "sub": str(account.id),
             "tenant_id": account.tenant_id,
             "client_id": account.client_id,
             "account_type": "client_portal",
-        }
+            "aud": PORTAL_TOKEN_AUDIENCE,
+            "exp": expire_at,
+        },
+        settings.PORTAL_SECRET_KEY or STAFF_SECRET_KEY,
+        algorithm=ALGORITHM,
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -213,16 +242,158 @@ def get_or_create_client(
     return client
 
 
+def ensure_portal_account_client_link(db: Session, account: ClientPortalAccount) -> Client:
+    existing_client = None
+
+    if account.client_id:
+        existing_client = (
+            db.query(Client)
+            .filter(
+                Client.id == account.client_id,
+                Client.tenant_id == account.tenant_id,
+                Client.deleted_at.is_(None),
+            )
+            .first()
+        )
+
+    client = existing_client or get_or_create_client(
+        db,
+        tenant_id=account.tenant_id,
+        client_name=account.full_name,
+        client_email=account.email,
+        client_phone=account.phone,
+        client_address=account.address,
+    )
+
+    changed = False
+    if client.name != account.full_name and account.full_name:
+        client.name = account.full_name
+        changed = True
+    if account.email and account.email != client.email:
+        client.email = account.email
+        changed = True
+    if account.phone and account.phone != client.phone:
+        client.phone = account.phone
+        changed = True
+    if account.address and account.address != client.address:
+        client.address = account.address
+        changed = True
+    if account.client_id != client.id:
+        account.client_id = client.id
+        changed = True
+
+    if changed:
+        db.commit()
+        db.refresh(client)
+        db.refresh(account)
+
+    return client
+
+
+def get_portal_case_or_404(db: Session, account: ClientPortalAccount, case_id: int) -> Case:
+    if not account.client_id:
+        raise HTTPException(status_code=404, detail="No case is linked to this portal account yet.")
+
+    case = (
+        db.query(Case)
+        .filter(
+            Case.id == case_id,
+            Case.client_id == account.client_id,
+            Case.tenant_id == account.tenant_id,
+            Case.deleted_at.is_(None),
+        )
+        .first()
+    )
+
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found for this portal account.")
+
+    return case
+
+
 def build_account_out(account: ClientPortalAccount) -> dict:
     return {
         "id": account.id,
         "full_name": account.full_name,
         "email": account.email,
+        "phone": account.phone,
+        "address": account.address,
         "tenant_id": account.tenant_id,
         "client_id": account.client_id,
         "tenant_name": account.tenant.name if account.tenant else None,
+        "tenant_slug": account.tenant.slug if account.tenant else None,
+        "requires_email_verification": bool(account.requires_email_verification),
         "created_at": account.created_at,
     }
+
+
+def build_dashboard_response(
+    db: Session,
+    account: ClientPortalAccount,
+    *,
+    jobs: list[dict] | None = None,
+) -> dict:
+    db.refresh(account)
+    consultations = build_consultation_items(db, account)
+    case_items, _ = build_case_items(db, account)
+    document_items = build_document_items(db, account)
+    return {
+        "account": build_account_out(account),
+        "consultations": consultations,
+        "cases": case_items,
+        "documents": document_items,
+        "activity": build_activity_feed(
+            consultations=consultations,
+            documents=document_items,
+            cases=case_items,
+        ),
+        "metrics": build_dashboard_metrics(
+            consultations=consultations,
+            cases=case_items,
+            documents=document_items,
+        ),
+        "jobs": jobs or [],
+    }
+
+
+def get_accessible_case_ids(db: Session, account: ClientPortalAccount) -> list[int]:
+    if not account.client_id:
+        return []
+    rows = (
+        db.query(Case.id)
+        .filter(
+            Case.client_id == account.client_id,
+            Case.tenant_id == account.tenant_id,
+            Case.deleted_at.is_(None),
+        )
+        .order_by(Case.updated_at.desc(), Case.id.desc())
+        .all()
+    )
+    return [row[0] for row in rows]
+
+
+def get_accessible_document_ids(
+    db: Session,
+    account: ClientPortalAccount,
+    *,
+    case_id: int | None = None,
+) -> list[int]:
+    if not account.client_id:
+        return []
+    query = (
+        db.query(Document.id)
+        .join(Case, Case.id == Document.case_id)
+        .filter(
+            Case.client_id == account.client_id,
+            Case.tenant_id == account.tenant_id,
+            Case.deleted_at.is_(None),
+            Document.tenant_id == account.tenant_id,
+        )
+    )
+    if isinstance(case_id, int):
+        query = query.filter(Document.case_id == case_id)
+    rows = query.order_by(Document.upload_timestamp.desc(), Document.id.desc()).all()
+    return [row[0] for row in rows]
 
 
 def build_consultation_items(db: Session, account: ClientPortalAccount) -> list[dict]:
@@ -310,7 +481,7 @@ def build_case_items(db: Session, account: ClientPortalAccount) -> tuple[list[di
             key=lambda item: (item.updated_at or item.created_at),
             reverse=True,
         )[0] if case_consultations else None
-        pending_documents = sum(1 for document in case_documents if (document.processing_status or "").lower() != "completed")
+        pending_documents = sum(1 for document in case_documents if not is_document_done(document.processing_status))
 
         if pending_documents > 0:
             next_step = "Your uploaded documents are currently being analyzed."
@@ -378,7 +549,7 @@ def build_dashboard_metrics(
     documents: list[dict],
 ) -> dict:
     active_cases = sum(1 for case in cases if (case.get("status") or "").lower() in {"open", "in_progress"})
-    pending_documents = sum(1 for document in documents if (document.get("processing_status") or "").lower() != "completed")
+    pending_documents = sum(1 for document in documents if not is_document_done(document.get("processing_status")))
     requests_under_review = sum(
         1
         for consultation in consultations
@@ -414,11 +585,13 @@ def build_activity_feed(
         )
 
     for document in documents[:12]:
+        processing_status = (document.get("processing_status") or "").strip().lower()
+        status_label = "completed" if is_document_done(processing_status) else (processing_status or "pending")
         activity.append(
             {
                 "id": f"document-{document['id']}",
                 "event_type": "document_update",
-                "title": f"Document '{document['filename']}' is {document['processing_status']}",
+                "title": f"Document '{document['filename']}' is {status_label}",
                 "description": f"Attached to case: {document['case_title']}",
                 "created_at": document["upload_timestamp"],
                 "case_id": document["case_id"],
@@ -445,35 +618,31 @@ def build_activity_feed(
 def register_portal_account(data: ClientPortalRegisterRequest, db: Session = Depends(get_db)):
     normalized_email = data.email.lower().strip()
     normalized_name = data.full_name.strip()
+    normalized_phone = data.phone.strip() if data.phone else None
+    normalized_address = data.address.strip() if data.address else None
 
     existing = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == normalized_email).first()
     if existing:
         raise HTTPException(status_code=400, detail="A portal account already exists for this email.")
 
     validate_portal_password(data.password)
-    tenant = get_default_tenant(db)
-
-    client = get_or_create_client(
-        db,
-        tenant_id=tenant.id,
-        client_name=normalized_name,
-        client_email=normalized_email,
-        client_phone=data.phone,
-        client_address=data.address,
-    )
+    tenant = get_portal_tenant_or_404(db, data.tenant_slug)
 
     account = ClientPortalAccount(
         full_name=normalized_name,
         email=normalized_email,
         hashed_password=hash_password(data.password),
+        phone=normalized_phone,
+        address=normalized_address,
         tenant_id=tenant.id,
-        client_id=client.id,
+        client_id=None,
+        requires_email_verification=True,
     )
     db.add(account)
     db.commit()
     db.refresh(account)
 
-    return {"message": "Account created successfully. Sign in to receive your six-digit access code."}
+    return {"message": "Account created successfully. First login requires one-time verification code."}
 
 
 @router.post("/auth/login/request-code", response_model=ClientPortalMessageResponse)
@@ -503,6 +672,12 @@ def request_login_code(data: ClientPortalLoginCodeRequest, request: Request, db:
         identifier=normalized_email,
         client_ip=client_ip,
     )
+
+    if not account.requires_email_verification:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Verification code is only required for first login. Sign in directly with email and password.",
+        )
 
     now = datetime.now(timezone.utc)
     active_codes = (
@@ -622,20 +797,72 @@ def verify_login_code(data: ClientPortalLoginCodeVerifyRequest, request: Request
         client_ip=client_ip,
     )
 
-    login_code.consumed_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    login_code.consumed_at = now
+    account.requires_email_verification = False
+    account.verified_at = account.verified_at or now
+    account.last_login_at = now
+    ensure_portal_account_client_link(db, account)
     db.commit()
+    db.refresh(account)
 
     return issue_portal_token(account)
 
 
-@router.post("/auth/login", response_model=ClientPortalMessageResponse)
-def login_portal_account(data: ClientPortalLoginRequest, db: Session = Depends(get_db)):
-    _ = db
-    _ = data
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail="Portal login now requires the request-code and verify-code flow.",
+@router.post("/auth/login", response_model=ClientPortalToken)
+def login_portal_account(data: ClientPortalLoginRequest, request: Request, db: Session = Depends(get_db)):
+    normalized_email = data.email.lower().strip()
+    client_ip = get_client_ip(request)
+
+    auth_rate_limiter.assert_allowed(
+        scope="portal-login-password",
+        identifier=normalized_email,
+        client_ip=client_ip,
+        config=portal_login_code_limit,
     )
+
+    account = db.query(ClientPortalAccount).filter(ClientPortalAccount.email == normalized_email).first()
+    if not account or not verify_password(data.password, account.hashed_password):
+        auth_rate_limiter.record_failure(
+            scope="portal-login-password",
+            identifier=normalized_email,
+            client_ip=client_ip,
+            config=portal_login_code_limit,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+
+    auth_rate_limiter.record_success(
+        scope="portal-login-password",
+        identifier=normalized_email,
+        client_ip=client_ip,
+    )
+
+    if account.requires_email_verification:
+        previously_verified = (
+            db.query(ClientPortalLoginCode.id)
+            .filter(
+                ClientPortalLoginCode.portal_account_id == account.id,
+                ClientPortalLoginCode.purpose == "login",
+                ClientPortalLoginCode.consumed_at.is_not(None),
+            )
+            .first()
+        )
+
+        if previously_verified:
+            account.requires_email_verification = False
+            account.verified_at = account.verified_at or datetime.now(timezone.utc)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Verification code is required for first login. Request a code and verify once.",
+            )
+
+    account.last_login_at = datetime.now(timezone.utc)
+    ensure_portal_account_client_link(db, account)
+    db.commit()
+    db.refresh(account)
+
+    return issue_portal_token(account)
 
 
 @router.get("/auth/me", response_model=ClientPortalAccountOut)
@@ -648,20 +875,61 @@ def dashboard(
     db: Session = Depends(get_db),
     account: ClientPortalAccount = Depends(get_current_portal_account),
 ):
-    db.refresh(account)
-    consultations = build_consultation_items(db, account)
-    case_items, _ = build_case_items(db, account)
-    document_items = build_document_items(db, account)
-    activity = build_activity_feed(consultations=consultations, documents=document_items, cases=case_items)
-    metrics = build_dashboard_metrics(consultations=consultations, cases=case_items, documents=document_items)
-    return {
-        "account": build_account_out(account),
-        "consultations": consultations,
-        "cases": case_items,
-        "documents": document_items,
-        "activity": activity,
-        "metrics": metrics,
-    }
+    return build_dashboard_response(db, account)
+
+
+@router.post("/cases/{case_id}/uploads", response_model=ClientPortalDashboardResponse, status_code=status.HTTP_201_CREATED)
+def upload_case_materials(
+    case_id: int,
+    background_tasks: BackgroundTasks,
+    voice_note: UploadFile | None = File(None),
+    supporting_document: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    if (not voice_note or not voice_note.filename) and (not supporting_document or not supporting_document.filename):
+        raise HTTPException(status_code=400, detail="Upload at least one PDF or voice file.")
+
+    case = get_portal_case_or_404(db=db, account=account, case_id=case_id)
+    jobs: list[dict] = []
+
+    if voice_note and voice_note.filename:
+        if not is_supported_audio_upload(voice_note.filename, voice_note.content_type):
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported audio format. Use webm, wav, mp3, mp4, ogg, or m4a.",
+            )
+
+        voice_note.file.seek(0, 2)
+        voice_size = voice_note.file.tell()
+        voice_note.file.seek(0)
+        max_voice_bytes = max(1, int(settings.VOICE_UPLOAD_MAX_MB)) * 1024 * 1024
+        if voice_size > max_voice_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Voice note too large. Maximum allowed size is {settings.VOICE_UPLOAD_MAX_MB} MB.",
+            )
+        _, voice_job = ingestion_use_case.create_voice_upload(
+            db=db,
+            case=case,
+            file=voice_note,
+            uploaded_by_user_id=None,
+            background_tasks=background_tasks,
+        )
+        if voice_job:
+            jobs.append(voice_job)
+
+    if supporting_document and supporting_document.filename:
+        _, document_job = ingestion_use_case.create_document_upload(
+            db=db,
+            case=case,
+            file=supporting_document,
+            background_tasks=background_tasks,
+        )
+        if document_job:
+            jobs.append(document_job)
+
+    return build_dashboard_response(db, account, jobs=jobs)
 
 
 @router.post("/intake/submit", response_model=ClientPortalDashboardResponse, status_code=status.HTTP_201_CREATED)
@@ -682,19 +950,7 @@ def submit_authenticated_intake(
             detail="This tenant has no staff account available to receive portal requests.",
         )
 
-    client = account.client or get_or_create_client(
-        db,
-        tenant_id=account.tenant_id,
-        client_name=account.full_name,
-        client_email=account.email,
-        client_phone=None,
-        client_address=None,
-    )
-
-    if not account.client_id:
-        account.client_id = client.id
-        db.commit()
-        db.refresh(account)
+    client = ensure_portal_account_client_link(db, account)
 
     case = Case(
         title=normalize_case_title(account.full_name, issue_summary),
@@ -729,8 +985,14 @@ def submit_authenticated_intake(
     db.add(consultation)
     db.commit()
     db.refresh(consultation)
+    jobs: list[dict] = []
 
     if voice_note and voice_note.filename:
+        if not is_supported_audio_upload(voice_note.filename, voice_note.content_type):
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported audio format. Use webm, wav, mp3, mp4, ogg, or m4a.",
+            )
         voice_note.file.seek(0, 2)
         voice_size = voice_note.file.tell()
         voice_note.file.seek(0)
@@ -740,80 +1002,121 @@ def submit_authenticated_intake(
                 status_code=400,
                 detail=f"Voice note too large. Maximum allowed size is {settings.VOICE_UPLOAD_MAX_MB} MB.",
             )
-        voice_storage_path = upload_file(voice_note.file, voice_note.filename.strip(), prefix="voice")
-
-        recording = VoiceRecording(
-            filename=voice_note.filename.strip(),
-            storage_path=voice_storage_path,
-            mime_type=voice_note.content_type or "audio/webm",
-            file_size=voice_size,
-            transcription_status="processing",
-            case_id=case.id,
-            tenant_id=account.tenant_id,
+        recording, voice_job = ingestion_use_case.create_voice_upload(
+            db=db,
+            case=case,
+            file=voice_note,
             uploaded_by_user_id=None,
+            consultation_request_id=consultation.id,
+            background_tasks=background_tasks,
         )
-        db.add(recording)
-        db.commit()
-        db.refresh(recording)
 
         consultation.voice_recording_id = recording.id
         db.commit()
-        background_tasks.add_task(process_voice_recording, recording.id, consultation.id)
+        if voice_job:
+            jobs.append(voice_job)
 
     if supporting_document and supporting_document.filename:
-        normalized_content_type = (supporting_document.content_type or "").split(";")[0].strip().lower()
-        extension = Path(supporting_document.filename).suffix.lower()
-        if normalized_content_type != "application/pdf" and extension != ".pdf":
-            raise HTTPException(status_code=400, detail="Only PDF files are accepted as supporting documents.")
+        _, document_job = ingestion_use_case.create_document_upload(
+            db=db,
+            case=case,
+            file=supporting_document,
+            background_tasks=background_tasks,
+        )
+        if document_job:
+            jobs.append(document_job)
 
-        supporting_document.file.seek(0, 2)
-        document_size = supporting_document.file.tell()
-        supporting_document.file.seek(0)
-        max_document_bytes = max(1, int(settings.DOCUMENT_UPLOAD_MAX_MB)) * 1024 * 1024
-        if document_size > max_document_bytes:
+    snapshot_job = ingestion_use_case.enqueue_case_snapshot_refresh(
+        db=db,
+        tenant_id=account.tenant_id,
+        case_id=case.id,
+        background_tasks=background_tasks,
+    )
+    if snapshot_job:
+        jobs.append(snapshot_job)
+
+    return build_dashboard_response(db, account, jobs=jobs)
+
+
+@router.get("/jobs/{job_id}")
+def get_portal_job_status(
+    job_id: str,
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    job = background_job_service.get_job(db=db, job_id=job_id)
+    if not job or job.tenant_id != account.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+
+    accessible_case_ids = set(get_accessible_case_ids(db, account))
+    if job.case_id is not None and job.case_id not in accessible_case_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found.")
+
+    return background_job_service.to_public_payload(job)
+
+
+@router.post("/assistant", response_model=ClientPortalAssistantResponse)
+def portal_assistant(
+    data: ClientPortalAssistantRequest,
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    accessible_case_ids = get_accessible_case_ids(db, account)
+    if not accessible_case_ids:
+        return {
+            "answer": "No active case is linked to your portal account yet. Upload documents or submit a request first.",
+            "confidence": "medium",
+            "scope": "tenant",
+            "sources": [],
+            "citations": [],
+            "execution_trace": [],
+            "case_snapshot_version": None,
+        }
+
+    selected_case_id = data.case_id
+    if selected_case_id is None:
+        if len(accessible_case_ids) == 1:
+            selected_case_id = accessible_case_ids[0]
+        else:
             raise HTTPException(
-                status_code=400,
-                detail=f"Supporting document too large. Maximum allowed size is {settings.DOCUMENT_UPLOAD_MAX_MB} MB.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Select a case before using the portal assistant.",
             )
-        document_storage_path = upload_file(
-            supporting_document.file,
-            supporting_document.filename.strip(),
-            prefix="documents",
+
+    if selected_case_id not in accessible_case_ids:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found for this portal account.")
+
+    accessible_document_ids = get_accessible_document_ids(db, account, case_id=selected_case_id)
+    if data.document_id is not None and data.document_id not in accessible_document_ids:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found for this portal account.",
         )
 
-        document = Document(
-            filename=supporting_document.filename.strip(),
-            storage_path=document_storage_path,
-            file_size=document_size,
-            file_type=normalized_content_type or "application/pdf",
-            case_id=case.id,
-            tenant_id=account.tenant_id,
-            processing_status="pending",
-        )
-        db.add(document)
-        db.commit()
-        db.refresh(document)
-
-        if document.file_type == "application/pdf":
-            pipeline.process_document(document, db)
-
-    consultations = build_consultation_items(db, account)
-    case_items, _ = build_case_items(db, account)
-    document_items = build_document_items(db, account)
+    result = copilot_orchestration_service.run(
+        db=db,
+        tenant_id=account.tenant_id,
+        user_id=None,
+        user_role="client",
+        message=data.message,
+        top_k=data.top_k,
+        use_external_research=False,
+        mode="default",
+        legal_search_multilingual_output=False,
+        agent_mode=False,
+        workspace_case_id=selected_case_id,
+        workspace_document_id=data.document_id,
+        conversation_history=data.conversation_history,
+        allowed_case_ids=accessible_case_ids,
+        allowed_document_ids=accessible_document_ids,
+    )
 
     return {
-        "account": build_account_out(account),
-        "consultations": consultations,
-        "cases": case_items,
-        "documents": document_items,
-        "activity": build_activity_feed(
-            consultations=consultations,
-            documents=document_items,
-            cases=case_items,
-        ),
-        "metrics": build_dashboard_metrics(
-            consultations=consultations,
-            cases=case_items,
-            documents=document_items,
-        ),
+        "answer": result.get("answer", ""),
+        "confidence": result.get("confidence", "medium"),
+        "scope": result.get("scope", "case"),
+        "sources": result.get("sources", []),
+        "citations": result.get("citations", []),
+        "execution_trace": result.get("execution_trace", []),
+        "case_snapshot_version": result.get("case_snapshot_version"),
     }

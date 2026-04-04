@@ -1,0 +1,24 @@
+{
+  "name": "Legal AI Workspace",
+  "short_name": "Legal AI",
+  "description": "Mobile-ready legal AI workspace for case intelligence, drafting, and collaboration.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08130e",
+  "theme_color": "#0d1f18",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/mask-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

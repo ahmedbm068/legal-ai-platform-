@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class ClientPortalRegisterRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
+    tenant_slug: str = Field(..., min_length=2, max_length=80)
     full_name: str = Field(..., min_length=2)
     email: EmailStr
     password: str = Field(..., min_length=10, max_length=256)
@@ -48,9 +49,13 @@ class ClientPortalAccountOut(BaseModel):
     id: int
     full_name: str
     email: EmailStr
+    phone: Optional[str] = None
+    address: Optional[str] = None
     tenant_id: int
     client_id: Optional[int] = None
     tenant_name: Optional[str] = None
+    tenant_slug: Optional[str] = None
+    requires_email_verification: bool = False
     created_at: datetime
 
 
@@ -117,3 +122,24 @@ class ClientPortalDashboardResponse(BaseModel):
     documents: list[ClientPortalDocumentItem] = Field(default_factory=list)
     activity: list[ClientPortalActivityItem] = Field(default_factory=list)
     metrics: ClientPortalDashboardMetrics = Field(default_factory=ClientPortalDashboardMetrics)
+    jobs: list[dict] = Field(default_factory=list)
+
+
+class ClientPortalAssistantRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    message: str = Field(..., min_length=1, max_length=6000)
+    case_id: Optional[int] = Field(default=None, ge=1)
+    document_id: Optional[int] = Field(default=None, ge=1)
+    conversation_history: list[dict] = Field(default_factory=list, max_length=20)
+    top_k: int = Field(default=5, ge=1, le=10)
+
+
+class ClientPortalAssistantResponse(BaseModel):
+    answer: str
+    confidence: str
+    scope: str
+    sources: list[dict] = Field(default_factory=list)
+    citations: list[dict] = Field(default_factory=list)
+    execution_trace: list[dict] = Field(default_factory=list)
+    case_snapshot_version: Optional[int] = None

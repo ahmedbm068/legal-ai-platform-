@@ -10,9 +10,12 @@ class Settings(BaseSettings):
 
     # Security
     SECRET_KEY: str
+    PORTAL_SECRET_KEY: Optional[str] = None
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
+    CACHE_TTL_SECONDS: int = 300
+    LEGAL_SEARCH_CACHE_TTL_SECONDS: int = 900
 
     # MinIO
     MINIO_ENDPOINT: str
@@ -27,6 +30,12 @@ class Settings(BaseSettings):
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_BASE_URL: Optional[str] = None
     LLM_MODEL: str = "openai/gpt-4o-mini"
+    LLM_SMALL_MODEL: Optional[str] = None
+    LLM_STANDARD_MODEL: Optional[str] = None
+    LLM_HEAVY_MODEL: Optional[str] = None
+    VISION_MODEL: Optional[str] = None
+    VISION_API_KEY: Optional[str] = None
+    VISION_BASE_URL: Optional[str] = None
     SUMMARY_AGENT_MODEL: Optional[str] = None
     LLM_TIMEOUT_SECONDS: int = 45
     LLM_MAX_RETRIES: int = 2
@@ -75,6 +84,8 @@ class Settings(BaseSettings):
     SMTP_TIMEOUT_SECONDS: int = 20
     PORTAL_LOGIN_CODE_EXPIRE_MINUTES: int = 10
     PORTAL_ALLOW_CONSOLE_CODE_FALLBACK: bool = True
+    PORTAL_REQUIRE_TENANT_SLUG: bool = True
+    STAFF_INVITE_ONLY: bool = True
 
     # Auth hardening
     AUTH_LOGIN_MAX_ATTEMPTS: int = 6
@@ -90,6 +101,9 @@ class Settings(BaseSettings):
     # Upload controls
     DOCUMENT_UPLOAD_MAX_MB: int = 20
     VOICE_UPLOAD_MAX_MB: int = 25
+    IMAGE_UPLOAD_MAX_MB: int = 12
+    IMAGE_BATCH_MAX_FILES: int = 20
+    VISION_MAX_ATTACHMENTS: int = 4
 
     model_config = SettingsConfigDict(
         env_file=".env",

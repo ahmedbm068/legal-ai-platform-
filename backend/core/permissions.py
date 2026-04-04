@@ -3,8 +3,14 @@ from backend.models.user import User
 from backend.core.enums import UserRole
 
 
+def _normalized_role_value(value) -> str:
+    if hasattr(value, "value"):
+        return str(value.value).strip().lower()
+    return str(value).strip().lower()
+
+
 def is_admin(current_user: User) -> bool:
-    role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    role = _normalized_role_value(current_user.role)
     return role == UserRole.admin.value
 
 
@@ -22,7 +28,10 @@ def require_roles(current_user: User, allowed_roles: list[UserRole]):
     if is_admin(current_user):
         return
 
-    if current_user.role not in allowed_roles:
+    current_role_value = _normalized_role_value(current_user.role)
+    allowed_role_values = {_normalized_role_value(role) for role in allowed_roles}
+
+    if current_role_value not in allowed_role_values:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to perform this action"

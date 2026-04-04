@@ -31,16 +31,33 @@ class ConversationTurn(BaseModel):
     document_id: Optional[int] = Field(default=None, ge=1)
 
 
+class CopilotAttachment(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    client_id: str
+    name: str = Field(..., min_length=1, max_length=240)
+    mime_type: str = Field(..., min_length=1, max_length=120)
+    kind: Literal["image", "stored_asset"] = "image"
+    data_url: Optional[str] = None
+    asset_id: Optional[int] = Field(default=None, ge=1)
+    page_order: Optional[int] = Field(default=None, ge=1)
+
+
 class CopilotRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     message: str = Field(..., min_length=1)
     top_k: int = Field(default=5, ge=1, le=10)
     use_external_research: bool = True
+    mode: Literal["default", "legal_search"] = "default"
+    legal_search_multilingual_output: bool = False
     agent_mode: bool = False
     workspace_case_id: Optional[int] = Field(default=None, ge=1)
     workspace_document_id: Optional[int] = Field(default=None, ge=1)
     conversation_history: List[ConversationTurn] = Field(default_factory=list, max_length=30)
+    attachments: List[CopilotAttachment] = Field(default_factory=list, max_length=8)
+    save_attachments_to_case: bool = False
+    attachment_case_id: Optional[int] = Field(default=None, ge=1)
 
 
 class AgentWorkflowRequest(BaseModel):
@@ -64,6 +81,23 @@ class SemanticTranslateRequest(BaseModel):
     target_language: Literal["en", "de", "ar"] = "en"
     source_language: Literal["auto", "en", "de", "ar"] = "auto"
     domain: Literal["legal_ui", "legal_content", "general"] = "legal_content"
+
+
+class PromptOptimizationRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    prompt: str = Field(..., min_length=1, max_length=12000)
+    workspace_case_id: Optional[int] = Field(default=None, ge=1)
+    workspace_document_id: Optional[int] = Field(default=None, ge=1)
+
+
+class PromptOptimizationResponse(BaseModel):
+    optimized_prompt: str
+    notes: Optional[str] = None
+    strategy: str = "heuristic"
+    used_llm: bool = False
+    target_type: Optional[str] = None
+    target_id: Optional[int] = None
 
 
 class RetrievedChunk(BaseModel):
@@ -94,6 +128,37 @@ class SourceItem(BaseModel):
     chunk_index: Optional[int] = None
     score: float
     snippet: str
+
+
+class CitationItem(BaseModel):
+    label: str
+    document_id: Optional[int] = None
+    case_id: Optional[int] = None
+    snippet: str = ""
+
+
+class CacheMetadata(BaseModel):
+    key: Optional[str] = None
+    hit: bool = False
+    backend: str = "none"
+
+
+class BackgroundJobItem(BaseModel):
+    id: str
+    job_type: str
+    queue_name: str
+    status: str
+    tenant_id: Optional[int] = None
+    case_id: Optional[int] = None
+    document_id: Optional[int] = None
+    voice_recording_id: Optional[int] = None
+    consultation_request_id: Optional[int] = None
+    attempts: int = 0
+    max_attempts: int = 0
+    error: Optional[str] = None
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
 
 
 class ArtifactVersionOut(BaseModel):
@@ -130,6 +195,38 @@ class JurisdictionContext(BaseModel):
     risk_focus_areas: List[str] = Field(default_factory=list)
 
 
+class VisionField(BaseModel):
+    label: str
+    value: str
+
+
+class VisionCitationItem(BaseModel):
+    label: str
+    asset_id: Optional[int] = None
+    page_order: Optional[int] = None
+    snippet: str = ""
+
+
+class VisionAuthenticityReview(BaseModel):
+    risk_score: int = Field(default=0, ge=0, le=100)
+    confidence: str = "low"
+    signals: List[str] = Field(default_factory=list)
+    limitations: List[str] = Field(default_factory=list)
+    analysis_text: str = ""
+
+
+class VisionResult(BaseModel):
+    task_kind: str
+    summary: str
+    answer: str
+    extracted_text: str = ""
+    detected_language: Optional[str] = None
+    confidence: str = "medium"
+    fields: List[VisionField] = Field(default_factory=list)
+    citations: List[VisionCitationItem] = Field(default_factory=list)
+    authenticity_review: Optional[VisionAuthenticityReview] = None
+
+
 class AskResponse(BaseModel):
     answer: str
     used_fallback: bool
@@ -137,6 +234,8 @@ class AskResponse(BaseModel):
     confidence: str
     scope: str
     sources: List[SourceItem]
+    citations: List[CitationItem] = Field(default_factory=list)
+    cache: CacheMetadata = Field(default_factory=CacheMetadata)
 
 
 class CopilotResponse(BaseModel):
@@ -144,6 +243,7 @@ class CopilotResponse(BaseModel):
     parsed_intent: str
     target_type: Optional[str] = None
     target_id: Optional[int] = None
+    mode: Literal["default", "legal_search", "multimodal"] = "default"
     agent_mode: bool = False
     action_category: str = "analysis"
     action_status: Optional[str] = None
@@ -156,8 +256,16 @@ class CopilotResponse(BaseModel):
     confidence: str
     scope: str
     sources: List[SourceItem]
+    citations: List[CitationItem] = Field(default_factory=list)
+    execution_trace: List[Dict[str, Any]] = Field(default_factory=list)
+    cache: CacheMetadata = Field(default_factory=CacheMetadata)
+    job_id: Optional[str] = None
+    case_snapshot_version: Optional[int] = None
     artifact: Optional[ArtifactContext] = None
     jurisdiction: Optional[JurisdictionContext] = None
+    vision_result: Optional[VisionResult] = None
+    saved_asset_ids: List[int] = Field(default_factory=list)
+    review_record_id: Optional[int] = None
 
 
 class CopilotFeedbackCreateRequest(BaseModel):
@@ -225,6 +333,8 @@ class AgentWorkflowResponse(BaseModel):
     verified_summary: str
     client_email: str
     sources: List[SourceItem]
+    citations: List[CitationItem] = Field(default_factory=list)
+    case_snapshot_version: Optional[int] = None
     stages: Dict[str, WorkflowStage]
     stage_outputs: Dict[str, Dict[str, Any]]
 
@@ -236,6 +346,10 @@ class ProviderStatusResponse(BaseModel):
     summary_model: Optional[str] = None
     key_present: bool
     provider_name: str
+    vision_available: bool = False
+    vision_provider_name: Optional[str] = None
+    vision_model: Optional[str] = None
+    vision_reason_unavailable: Optional[str] = None
 
 
 class LLMTestResponse(BaseModel):

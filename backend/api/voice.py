@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.core.config import settings
-from backend.api.voice_schema import VoiceRecordingOut, VoiceUploadResponse
+from backend.api.voice_schema import VoiceRecordingOut, VoiceTranscriptionResponse, VoiceUploadResponse
 from backend.core.deps import get_current_user, get_db
 from backend.core.permissions import apply_tenant_scope
 from backend.models.case import Case
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
-from backend.services.storage_service import upload_file
-from backend.services.voice_processing_service import process_voice_recording
+from backend.services.ai.transcription_service import transcription_service
+from backend.services.use_cases.ingestion_use_case import ingestion_use_case
 
 
 router = APIRouter(prefix="/voice", tags=["Voice"])
@@ -181,27 +184,83 @@ def upload_voice_recording(
             detail=f"Audio file too large. Maximum allowed size is {settings.VOICE_UPLOAD_MAX_MB} MB."
         )
 
-    storage_path = upload_file(file.file, filename, prefix="voice")
-
-    recording = VoiceRecording(
-        filename=filename,
-        storage_path=storage_path,
-        mime_type=normalized_content_type,
-        file_size=file_size,
-        transcription_status="processing",
-        case_id=case_id,
-        tenant_id=case.tenant_id,
+    recording, job_payload = ingestion_use_case.create_voice_upload(
+        db=db,
+        case=case,
+        file=file,
         uploaded_by_user_id=current_user.id,
+        background_tasks=background_tasks,
     )
-
-    db.add(recording)
-    db.commit()
-    db.refresh(recording)
-
-    background_tasks.add_task(process_voice_recording, recording.id, None)
-    message = "Voice recording uploaded. Transcription is running in the background."
+    message = "Voice recording uploaded. Transcription is queued and will continue in the background."
 
     return {
         "recording": recording,
         "message": message,
+        "job": job_payload,
     }
+
+
+@router.post("/transcribe", response_model=VoiceTranscriptionResponse)
+def transcribe_voice_input(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    del current_user
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    if not is_supported_audio_upload(file.filename, file.content_type):
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported audio format. Use webm, wav, mp3, mp4, m4a, or ogg.",
+        )
+
+    filename = file.filename.strip()
+    file.file.seek(0, 2)
+    file_size = file.file.tell()
+    file.file.seek(0)
+
+    max_file_size = max(1, int(settings.VOICE_UPLOAD_MAX_MB)) * 1024 * 1024
+    if file_size > max_file_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Audio file too large. Maximum allowed size is {settings.VOICE_UPLOAD_MAX_MB} MB.",
+        )
+
+    suffix = Path(filename).suffix.lower() or ".webm"
+    temp_file_path: str | None = None
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            shutil.copyfileobj(file.file, temp_file)
+            temp_file_path = temp_file.name
+
+        result = transcription_service.transcribe_file(temp_file_path, filename=filename)
+        transcript_text = str(result.get("text") or "").strip()
+        transcript_error = str(result.get("error") or "").strip() or None
+
+        if looks_like_html_error_page(transcript_text):
+            transcript_text = ""
+            transcript_error = (
+                "Transcription failed because the provider returned an HTML error page instead of text."
+            )
+
+        if looks_like_html_error_page(transcript_error):
+            transcript_error = (
+                "Transcription failed because the provider returned an HTML error page instead of text."
+            )
+
+        return {
+            "success": bool(result.get("success")) and bool(transcript_text),
+            "transcript_text": transcript_text,
+            "transcript_source": result.get("source"),
+            "transcript_language": result.get("language"),
+            "error": transcript_error,
+        }
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+            except OSError:
+                pass

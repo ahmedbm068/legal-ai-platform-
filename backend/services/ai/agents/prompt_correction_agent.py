@@ -33,6 +33,7 @@ class PromptCorrectionAgent(BaseAgent):
         *,
         raw_query: str,
         conversation_history: Iterable[dict[str, Any]] | None = None,
+        allow_llm: bool = False,
     ) -> AgentResult:
         original = self._normalize_text(raw_query)
         if not original:
@@ -45,7 +46,7 @@ class PromptCorrectionAgent(BaseAgent):
         heuristic = self._heuristic_correct(original)
         trace = ["Applied heuristic correction pass."]
 
-        if self.client:
+        if self.client and allow_llm:
             llm_correction = self._llm_correct(original=original, heuristic=heuristic, conversation_history=conversation_history or [])
             if llm_correction:
                 corrected = llm_correction
@@ -55,7 +56,10 @@ class PromptCorrectionAgent(BaseAgent):
                 trace.append("LLM semantic correction unavailable; kept heuristic correction.")
         else:
             corrected = heuristic
-            trace.append("No LLM client configured; kept heuristic correction.")
+            if allow_llm:
+                trace.append("No LLM client configured; kept heuristic correction.")
+            else:
+                trace.append("Skipped LLM semantic correction; kept heuristic correction.")
 
         changed = corrected != original
         return self.result(

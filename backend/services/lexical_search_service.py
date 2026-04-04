@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import math
 import re
 from collections import Counter, defaultdict
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from backend.models.document_chunk import DocumentChunk
 from backend.models.document import Document
+from backend.models.document_chunk import DocumentChunk
 
 
 TOKEN_PATTERN = re.compile(r"\w+", re.UNICODE)
@@ -45,7 +48,7 @@ def _bm25_score(
     total_docs: int,
     avg_doc_len: float,
     k1: float = 1.5,
-    b: float = 0.75
+    b: float = 0.75,
 ) -> float:
     if not doc_tokens or not query_tokens or total_docs == 0 or avg_doc_len == 0:
         return 0.0
@@ -75,11 +78,22 @@ def search_chunks_lexically(
     query: str,
     top_k: int = 5,
     case_id: Optional[int] = None,
-    document_id: Optional[int] = None
+    document_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     normalized_query = query.strip()
     if not normalized_query:
         return []
+
+    postgres_results = _search_chunks_postgres(
+        db=db,
+        tenant_id=tenant_id,
+        query=normalized_query,
+        top_k=top_k,
+        case_id=case_id,
+        document_id=document_id,
+    )
+    if postgres_results:
+        return postgres_results
 
     rows_query = db.query(DocumentChunk, Document).join(Document, Document.id == DocumentChunk.document_id)
 
@@ -115,7 +129,7 @@ def search_chunks_lexically(
             "chunk": chunk,
             "document": document,
             "tokens": doc_tokens,
-            "token_counts": token_counts
+            "token_counts": token_counts,
         })
 
     total_docs = len(prepared_docs)
@@ -135,7 +149,7 @@ def search_chunks_lexically(
             doc_freqs=token_counts,
             corpus_doc_freq=corpus_doc_freq,
             total_docs=total_docs,
-            avg_doc_len=avg_doc_len
+            avg_doc_len=avg_doc_len,
         )
 
         if bm25_score <= 0:
@@ -152,7 +166,7 @@ def search_chunks_lexically(
             "bm25_score": bm25_score,
             "semantic_score": 0.0,
             "retrieval_method": "lexical",
-            "matched_text": _build_snippet(chunk.content, normalized_query)
+            "matched_text": _build_snippet(chunk.content, normalized_query),
         })
 
     scored_results.sort(key=lambda item: item["score"], reverse=True)
@@ -165,7 +179,7 @@ def lexical_search_documents(
     query: str,
     top_k: int = 5,
     case_id: Optional[int] = None,
-    document_id: Optional[int] = None
+    document_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     results = search_chunks_lexically(
         db=db,
@@ -173,14 +187,87 @@ def lexical_search_documents(
         query=query,
         top_k=top_k,
         case_id=case_id,
-        document_id=document_id
+        document_id=document_id,
     )
 
     return [
         {
             "document_id": item["document_id"],
             "filename": item["filename"],
-            "matched_text": item["matched_text"]
+            "matched_text": item["matched_text"],
         }
         for item in results
     ]
+
+
+def _search_chunks_postgres(
+    *,
+    db: Session,
+    tenant_id: int | None,
+    query: str,
+    top_k: int,
+    case_id: int | None,
+    document_id: int | None,
+) -> list[dict[str, Any]]:
+    bind = db.get_bind()
+    if bind is None or bind.dialect.name != "postgresql":
+        return []
+
+    statement = text(
+        """
+        SELECT
+            dc.id AS chunk_id,
+            dc.document_id AS document_id,
+            dc.case_id AS case_id,
+            d.filename AS filename,
+            dc.chunk_index AS chunk_index,
+            dc.content AS chunk_text,
+            ts_rank_cd(
+                to_tsvector('simple', COALESCE(dc.content, '')),
+                websearch_to_tsquery('simple', :query)
+            ) AS bm25_score
+        FROM document_chunks dc
+        INNER JOIN documents d ON d.id = dc.document_id
+        WHERE (:tenant_id IS NULL OR dc.tenant_id = :tenant_id)
+          AND (:case_id IS NULL OR dc.case_id = :case_id)
+          AND (:document_id IS NULL OR dc.document_id = :document_id)
+          AND to_tsvector('simple', COALESCE(dc.content, '')) @@ websearch_to_tsquery('simple', :query)
+        ORDER BY bm25_score DESC, dc.id DESC
+        LIMIT :top_k
+        """
+    )
+
+    try:
+        rows = db.execute(
+            statement,
+            {
+                "tenant_id": tenant_id,
+                "case_id": case_id,
+                "document_id": document_id,
+                "query": query,
+                "top_k": max(1, int(top_k)),
+            },
+        ).mappings().all()
+    except Exception:
+        return []
+
+    results = []
+    for row in rows:
+        bm25_score = float(row.get("bm25_score") or 0.0)
+        chunk_text = str(row.get("chunk_text") or "")
+        results.append(
+            {
+                "chunk_id": row.get("chunk_id"),
+                "document_id": row.get("document_id"),
+                "case_id": row.get("case_id"),
+                "filename": row.get("filename") or "unknown",
+                "chunk_index": row.get("chunk_index"),
+                "chunk_text": chunk_text,
+                "score": bm25_score,
+                "bm25_score": bm25_score,
+                "semantic_score": 0.0,
+                "retrieval_method": "lexical",
+                "matched_text": _build_snippet(chunk_text, query),
+            }
+        )
+    return results

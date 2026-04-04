@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VoiceRecordingOut(BaseModel):
@@ -27,3 +27,12 @@ class VoiceRecordingOut(BaseModel):
 class VoiceUploadResponse(BaseModel):
     recording: VoiceRecordingOut
     message: str
+    job: dict = Field(default_factory=dict)
+
+
+class VoiceTranscriptionResponse(BaseModel):
+    success: bool
+    transcript_text: str = ""
+    transcript_source: Optional[str] = None
+    transcript_language: Optional[str] = None
+    error: Optional[str] = None

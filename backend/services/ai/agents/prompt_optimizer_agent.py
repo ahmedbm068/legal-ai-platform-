@@ -29,6 +29,7 @@ class PromptOptimizerAgent(BaseAgent):
         intent: str | None = None,
         target_type: str | None = None,
         target_id: int | None = None,
+        allow_llm: bool = False,
     ) -> AgentResult:
         cleaned_query = self._normalize_text(raw_query)
         if not cleaned_query:
@@ -48,7 +49,7 @@ class PromptOptimizerAgent(BaseAgent):
             "Built heuristic optimized prompt.",
         ]
 
-        if self.client:
+        if self.client and allow_llm:
             llm_payload = self._generate_llm_optimization(
                 raw_query=cleaned_query,
                 intent=intent,
@@ -65,7 +66,10 @@ class PromptOptimizerAgent(BaseAgent):
                 trace.append("LLM optimization unavailable; kept heuristic optimization.")
         else:
             heuristic["used_llm"] = False
-            trace.append("No LLM client configured; kept heuristic optimization.")
+            if allow_llm:
+                trace.append("No LLM client configured; kept heuristic optimization.")
+            else:
+                trace.append("Skipped LLM prompt optimization; kept heuristic optimization.")
 
         warnings: list[str] = []
         if heuristic.get("optimized_query") == cleaned_query:

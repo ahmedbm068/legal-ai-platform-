@@ -1,308 +1,282 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./lib/api";
+
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
+import { workspaceApi as api } from "./workspaceApi";
+import ChatMessageBubble, { type MessageFeedbackState } from "./components/ChatMessageBubble";
 import type {
-  AgentWorkflowResponse,
-  ArtifactContext,
-  ArtifactVersion,
   CaseItem,
   ChatMessage,
   Client,
   ConsultationRequest,
   DocumentItem,
+  EvidenceAnalysisReview,
   FullDocumentAnalysis,
+  ImageDocumentBatch,
+  PromptLibraryEntry,
   ProviderStatusResponse,
-  SourceItem,
+  CaseReviewTable,
   User,
   VoiceRecording,
 } from "./types";
 
+// Optimization: lazy load right-side intelligence dashboard to reduce initial bundle and first paint cost.
+const IntelligencePanel = lazy(() => import("./components/IntelligencePanel"));
+
 const TOKEN_STORAGE_KEY = "legal-ai-platform-token";
-const THEME_STORAGE_KEY = "legal-ai-platform-theme";
-const UI_LANGUAGE_STORAGE_KEY = "legal-ai-platform-ui-language";
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "legal-ai-platform-sidebar-collapsed";
-const CHAT_THREADS_STORAGE_KEY = "legal-ai-platform-chat-threads-v3";
-const CASE_REFERENCE_PATTERN = /\bcase\s*#?\s*(\d+)\b/i;
-const WRITE_ACTION_ROLES = new Set(["admin", "lawyer"]);
+const THEME_STORAGE_KEY = "legal-ai-platform-theme-v3";
+const LANGUAGE_STORAGE_KEY = "legal-ai-platform-language-v2";
+const LEGACY_CHAT_STORAGE_KEY = "legal-ai-platform-chat-map-v2";
+const CHAT_STORAGE_KEY = "legal-ai-platform-chat-sessions-v3";
+const IMAGE_BATCH_POLL_INTERVAL_MS = 4500;
+const IMAGE_BATCH_POLL_MAX_CYCLES = 30;
 
+type ThemeMode = "dark" | "light";
 type UiLanguage = "en" | "de" | "ar";
-type RetrievalPreset = "low" | "medium" | "high" | "extra_high";
+type WorkspaceMode = "chat" | "agent" | "legal_search";
+type ReasoningLevel = "low" | "medium" | "high";
+type FeedbackValue = "up" | "down";
 
-const RETRIEVAL_PRESET_CONFIG: Record<RetrievalPreset, { topK: number; range: string }> = {
-  low: { topK: 3, range: "1-3" },
-  medium: { topK: 5, range: "4-7" },
-  high: { topK: 8, range: "8-10" },
-  extra_high: { topK: 10, range: "8-10" },
+type BrowserSpeechRecognition = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: {
+    resultIndex: number;
+    results: ArrayLike<ArrayLike<{ transcript?: string }> & { isFinal?: boolean }>;
+  }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
 };
 
-interface ChatThread {
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => BrowserSpeechRecognition;
+    webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+  }
+}
+
+interface AuthFormState {
+  name: string;
+  tenant: string;
+  inviteToken: string;
+  email: string;
+  password: string;
+  role: "admin" | "lawyer" | "assistant";
+}
+
+interface ChatSession {
   id: string;
   title: string;
-  caseId: number | null;
-  messages: ChatMessage[];
   createdAt: string;
   updatedAt: string;
+  messages: ChatMessage[];
 }
 
-type FeedbackValue = "up" | "down";
-type FeedbackStatus = "idle" | "saving" | "submitted" | "error";
-
-interface MessageFeedbackState {
-  value: FeedbackValue;
-  status: FeedbackStatus;
+interface StoredChatSessionsState {
+  sessionsByCase: Record<number, ChatSession[]>;
+  activeSessionIdByCase: Record<number, string>;
 }
 
-const UI_STRINGS: Record<UiLanguage, Record<string, string>> = {
+const REASONING_TOP_K: Record<ReasoningLevel, number> = {
+  low: 3,
+  medium: 6,
+  high: 9,
+};
+
+const APP_TEXT: Record<UiLanguage, Record<string, string>> = {
   en: {
-    appTitle: "Legal Copilot",
-    newChat: "New chat",
-    searchChats: "Search chats",
-    chatHistory: "Chat history",
-    noHistory: "No chats yet",
-    askCopilot: "Ask copilot",
-    processing: "Thinking...",
-    placeholder: "Ask anything about your case, document, risks, deadlines, or drafting.",
-    features: "Features",
-    uploadPdf: "Upload document",
-    uploadAudio: "Upload audio",
-    recordVoice: "Record voice",
-    stopRecording: "Stop recording",
-    runWorkflow: "Run workflow",
-    createCase: "Create case",
-    createClient: "Create client",
-    drafts: "Versioned drafts",
-    refreshVersions: "Refresh versions",
-    reviseWithAgent: "Revise with agent",
-    saveVersion: "Save version",
-    smartTranslation: "Smart translation",
-  },
-  de: {
-    appTitle: "Legaler Copilot",
-    newChat: "Neuer Chat",
-    searchChats: "Chats suchen",
-    chatHistory: "Chatverlauf",
-    noHistory: "Noch keine Chats",
-    askCopilot: "Copilot fragen",
-    processing: "Denke nach...",
-    placeholder: "Frage alles zu Fall, Dokument, Risiken, Fristen oder Entwürfen.",
-    features: "Funktionen",
-    uploadPdf: "Dokument hochladen",
-    uploadAudio: "Audio hochladen",
-    recordVoice: "Sprache aufnehmen",
-    stopRecording: "Aufnahme stoppen",
-    runWorkflow: "Workflow starten",
-    createCase: "Fall erstellen",
-    createClient: "Mandant erstellen",
-    drafts: "Versionierte Entwürfe",
-    refreshVersions: "Versionen aktualisieren",
-    reviseWithAgent: "Mit Agent überarbeiten",
-    saveVersion: "Version speichern",
-    smartTranslation: "Semantische Übersetzung",
-  },
-  ar: {
-    appTitle: "المساعد القانوني",
-    newChat: "محادثة جديدة",
-    searchChats: "ابحث في المحادثات",
-    chatHistory: "سجل المحادثات",
-    noHistory: "لا توجد محادثات بعد",
-    askCopilot: "اسأل المساعد",
-    processing: "جاري التفكير...",
-    placeholder: "اسأل عن القضية أو المستند أو المخاطر أو المواعيد أو الصياغة.",
-    features: "الميزات",
-    uploadPdf: "رفع مستند",
-    uploadAudio: "رفع صوت",
-    recordVoice: "تسجيل صوت",
-    stopRecording: "إيقاف التسجيل",
-    runWorkflow: "تشغيل سير العمل",
-    createCase: "إنشاء قضية",
-    createClient: "إنشاء عميل",
-    drafts: "المسودات بالإصدارات",
-    refreshVersions: "تحديث الإصدارات",
-    reviseWithAgent: "تحسين عبر الوكيل",
-    saveVersion: "حفظ إصدار",
-    smartTranslation: "ترجمة دلالية ذكية",
-  },
-};
-
-const UI_BASE_COPY: Record<string, string> = {
-  ...UI_STRINGS.en,
-  cases: "Cases",
-  documents: "Documents",
-  voiceIntake: "Voice and intake",
-  evidence: "Evidence",
-  webResearch: "Web research",
-  workflowMode: "Workflow mode",
-  modeAgent: "Mode agent",
-  soon: "Soon",
-  on: "On",
-  off: "Off",
-  retrieval: "Retrieval",
-  retrievalReasoning: "Reasoning",
-  reasoningLow: "Low",
-  reasoningMedium: "Medium",
-  reasoningHigh: "High",
-  reasoningExtraHigh: "Extra High",
-  reasoningGuideLow: "Low value (1-3): faster but less complete answers.",
-  reasoningGuideMedium: "Medium value (4-7): balanced speed and accuracy.",
-  reasoningGuideHigh: "High value (8-10): deeper coverage, slower and sometimes noisy.",
-  reasoningGuideExtraHigh: "Extra High: maximum retrieval depth for the most complete pass.",
-  logout: "Logout",
-  noClient: "No client",
-  selectCaseFromSidebar: "Select a case from the sidebar",
-  alwaysReady: "Always ready to support legal work.",
-  noJurisdiction: "No jurisdiction",
-  webSources: "web sources",
-  loadingWorkspace: "Loading workspace...",
-  workflowReady: "Workflow ready",
-  focusedDocument: "Focused document",
-  documentIntelligence: "Document intelligence",
-  consultation: "Consultation",
-  createIntakeRequest: "Create intake request",
-  buildingIntake: "Building...",
-  constitutionSource: "Constitution source",
-  uploading: "Uploading...",
-  running: "Running...",
-  refreshing: "Refreshing...",
-  noSummaryYet: "No summary available yet.",
-  improvingPromptPlaceholder: "Tell the agent what to improve.",
-  selectClient: "Select client",
-  clientName: "Client name",
-  caseTitle: "Case title",
-  caseDescription: "Case description",
-  phone: "Phone",
-  address: "Address",
-  status: "Status",
-  jurisdiction: "Jurisdiction",
-  tune: "Tune",
-  transcribe: "Transcription",
-  chooseClient: "Choose client",
-  chooseCase: "Choose case",
-  enterWorkspace: "Enter workspace",
-  preparingWorkspace: "Preparing workspace...",
-  noClientsAvailable: "No clients found. Create clients from the clients page first.",
-  noCasesAvailable: "No cases found for this client. Create cases from the cases page first.",
-  selectCaseToStart: "Select a case to start your copilot workspace.",
-  workspaceSelection: "Workspace Selection",
-  loginEyebrow: "Case-Centric Legal AI",
-  loginTitle: "Grounded legal workspaces for cases, documents, and evidence-driven AI.",
-  loginSubtitle: "Sign in to your legal workspace and run case-aware AI workflows.",
-  lightMode: "Light mode",
-  darkMode: "Dark mode",
-  login: "Login",
-  register: "Register",
-  fullName: "Full name",
-  firmName: "Tenant / firm name",
-  role: "Role",
-  lawyer: "Lawyer",
-  assistant: "Assistant",
-  admin: "Admin",
-  email: "Email",
-  password: "Password",
-  working: "Working...",
-  createAccount: "Create account",
-  optimizePrompt: "Optimize prompt",
-  optimizingPrompt: "Optimizing...",
-  feedbackHelpful: "Helpful",
-  feedbackNeedsWork: "Needs work",
-  feedbackSaving: "Saving feedback...",
-  feedbackSaved: "Feedback saved",
-  feedbackFailed: "Feedback failed",
-  languageEnglish: "English",
-  languageGerman: "Deutsch",
-  languageArabic: "Arabic",
-  collapseSidebar: "Collapse sidebar",
-  expandSidebar: "Expand sidebar",
-  noDate: "No date",
-  you: "You",
-};
-
-const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
-  en: { ...UI_BASE_COPY },
-  de: {
-    ...UI_BASE_COPY,
-    appTitle: "Legal Copilot",
-    newChat: "Neuer Chat",
-    searchChats: "Chats suchen",
-    chatHistory: "Chatverlauf",
-    noHistory: "Noch keine Chats",
-    askCopilot: "Copilot fragen",
-    processing: "Denke nach...",
-    placeholder: "Frage etwas zu Fall, Dokument, Risiken, Fristen oder Entwurf.",
-    features: "Funktionen",
-    uploadPdf: "Dokument hochladen",
-    uploadAudio: "Audio hochladen",
-    recordVoice: "Sprache aufnehmen",
-    stopRecording: "Aufnahme stoppen",
-    runWorkflow: "Workflow ausfuehren",
-    drafts: "Versionierte Entwuerfe",
-    refreshVersions: "Versionen neu laden",
-    reviseWithAgent: "Mit Agent ueberarbeiten",
-    saveVersion: "Version speichern",
-    smartTranslation: "Semantische Uebersetzung",
-    cases: "Faelle",
-    documents: "Dokumente",
-    voiceIntake: "Sprache und Intake",
-    evidence: "Belege",
-    webResearch: "Web-Recherche",
-    workflowMode: "Workflow-Modus",
-    modeAgent: "Agent-Modus",
-    soon: "Bald",
-    on: "An",
-    off: "Aus",
-    retrieval: "Abruf",
-    retrievalReasoning: "Reasoning",
+    noDate: "No date",
+    modelLabel: "model",
+    notAvailable: "N/A",
+    caseIdLabel: "ID",
+    providerUnavailable: "Provider unavailable",
+    noCaseSelected: "No case selected",
+    noCasesForClient: "No cases found for selected client.",
+    noEvidenceYet: "No evidence uploaded yet.",
+    loadingWorkspace: "Loading workspace context...",
+    startQuestionTitle: "Start with a legal question",
+    startQuestionBody: "Ask about risks, obligations, deadlines, contradictions, or draft a professional legal response.",
+    focusedDocumentNone: "none",
+    caseLabel: "Case",
+    documentsLabel: "Documents",
+    consultationsLabel: "Consultations",
+    focusedDocumentLabel: "Focused document",
+    attachPdf: "Attach PDF",
+    attachVoice: "Attach voice file",
+    recordFromMic: "Record from microphone",
+    stopMicRecording: "Stop microphone recording",
+    askPlaceholder: "Ask about your case, risks, deadlines, or draft something...",
+    send: "Send",
+    optimizePrompt: "Optimize",
+    optimizingPrompt: "Optimizing...",
+    voiceInput: "Voice input",
+    stopVoiceInput: "Stop voice input",
+    transcribingVoiceInput: "Transcribing...",
+    liveVoiceInputNotice: "Live voice dictation is active.",
+    liveVoiceFallbackNotice: "Live dictation is unavailable in this browser. Using slower transcription fallback.",
+    promptOptimizedNotice: "Prompt optimized for clearer legal reasoning.",
+    promptOptimizeFailed: "Unable to optimize the prompt.",
+    voiceTranscriptFailed: "Unable to transcribe your voice input.",
+    voiceTranscriptInserted: "Voice transcript added to the prompt.",
+    stopCaseRecordingFirst: "Stop the case voice recording before starting prompt dictation.",
+    legalSearchFootnote: "Legal Search Mode prioritizes jurisdiction-specific legal sources before fallback reasoning.",
+    agentFootnote: "Agent Mode enables structured reasoning and legal workflow orchestration.",
+    chatFootnote: "Chat Mode provides conversational legal support grounded in your case context.",
+    modeChat: "Chat Mode",
+    modeChatDesc: "Fast legal discussion",
+    modeAgent: "Agent Mode",
+    modeAgentDesc: "Step-by-step execution",
+    modeLegalSearch: "Legal Search Mode",
+    modeLegalSearchDesc: "Source-grounded legal answers",
+    modeExternal: "External Mode",
+    modeExternalDesc: "Web-enhanced legal research",
+    plusModesTitle: "Modes",
+    plusAttachmentsTitle: "Attachments",
+    language: "Language",
+    languageEnglish: "English",
+    languageGerman: "German",
+    languageArabic: "Arabic",
+    reasoning: "Reasoning",
     reasoningLow: "Low",
     reasoningMedium: "Medium",
     reasoningHigh: "High",
-    reasoningExtraHigh: "Extra High",
-    reasoningGuideLow: "Niedrig (1-3): schneller, aber weniger vollstaendig.",
-    reasoningGuideMedium: "Mittel (4-7): gutes Gleichgewicht aus Tempo und Genauigkeit.",
-    reasoningGuideHigh: "Hoch (8-10): umfassender, aber langsamer und teils verrauscht.",
-    reasoningGuideExtraHigh: "Extra Hoch: maximale Retrieval-Tiefe fuer kritische Analysen.",
-    logout: "Abmelden",
-    noClient: "Kein Mandant",
-    selectCaseFromSidebar: "Waehle einen Fall in der Seitenleiste",
-    alwaysReady: "Bereit fuer deine juristische Arbeit.",
-    noJurisdiction: "Keine Zustaendigkeit",
-    webSources: "Webquellen",
-    loadingWorkspace: "Workspace wird geladen...",
-    workflowReady: "Workflow bereit",
-    focusedDocument: "Fokussiertes Dokument",
-    documentIntelligence: "Dokumentanalyse",
-    consultation: "Beratung",
-    createIntakeRequest: "Intake-Anfrage erstellen",
-    buildingIntake: "Wird erstellt...",
-    constitutionSource: "Verfassungsquelle",
-    uploading: "Wird hochgeladen...",
-    running: "Laeuft...",
-    refreshing: "Wird aktualisiert...",
-    noSummaryYet: "Noch keine Zusammenfassung verfuegbar.",
-    improvingPromptPlaceholder: "Sag dem Agenten, was verbessert werden soll.",
-    selectClient: "Mandant waehlen",
-    clientName: "Mandantenname",
-    caseTitle: "Falltitel",
-    caseDescription: "Fallbeschreibung",
-    phone: "Telefon",
-    address: "Adresse",
-    status: "Status",
-    jurisdiction: "Zustaendigkeit",
-    transcribe: "Transkription",
-    chooseClient: "Mandant waehlen",
-    chooseCase: "Fall waehlen",
-    enterWorkspace: "Workspace betreten",
-    preparingWorkspace: "Workspace wird vorbereitet...",
-    noClientsAvailable: "Keine Mandanten gefunden. Erstelle Mandanten zuerst auf der Mandanten-Seite.",
-    noCasesAvailable: "Keine Faelle fuer diesen Mandanten. Erstelle Faelle zuerst auf der Faelle-Seite.",
-    selectCaseToStart: "Waehle einen Fall, um den Copilot-Workspace zu starten.",
-    workspaceSelection: "Workspace-Auswahl",
-    loginEyebrow: "Fallzentrierte Legal AI",
-    loginTitle: "Fundierte juristische Workspaces fuer Faelle, Dokumente und beweisbasierte KI.",
-    loginSubtitle: "Melde dich an und arbeite mit fallbezogenen KI-Workflows.",
-    lightMode: "Heller Modus",
-    darkMode: "Dunkler Modus",
-    login: "Anmelden",
+    light: "Light",
+    dark: "Dark",
+    authKicker: "Next-Gen Legal AI Workspace",
+    authTitle: "Calm. Intelligent. Powerful.",
+    authSubtitle: "A premium legal copilot with case-grounded reasoning, structured insights, and evidence-aware drafting.",
+    authPoint1: "AI-native legal chat",
+    authPoint2: "Case intelligence dashboard",
+    authPoint3: "Document + voice ingestion",
+    signIn: "Sign in",
+    createAccountTitle: "Create account",
+    secureAccess: "Secure access to your legal workspace.",
+    login: "Login",
+    register: "Register",
+    fullName: "Full name",
+    tenant: "Tenant / Firm",
+    role: "Role",
+    lawyer: "Lawyer",
+    assistant: "Assistant",
+    admin: "Admin",
+    email: "Email",
+    password: "Password",
+    working: "Working...",
+    enterWorkspace: "Enter Workspace",
+    createAccount: "Create Account",
+    accountCreated: "Account created. Sign in to continue.",
+    authFailed: "Authentication failed.",
+    unableLoadWorkspace: "Unable to load workspace.",
+    unableLoadCaseContext: "Unable to load case context.",
+    uploadPdfOnly: "Only PDF files are allowed.",
+    uploadPdfFailed: "Unable to upload PDF.",
+    uploadAudioFailed: "Unable to upload audio.",
+    uploadPdfSuccess: "PDF uploaded and queued for processing.",
+    uploadAudioSuccess: "Voice file uploaded. Transcription is running.",
+    micUnsupported: "Microphone recording is not supported in this browser.",
+    micAccessFailed: "Unable to access microphone.",
+    copilotFailed: "Copilot request failed.",
+    copiedClipboard: "Copied to clipboard.",
+    legalAiPlatform: "Legal AI Platform",
+    premiumWorkspace: "Premium Copilot Workspace",
+    matterNavigator: "Matter Navigator",
+    client: "Client",
+    evidenceFeed: "Evidence Feed",
+    ingestion: "Ingestion",
+    workspaceFacts: "Workspace Facts",
+    logout: "Logout",
+    uploadPdf: "Upload PDF",
+    uploadingPdf: "Uploading PDF...",
+    uploadAudioFile: "Upload audio file",
+    uploadingAudio: "Uploading audio...",
+    stopRecording: "Stop recording",
+    recordVoice: "Record voice",
+    lawyerId: "Lawyer ID",
+    consultations: "Consultations",
+    voiceNotes: "Voice notes",
+    lastDocRefresh: "Last document refresh",
+    workspaceTopDefault: "Select a case to start",
+    copilotWorkspace: "Copilot Workspace",
+    copilotWorkspaceDesc: "AI-grounded legal drafting and reasoning for active matter.",
+    chatHistory: "Chat History",
+    noHistory: "No messages yet for this case.",
+    clearHistory: "Clear history",
+    userLabel: "You",
+    assistantLabel: "AI",
+  },
+  de: {
+    noDate: "Kein Datum",
+    modelLabel: "Modell",
+    notAvailable: "k. A.",
+    caseIdLabel: "ID",
+    providerUnavailable: "Provider nicht verfuegbar",
+    noCaseSelected: "Kein Fall ausgewaehlt",
+    noCasesForClient: "Keine Faelle fuer den ausgewaehlten Mandanten gefunden.",
+    noEvidenceYet: "Noch keine Beweise hochgeladen.",
+    loadingWorkspace: "Workspace-Kontext wird geladen...",
+    startQuestionTitle: "Beginne mit einer Rechtsfrage",
+    startQuestionBody: "Frage zu Risiken, Pflichten, Fristen, Widerspruechen oder erstelle einen professionellen Rechtstext.",
+    focusedDocumentNone: "keins",
+    caseLabel: "Fall",
+    documentsLabel: "Dokumente",
+    consultationsLabel: "Beratungen",
+    focusedDocumentLabel: "Fokussiertes Dokument",
+    attachPdf: "PDF anhaengen",
+    attachVoice: "Audio anhaengen",
+    recordFromMic: "Mit Mikrofon aufnehmen",
+    stopMicRecording: "Mikrofonaufnahme stoppen",
+    askPlaceholder: "Frage zu Fall, Risiken, Fristen oder erstelle einen Entwurf...",
+    send: "Senden",
+    legalSearchFootnote: "Legal Search Mode priorisiert zustandigkeitsspezifische Rechtsquellen vor Fallback-Reasoning.",
+    agentFootnote: "Agent Mode aktiviert strukturierte Reasoning- und Workflow-Ausfuehrung.",
+    chatFootnote: "Chat Mode bietet konversationelle rechtliche Hilfe auf Basis deines Falls.",
+    modeChat: "Chat-Modus",
+    modeChatDesc: "Schnelle juristische Unterhaltung",
+    modeAgent: "Agent-Modus",
+    modeAgentDesc: "Schrittweise Ausfuehrung",
+    modeLegalSearch: "Legal-Search-Modus",
+    modeLegalSearchDesc: "Quellenbasierte Rechtsantworten",
+    modeExternal: "Externer Modus",
+    modeExternalDesc: "Web-gestuetzte Rechtsrecherche",
+    plusModesTitle: "Modi",
+    plusAttachmentsTitle: "Anhaenge",
+    language: "Sprache",
+    languageEnglish: "Englisch",
+    languageGerman: "Deutsch",
+    languageArabic: "Arabisch",
+    reasoning: "Reasoning",
+    reasoningLow: "Niedrig",
+    reasoningMedium: "Mittel",
+    reasoningHigh: "Hoch",
+    light: "Hell",
+    dark: "Dunkel",
+    authKicker: "Next-Gen Legal AI Workspace",
+    authTitle: "Ruhig. Intelligent. Stark.",
+    authSubtitle: "Ein Premium-Copilot fuer juristische Arbeit mit fallbezogenem Reasoning und evidenzbasiertem Drafting.",
+    authPoint1: "AI-native Rechts-Chat",
+    authPoint2: "Fall-Intelligence-Dashboard",
+    authPoint3: "Dokument- und Audio-Ingestion",
+    signIn: "Anmelden",
+    createAccountTitle: "Konto erstellen",
+    secureAccess: "Sicherer Zugriff auf deinen Legal-Workspace.",
+    login: "Login",
     register: "Registrieren",
     fullName: "Vollstaendiger Name",
-    firmName: "Kanzlei / Mandant",
+    tenant: "Mandant / Kanzlei",
     role: "Rolle",
     lawyer: "Anwalt",
     assistant: "Assistent",
@@ -310,941 +284,475 @@ const STATIC_UI_COPY: Record<UiLanguage, Record<string, string>> = {
     email: "E-Mail",
     password: "Passwort",
     working: "Bitte warten...",
+    enterWorkspace: "Workspace betreten",
     createAccount: "Konto erstellen",
-    optimizePrompt: "Prompt optimieren",
-    optimizingPrompt: "Wird optimiert...",
-    feedbackHelpful: "Hilfreich",
-    feedbackNeedsWork: "Verbessern",
-    feedbackSaving: "Feedback wird gespeichert...",
-    feedbackSaved: "Feedback gespeichert",
-    feedbackFailed: "Feedback fehlgeschlagen",
-    languageEnglish: "Englisch",
-    languageGerman: "Deutsch",
-    languageArabic: "Arabisch",
-    collapseSidebar: "Seitenleiste einklappen",
-    expandSidebar: "Seitenleiste ausklappen",
-    noDate: "Kein Datum",
-    you: "Du",
+    accountCreated: "Konto erstellt. Bitte anmelden.",
+    authFailed: "Authentifizierung fehlgeschlagen.",
+    unableLoadWorkspace: "Workspace konnte nicht geladen werden.",
+    unableLoadCaseContext: "Fallkontext konnte nicht geladen werden.",
+    uploadPdfOnly: "Nur PDF-Dateien sind erlaubt.",
+    uploadPdfFailed: "PDF konnte nicht hochgeladen werden.",
+    uploadAudioFailed: "Audio konnte nicht hochgeladen werden.",
+    uploadPdfSuccess: "PDF hochgeladen und zur Verarbeitung vorgemerkt.",
+    uploadAudioSuccess: "Audiodatei hochgeladen. Transkription laeuft.",
+    micUnsupported: "Mikrofonaufnahme wird in diesem Browser nicht unterstuetzt.",
+    micAccessFailed: "Mikrofonzugriff fehlgeschlagen.",
+    copilotFailed: "Copilot-Anfrage fehlgeschlagen.",
+    copiedClipboard: "In Zwischenablage kopiert.",
+    legalAiPlatform: "Legal AI Platform",
+    premiumWorkspace: "Premium Copilot Workspace",
+    matterNavigator: "Fall-Navigator",
+    client: "Mandant",
+    evidenceFeed: "Evidenz-Feed",
+    ingestion: "Ingestion",
+    workspaceFacts: "Workspace-Fakten",
+    logout: "Abmelden",
+    uploadPdf: "PDF hochladen",
+    uploadingPdf: "PDF wird hochgeladen...",
+    uploadAudioFile: "Audiodatei hochladen",
+    uploadingAudio: "Audio wird hochgeladen...",
+    stopRecording: "Aufnahme stoppen",
+    recordVoice: "Sprache aufnehmen",
+    lawyerId: "Anwalt-ID",
+    consultations: "Beratungen",
+    voiceNotes: "Sprachnotizen",
+    lastDocRefresh: "Letzte Dokumentaktualisierung",
+    workspaceTopDefault: "Waehle einen Fall zum Start",
+    copilotWorkspace: "Copilot-Workspace",
+    copilotWorkspaceDesc: "AI-gestuetztes juristisches Drafting und Reasoning fuer den aktiven Fall.",
+    chatHistory: "Chat-Verlauf",
+    noHistory: "Noch keine Nachrichten fuer diesen Fall.",
+    clearHistory: "Verlauf loeschen",
+    userLabel: "Du",
+    assistantLabel: "AI",
   },
   ar: {
-    ...UI_BASE_COPY,
-    appTitle: "المساعد القانوني",
-    newChat: "محادثة جديدة",
-    searchChats: "ابحث في المحادثات",
-    chatHistory: "سجل المحادثات",
-    noHistory: "لا توجد محادثات بعد",
-    askCopilot: "اسأل المساعد",
-    processing: "جاري التفكير...",
-    placeholder: "اسأل عن القضية أو المستند أو المخاطر أو المواعيد أو الصياغة.",
-    features: "الميزات",
-    uploadPdf: "رفع مستند",
-    uploadAudio: "رفع صوت",
-    recordVoice: "تسجيل صوت",
-    stopRecording: "إيقاف التسجيل",
-    runWorkflow: "تشغيل سير العمل",
-    drafts: "المسودات بالإصدارات",
-    refreshVersions: "تحديث الإصدارات",
-    reviseWithAgent: "تحسين عبر الوكيل",
-    saveVersion: "حفظ الإصدار",
-    smartTranslation: "ترجمة دلالية ذكية",
-    cases: "القضايا",
-    documents: "المستندات",
-    voiceIntake: "الصوت والاستقبال",
-    evidence: "الأدلة",
-    webResearch: "بحث الويب",
-    workflowMode: "وضع سير العمل",
+    noDate: "لا يوجد تاريخ",
+    modelLabel: "النموذج",
+    notAvailable: "غير متاح",
+    caseIdLabel: "المعرّف",
+    providerUnavailable: "مزود الخدمة غير متاح",
+    noCaseSelected: "لا توجد قضية محددة",
+    noCasesForClient: "لا توجد قضايا للعميل المحدد.",
+    noEvidenceYet: "لا توجد أدلة مرفوعة بعد.",
+    loadingWorkspace: "جار تحميل سياق مساحة العمل...",
+    startQuestionTitle: "ابدأ بسؤال قانوني",
+    startQuestionBody: "اسأل عن المخاطر أو الالتزامات أو المواعيد أو التناقضات أو اطلب صياغة قانونية احترافية.",
+    focusedDocumentNone: "لا يوجد",
+    caseLabel: "القضية",
+    documentsLabel: "المستندات",
+    consultationsLabel: "الاستشارات",
+    focusedDocumentLabel: "المستند المحدد",
+    attachPdf: "إرفاق PDF",
+    attachVoice: "إرفاق ملف صوتي",
+    recordFromMic: "التسجيل من الميكروفون",
+    stopMicRecording: "إيقاف تسجيل الميكروفون",
+    askPlaceholder: "اسأل عن قضيتك أو المخاطر أو المواعيد أو اطلب صياغة...",
+    send: "إرسال",
+    legalSearchFootnote: "وضع البحث القانوني يعطي الأولوية للمصادر القانونية حسب الاختصاص قبل أي استدلال بديل.",
+    agentFootnote: "وضع الوكيل يفعّل الاستدلال المنظم وتنفيذ سير العمل القانوني.",
+    chatFootnote: "وضع المحادثة يوفّر دعماً قانونياً حوارياً مبنياً على سياق قضيتك.",
+    modeChat: "وضع المحادثة",
+    modeChatDesc: "مناقشة قانونية سريعة",
     modeAgent: "وضع الوكيل",
-    soon: "قريبًا",
-    on: "تشغيل",
-    off: "إيقاف",
-    retrieval: "الاسترجاع",
-    logout: "تسجيل الخروج",
-    noClient: "لا يوجد عميل",
-    selectCaseFromSidebar: "اختر قضية من الشريط الجانبي",
-    alwaysReady: "جاهز دائمًا لدعم العمل القانوني.",
-    noJurisdiction: "لا توجد ولاية قضائية",
-    webSources: "مصادر ويب",
-    loadingWorkspace: "جاري تحميل مساحة العمل...",
-    workflowReady: "سير العمل جاهز",
-    focusedDocument: "المستند المحدد",
-    documentIntelligence: "ذكاء المستند",
-    consultation: "الاستشارة",
-    createIntakeRequest: "إنشاء طلب استقبال",
-    buildingIntake: "جاري الإنشاء...",
-    constitutionSource: "مصدر الدستور",
-    uploading: "جاري الرفع...",
-    running: "جاري التشغيل...",
-    refreshing: "جاري التحديث...",
-    noSummaryYet: "لا يوجد ملخص حتى الآن.",
-    improvingPromptPlaceholder: "أخبر الوكيل بما تريد تحسينه.",
-    selectClient: "اختر العميل",
-    clientName: "اسم العميل",
-    caseTitle: "عنوان القضية",
-    caseDescription: "وصف القضية",
-    phone: "الهاتف",
-    address: "العنوان",
-    status: "الحالة",
-    jurisdiction: "الولاية القضائية",
-    transcribe: "التفريغ الصوتي",
-    chooseClient: "اختر العميل",
-    chooseCase: "اختر القضية",
-    enterWorkspace: "دخول مساحة العمل",
-    preparingWorkspace: "جاري تجهيز مساحة العمل...",
-    noClientsAvailable: "لا يوجد عملاء. أنشئ العملاء أولًا من صفحة العملاء.",
-    noCasesAvailable: "لا توجد قضايا لهذا العميل. أنشئ القضايا أولًا من صفحة القضايا.",
-    selectCaseToStart: "اختر قضية لبدء مساحة عمل المساعد.",
-    workspaceSelection: "اختيار مساحة العمل",
-    loginEyebrow: "ذكاء قانوني متمحور حول القضية",
-    loginTitle: "مساحات عمل قانونية مدعومة بالأدلة للقضايا والمستندات والذكاء الاصطناعي.",
-    loginSubtitle: "سجّل الدخول وشغّل سير عمل ذكاء اصطناعي مرتبطًا بالقضية.",
-    lightMode: "الوضع الفاتح",
-    darkMode: "الوضع الداكن",
-    login: "تسجيل الدخول",
-    register: "إنشاء حساب",
+    modeAgentDesc: "تنفيذ خطوة بخطوة",
+    modeLegalSearch: "وضع البحث القانوني",
+    modeLegalSearchDesc: "إجابات قانونية مدعومة بالمصادر",
+    modeExternal: "الوضع الخارجي",
+    modeExternalDesc: "بحث قانوني مدعوم بالويب",
+    plusModesTitle: "الأوضاع",
+    plusAttachmentsTitle: "المرفقات",
+    language: "اللغة",
+    languageEnglish: "الإنجليزية",
+    languageGerman: "الألمانية",
+    languageArabic: "العربية",
+    reasoning: "الاستدلال",
+    reasoningLow: "منخفض",
+    reasoningMedium: "متوسط",
+    reasoningHigh: "عال",
+    light: "فاتح",
+    dark: "داكن",
+    authKicker: "مساحة عمل قانونية ذكية",
+    authTitle: "هادئ. ذكي. قوي.",
+    authSubtitle: "مساعد قانوني مميز يعتمد على سياق القضية واستدلال منظم وصياغة مبنية على الأدلة.",
+    authPoint1: "دردشة قانونية مدعومة بالذكاء الاصطناعي",
+    authPoint2: "لوحة ذكاء القضية",
+    authPoint3: "إدخال المستندات والصوت",
+    signIn: "تسجيل الدخول",
+    createAccountTitle: "إنشاء حساب",
+    secureAccess: "وصول آمن إلى مساحة العمل القانونية.",
+    login: "دخول",
+    register: "تسجيل",
     fullName: "الاسم الكامل",
-    firmName: "المكتب / المؤسسة",
+    tenant: "المؤسسة / المكتب",
     role: "الدور",
     lawyer: "محامٍ",
     assistant: "مساعد",
     admin: "مشرف",
     email: "البريد الإلكتروني",
     password: "كلمة المرور",
-    working: "جاري العمل...",
+    working: "جارٍ العمل...",
+    enterWorkspace: "دخول مساحة العمل",
     createAccount: "إنشاء حساب",
-    optimizePrompt: "تحسين الطلب",
-    optimizingPrompt: "جارٍ التحسين...",
-    feedbackHelpful: "Helpful",
-    feedbackNeedsWork: "Needs work",
-    feedbackSaving: "Saving feedback...",
-    feedbackSaved: "Feedback saved",
-    feedbackFailed: "Feedback failed",
-    languageEnglish: "الإنجليزية",
-    languageGerman: "الألمانية",
-    languageArabic: "العربية",
-    collapseSidebar: "طي الشريط الجانبي",
-    expandSidebar: "إظهار الشريط الجانبي",
-    noDate: "بدون تاريخ",
-    you: "أنت",
+    accountCreated: "تم إنشاء الحساب. قم بتسجيل الدخول للمتابعة.",
+    authFailed: "فشل تسجيل الدخول.",
+    unableLoadWorkspace: "تعذر تحميل مساحة العمل.",
+    unableLoadCaseContext: "تعذر تحميل سياق القضية.",
+    uploadPdfOnly: "يسمح فقط بملفات PDF.",
+    uploadPdfFailed: "تعذر رفع ملف PDF.",
+    uploadAudioFailed: "تعذر رفع الملف الصوتي.",
+    uploadPdfSuccess: "تم رفع ملف PDF وإرساله للمعالجة.",
+    uploadAudioSuccess: "تم رفع الملف الصوتي. بدأت عملية التفريغ.",
+    micUnsupported: "التسجيل عبر الميكروفون غير مدعوم في هذا المتصفح.",
+    micAccessFailed: "تعذر الوصول إلى الميكروفون.",
+    copilotFailed: "فشل طلب المساعد.",
+    copiedClipboard: "تم النسخ إلى الحافظة.",
+    legalAiPlatform: "منصة الذكاء القانوني",
+    premiumWorkspace: "مساحة كوبايلوت الاحترافية",
+    matterNavigator: "مستعرض القضايا",
+    client: "العميل",
+    evidenceFeed: "سجل الأدلة",
+    ingestion: "الإدخال",
+    workspaceFacts: "حقائق مساحة العمل",
+    logout: "تسجيل الخروج",
+    uploadPdf: "رفع PDF",
+    uploadingPdf: "جار رفع PDF...",
+    uploadAudioFile: "رفع ملف صوتي",
+    uploadingAudio: "جار رفع الصوت...",
+    stopRecording: "إيقاف التسجيل",
+    recordVoice: "تسجيل صوت",
+    lawyerId: "معرّف المحامي",
+    consultations: "الاستشارات",
+    voiceNotes: "ملاحظات صوتية",
+    lastDocRefresh: "آخر تحديث للمستندات",
+    workspaceTopDefault: "اختر قضية للبدء",
+    copilotWorkspace: "مساحة عمل المساعد",
+    copilotWorkspaceDesc: "صياغة قانونية واستدلال مدعوم بالذكاء الاصطناعي للقضية النشطة.",
+    chatHistory: "سجل المحادثة",
+    noHistory: "لا توجد رسائل بعد لهذه القضية.",
+    clearHistory: "مسح السجل",
+    userLabel: "أنت",
+    assistantLabel: "ذكاء",
   },
 };
-function nowIso() {
-  return new Date().toISOString();
-}
 
-function formatBytes(size: number) {
-  if (!size) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = size;
-  let index = 0;
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024;
-    index += 1;
+function generateId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
   }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[index]}`;
+  return `m-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
 }
 
-function normalizeForSearch(value: string) {
-  return value.toLowerCase().replace(/\s+/g, " ").trim();
+function compactDate(value: string | null | undefined, locale = "en-US", noDateLabel = "No date"): string {
+  if (!value) return noDateLabel;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return noDateLabel;
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(parsed);
 }
 
-function deriveThreadTitle(messages: ChatMessage[], fallback = "New chat") {
-  const firstUser = messages.find((item) => item.role === "user");
-  if (!firstUser?.content) return fallback;
-  const compact = firstUser.content.replace(/\s+/g, " ").trim();
-  return compact.length > 48 ? `${compact.slice(0, 48)}...` : compact;
+function compactDateTime(value: string | null | undefined, locale = "en-US", noDateLabel = "No date"): string {
+  if (!value) return noDateLabel;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return noDateLabel;
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
 }
 
-function looksLikeHtml(value?: string | null) {
-  if (!value) return false;
-  const normalized = value.trim().toLowerCase();
-  return normalized.startsWith("<!doctype html") || normalized.startsWith("<html");
-}
-
-function getRecordingTranscriptDisplay(recording: VoiceRecording) {
-  if (recording.transcription_status === "failed") {
-    return (
-      recording.transcription_error ||
-      (looksLikeHtml(recording.transcript_text)
-        ? "Transcription failed because provider returned HTML instead of transcript text."
-        : "Transcription failed.")
-    );
-  }
-  if (recording.transcript_text && !looksLikeHtml(recording.transcript_text)) return recording.transcript_text;
-  if (recording.transcription_error) return recording.transcription_error;
-  return "Transcript not available yet.";
-}
-
-function getPreferredRecordingMimeType() {
-  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg", "audio/mp4"];
-  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") return "";
-  return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || "";
-}
-
-function getAudioExtension(mimeType: string) {
-  const normalized = mimeType.split(";")[0].trim().toLowerCase();
-  if (normalized.includes("wav")) return "wav";
-  if (normalized.includes("ogg")) return "ogg";
-  if (normalized.includes("mp4") || normalized.includes("m4a")) return "mp4";
-  if (normalized.includes("mpeg") || normalized.includes("mp3")) return "mp3";
-  return "webm";
-}
-
-function encodeWavFromAudioBuffer(audioBuffer: AudioBuffer) {
-  const channelCount = Math.min(audioBuffer.numberOfChannels, 2);
-  const length = audioBuffer.length;
-  const interleaved = new Float32Array(length * channelCount);
-  for (let sampleIndex = 0; sampleIndex < length; sampleIndex += 1) {
-    for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
-      interleaved[sampleIndex * channelCount + channelIndex] = audioBuffer.getChannelData(channelIndex)[sampleIndex];
-    }
-  }
-
-  const bytesPerSample = 2;
-  const blockAlign = channelCount * bytesPerSample;
-  const buffer = new ArrayBuffer(44 + interleaved.length * bytesPerSample);
-  const view = new DataView(buffer);
-  const writeString = (offset: number, value: string) => {
-    for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
-  };
-
-  writeString(0, "RIFF");
-  view.setUint32(4, 36 + interleaved.length * bytesPerSample, true);
-  writeString(8, "WAVE");
-  writeString(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channelCount, true);
-  view.setUint32(24, audioBuffer.sampleRate, true);
-  view.setUint32(28, audioBuffer.sampleRate * blockAlign, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true);
-  writeString(36, "data");
-  view.setUint32(40, interleaved.length * bytesPerSample, true);
-
-  let offset = 44;
-  for (let index = 0; index < interleaved.length; index += 1) {
-    const sample = Math.max(-1, Math.min(1, interleaved[index]));
-    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-    offset += 2;
-  }
-  return new Blob([buffer], { type: "audio/wav" });
-}
-
-async function normalizeAudioFileToWav(file: File) {
-  const context = new AudioContext();
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const audioBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
-    const wavBlob = encodeWavFromAudioBuffer(audioBuffer);
-    const normalizedName = file.name.replace(/\.[^.]+$/, "") || `voice-note-${Date.now()}`;
-    return new File([wavBlob], `${normalizedName}.wav`, { type: "audio/wav", lastModified: Date.now() });
-  } finally {
-    await context.close();
-  }
-}
-
-function buildWelcomeMessage(caseTitle?: string): ChatMessage {
-  return {
-    id: crypto.randomUUID(),
-    role: "assistant",
-    timestamp: nowIso(),
-    content: caseTitle
-      ? `Workspace ready for "${caseTitle}". Ask for summaries, risks, timelines, or draft updates.`
-      : "Select a case to start. I can summarize cases, inspect documents, surface risks, and draft client updates.",
-  };
-}
-
-function inferAgentFromIntent(intent?: string) {
-  if (!intent) return "Copilot Core";
-  if (intent === "create_case" || intent === "create_client" || intent === "update_case_status" || intent === "create_case_appointment") return "Agent Action Runner";
-  if (intent === "request_document_upload" || intent === "request_audio_upload") return "Workspace Action Router";
-  if (intent === "optimize_prompt") return "Prompt Optimizer Agent";
-  if (intent === "build_timeline_case") return "Timeline Agent";
-  if (intent === "review_booking_case") return "Booking Agent";
-  if (intent === "compare_case_documents") return "Document Comparison Agent";
-  if (intent === "draft_client_email_case") return "Drafting Agent";
-  if (intent === "list_deadlines_case" || intent === "analyze_risks_case" || intent === "summarize_case" || intent === "summarize_and_analyze_risks_case") return "Case Reasoning Agent";
-  if (intent === "summarize_document") return "Summarization Agent";
-  if (intent.startsWith("ask_") || intent.startsWith("summarize_")) return "RAG + External Research";
-  return "Copilot Core";
-}
-
-const AI_ENGINE_AGENTS: Array<{
-  name: string;
-  role: string;
-  intentHints: string[];
-  stageHints: string[];
-  activeNameHints: string[];
-}> = [
-    {
-      name: "PromptCorrectionAgent",
-      role: "Normalizes and clarifies legal prompts before orchestration.",
-      intentHints: ["validation_error", "request_error"],
-      stageHints: ["correction", "prompt_correction"],
-      activeNameHints: ["copilot core"],
-    },
-    {
-      name: "PromptOptimizerAgent",
-      role: "Optimizes prompt precision for legal retrieval quality.",
-      intentHints: ["optimize_prompt"],
-      stageHints: ["optimizer", "prompt_opt"],
-      activeNameHints: ["prompt optimizer"],
-    },
-    {
-      name: "RetrievalAgent",
-      role: "Runs grounded retrieval over chunks and web sources.",
-      intentHints: ["ask_", "summarize_"],
-      stageHints: ["retrieval", "search"],
-      activeNameHints: ["rag", "retrieval"],
-    },
-    {
-      name: "VerifierAgent",
-      role: "Checks evidence grounding and answer consistency.",
-      intentHints: ["agent_workflow"],
-      stageHints: ["verify", "verification"],
-      activeNameHints: ["verifier"],
-    },
-    {
-      name: "SummarizationAgent",
-      role: "Produces concise document-focused legal summaries.",
-      intentHints: ["summarize_document", "summarize_case"],
-      stageHints: ["summary", "summar"],
-      activeNameHints: ["summarization"],
-    },
-    {
-      name: "CaseReasoningAgent",
-      role: "Performs case-level risk, deadline, and action reasoning.",
-      intentHints: ["analyze_risks_case", "list_deadlines_case", "summarize_and_analyze_risks_case"],
-      stageHints: ["reason", "risk"],
-      activeNameHints: ["case reasoning"],
-    },
-    {
-      name: "TimelineAgent",
-      role: "Constructs legal event timelines and sequence outputs.",
-      intentHints: ["build_timeline_case"],
-      stageHints: ["timeline"],
-      activeNameHints: ["timeline"],
-    },
-    {
-      name: "BookingAgent",
-      role: "Handles scheduling and booking-intent review tasks.",
-      intentHints: ["review_booking_case"],
-      stageHints: ["booking", "schedule"],
-      activeNameHints: ["booking"],
-    },
-    {
-      name: "DocumentComparisonAgent",
-      role: "Compares clauses and contradictions across documents.",
-      intentHints: ["compare_case_documents"],
-      stageHints: ["comparison", "compare"],
-      activeNameHints: ["document comparison"],
-    },
-    {
-      name: "DraftingAgent",
-      role: "Creates versioned legal drafts and client communications.",
-      intentHints: ["draft_client_email_case"],
-      stageHints: ["draft", "email"],
-      activeNameHints: ["drafting"],
-    },
-    {
-      name: "IntakeAgent",
-      role: "Transforms intake inputs into structured legal records.",
-      intentHints: ["request_audio_upload", "request_document_upload"],
-      stageHints: ["intake", "consultation"],
-      activeNameHints: ["workspace action", "action runner"],
-    },
-  ];
-
-function summarizePreview(value?: string | null, max = 100) {
+function truncateText(value: string, max = 92): string {
   const cleaned = (value || "").replace(/\s+/g, " ").trim();
-  if (!cleaned) return "No data yet.";
   if (cleaned.length <= max) return cleaned;
-  return `${cleaned.slice(0, max)}...`;
+  return `${cleaned.slice(0, max - 1)}...`;
 }
 
-function confidenceToScore(confidence?: string | null) {
-  const value = (confidence || "").toLowerCase().trim();
-  if (value === "high") return 0.9;
-  if (value === "medium") return 0.74;
-  if (value === "low") return 0.58;
-  return 0.64;
+function normalizeError(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
 }
 
-function extractSourceUrl(source: SourceItem) {
-  const match = source.snippet.match(/https?:\/\/[^\s)]+/i);
-  return match ? match[0] : null;
+function normalizeStoredMessage(message: ChatMessage): ChatMessage {
+  const rawAnswer = message.meta?.rawAnswer;
+  if (message.role === "assistant" && typeof rawAnswer === "string" && rawAnswer && message.content !== rawAnswer) {
+    return {
+      ...message,
+      content: rawAnswer,
+    };
+  }
+  return message;
 }
 
-function extractReferencedCaseId(value: string) {
-  const match = value.match(CASE_REFERENCE_PATTERN);
-  if (!match) return null;
-  const parsed = Number(match[1]);
-  return Number.isInteger(parsed) ? parsed : null;
+function buildChatSessionTitle(messages: ChatMessage[], fallback = "New chat"): string {
+  const firstUserMessage = messages.find((message) => message.role === "user")?.content || "";
+  return truncateText(firstUserMessage, 52) || fallback;
 }
 
-function formatJurisdictionCountry(country?: string | null) {
-  if (!country) return "Tunisia";
-  if (country === "germany") return "Germany";
-  return "Tunisia";
-}
+function normalizeStoredSession(rawSession: Partial<ChatSession> | null | undefined): ChatSession | null {
+  if (!rawSession || !Array.isArray(rawSession.messages)) {
+    return null;
+  }
 
-type ComposerMenuIcon = "agent" | "web" | "document" | "audio" | "record" | "workflow";
+  const messages = rawSession.messages.map(normalizeStoredMessage);
+  const createdAt = rawSession.createdAt || messages[0]?.timestamp || new Date().toISOString();
+  const updatedAt = rawSession.updatedAt || messages[messages.length - 1]?.timestamp || createdAt;
 
-function MenuIcon({ icon }: { icon: ComposerMenuIcon }) {
-  const shared = {
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.8,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    className: "menu-item-icon",
-    "aria-hidden": true,
+  return {
+    id: rawSession.id || generateId(),
+    title: rawSession.title || buildChatSessionTitle(messages),
+    createdAt,
+    updatedAt,
+    messages,
   };
-
-  if (icon === "agent") {
-    return (
-      <svg {...shared}>
-        <path d="M12 3l1.9 4.2L18 9l-4.1 1.8L12 15l-1.9-4.2L6 9l4.1-1.8L12 3z" />
-        <circle cx="18.5" cy="5.5" r="1.5" />
-      </svg>
-    );
-  }
-  if (icon === "web") {
-    return (
-      <svg {...shared}>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18" />
-      </svg>
-    );
-  }
-  if (icon === "document") {
-    return (
-      <svg {...shared}>
-        <path d="M14 2H7a2 2 0 00-2 2v16a2 2 0 002 2h10a2 2 0 002-2V7z" />
-        <path d="M14 2v5h5M9 13h6M9 17h6" />
-      </svg>
-    );
-  }
-  if (icon === "audio") {
-    return (
-      <svg {...shared}>
-        <path d="M11 5L6 9v6l5 4V5zM15 9.5a4 4 0 010 5M17.7 7a7.5 7.5 0 010 10" />
-      </svg>
-    );
-  }
-  if (icon === "record") {
-    return (
-      <svg {...shared}>
-        <rect x="8" y="3.5" width="8" height="12" rx="4" />
-        <path d="M5 11.5a7 7 0 0014 0M12 18.5V21" />
-      </svg>
-    );
-  }
-  return (
-    <svg {...shared}>
-      <path d="M4 12h16M12 4v16" />
-      <circle cx="12" cy="12" r="9" />
-    </svg>
-  );
 }
 
-type SidebarIconName = "toggle" | "chat" | "history" | "cases" | "features" | "document" | "audio" | "evidence";
+function parseStoredChatState(): StoredChatSessionsState {
+  try {
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<StoredChatSessionsState>;
+      const sessionsByCase: Record<number, ChatSession[]> = {};
+      const activeSessionIdByCase: Record<number, string> = {};
 
-function SidebarIcon({ icon }: { icon: SidebarIconName }) {
-  const shared = {
-    viewBox: "0 0 24 24",
-    fill: "none",
-    stroke: "currentColor",
-    strokeWidth: 1.9,
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-    className: "sidebar-icon",
-    "aria-hidden": true,
+      Object.entries(parsed.sessionsByCase || {}).forEach(([key, value]) => {
+        const numeric = Number(key);
+        if (Number.isNaN(numeric) || !Array.isArray(value)) return;
+        const sessions = value
+          .map((session) => normalizeStoredSession(session))
+          .filter((session): session is ChatSession => Boolean(session));
+        sessionsByCase[numeric] = sessions;
+      });
+
+      Object.entries(parsed.activeSessionIdByCase || {}).forEach(([key, value]) => {
+        const numeric = Number(key);
+        if (!Number.isNaN(numeric) && typeof value === "string" && value.trim()) {
+          activeSessionIdByCase[numeric] = value;
+        }
+      });
+
+      return { sessionsByCase, activeSessionIdByCase };
+    }
+
+    const legacyRaw = localStorage.getItem(LEGACY_CHAT_STORAGE_KEY);
+    if (!legacyRaw) {
+      return { sessionsByCase: {}, activeSessionIdByCase: {} };
+    }
+
+    const parsed = JSON.parse(legacyRaw) as Record<string, ChatMessage[]>;
+    const sessionsByCase: Record<number, ChatSession[]> = {};
+    const activeSessionIdByCase: Record<number, string> = {};
+
+    Object.entries(parsed).forEach(([key, value]) => {
+      const numeric = Number(key);
+      if (!Number.isNaN(numeric) && Array.isArray(value)) {
+        const messages = value.map(normalizeStoredMessage);
+        const createdAt = messages[0]?.timestamp || new Date().toISOString();
+        const updatedAt = messages[messages.length - 1]?.timestamp || createdAt;
+        const sessionId = generateId();
+        sessionsByCase[numeric] = [{
+          id: sessionId,
+          title: buildChatSessionTitle(messages),
+          createdAt,
+          updatedAt,
+          messages,
+        }];
+        activeSessionIdByCase[numeric] = sessionId;
+      }
+    });
+
+    return { sessionsByCase, activeSessionIdByCase };
+  } catch {
+    return { sessionsByCase: {}, activeSessionIdByCase: {} };
+  }
+}
+
+function createMessage(role: "user" | "assistant", content: string, meta?: ChatMessage["meta"]): ChatMessage {
+  return {
+    id: generateId(),
+    role,
+    content,
+    timestamp: new Date().toISOString(),
+    meta,
   };
+}
 
-  if (icon === "toggle") {
-    return (
-      <svg {...shared}>
-        <path d="M9 4h11M9 12h11M9 20h11" />
-        <path d="M4 4v16" />
-      </svg>
-    );
-  }
-  if (icon === "chat") {
-    return (
-      <svg {...shared}>
-        <path d="M21 12a8 8 0 01-8 8H6l-3 2 1-4A8 8 0 1112 4h1a8 8 0 018 8z" />
-      </svg>
-    );
-  }
-  if (icon === "history") {
-    return (
-      <svg {...shared}>
-        <path d="M3 12a9 9 0 109-9" />
-        <path d="M3 4v4h4M12 7v5l3 2" />
-      </svg>
-    );
-  }
-  if (icon === "cases") {
-    return (
-      <svg {...shared}>
-        <path d="M4 6h16v12H4z" />
-        <path d="M9 6V4h6v2M8 11h8M8 15h5" />
-      </svg>
-    );
-  }
-  if (icon === "features") {
-    return (
-      <svg {...shared}>
-        <path d="M12 3l2.6 5.2L20 9l-4 3.9L17 20l-5-2.8L7 20l1-7.1L4 9l5.4-.8L12 3z" />
-      </svg>
-    );
-  }
-  if (icon === "document") {
-    return (
-      <svg {...shared}>
-        <path d="M14 2H7a2 2 0 00-2 2v16a2 2 0 002 2h10a2 2 0 002-2V7z" />
-        <path d="M14 2v5h5M9 13h6M9 17h6" />
-      </svg>
-    );
-  }
-  if (icon === "audio") {
-    return (
-      <svg {...shared}>
-        <path d="M11 5L6 9v6l5 4V5zM15 9.5a4 4 0 010 5M17.7 7a7.5 7.5 0 010 10" />
-      </svg>
-    );
-  }
+function TypingIndicator() {
   return (
-    <svg {...shared}>
-      <path d="M4 12h16" />
-      <path d="M12 4v16" />
-      <circle cx="12" cy="12" r="9" />
-    </svg>
+    <div className="typing-indicator">
+      <span />
+      <span />
+      <span />
+    </div>
   );
 }
 
 export default function App() {
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
+  const [theme, setTheme] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === "light" || stored === "dark") return stored;
-    return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+    return stored === "dark" ? "dark" : "light";
   });
-  const [uiLanguage, setUiLanguage] = useState<UiLanguage>(() => {
-    const stored = localStorage.getItem(UI_LANGUAGE_STORAGE_KEY);
-    if (stored === "de" || stored === "ar" || stored === "en") return stored;
+  const [language, setLanguage] = useState<UiLanguage>(() => {
+    const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (stored === "de" || stored === "ar") return stored;
     return "en";
   });
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "1");
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_STORAGE_KEY));
-  const [user, setUser] = useState<User | null>(null);
-  const [cases, setCases] = useState<CaseItem[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [documents, setDocuments] = useState<DocumentItem[]>([]);
-  const [voiceRecordings, setVoiceRecordings] = useState<VoiceRecording[]>([]);
-  const [consultationRequests, setConsultationRequests] = useState<ConsultationRequest[]>([]);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("chat");
+  const [externalModeEnabled, setExternalModeEnabled] = useState(false);
+  const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("medium");
 
+  const [user, setUser] = useState<User | null>(null);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [cases, setCases] = useState<CaseItem[]>([]);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [recordings, setRecordings] = useState<VoiceRecording[]>([]);
+  const [consultations, setConsultations] = useState<ConsultationRequest[]>([]);
+  const [imageBatches, setImageBatches] = useState<ImageDocumentBatch[]>([]);
+  const [evidenceReviews, setEvidenceReviews] = useState<EvidenceAnalysisReview[]>([]);
+  const [promptLibraryEntries, setPromptLibraryEntries] = useState<PromptLibraryEntry[]>([]);
+  const [caseReviewTable, setCaseReviewTable] = useState<CaseReviewTable | null>(null);
+  const [selectedAnalysis, setSelectedAnalysis] = useState<FullDocumentAnalysis | null>(null);
+
+  const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
-  const [selectedRecordingId, setSelectedRecordingId] = useState<number | null>(null);
-  const [selectedDocumentAnalysis, setSelectedDocumentAnalysis] = useState<FullDocumentAnalysis | null>(null);
-  const [agentWorkflow, setAgentWorkflow] = useState<AgentWorkflowResponse | null>(null);
 
-  const [chatThreads, setChatThreads] = useState<ChatThread[]>([]);
-  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([buildWelcomeMessage()]);
-  const [historyQuery, setHistoryQuery] = useState("");
+  const [chatState, setChatState] = useState<StoredChatSessionsState>(() => parseStoredChatState());
   const [chatInput, setChatInput] = useState("");
-  const [messageFeedback, setMessageFeedback] = useState<Record<string, MessageFeedbackState>>({});
-
-  const [activeSources, setActiveSources] = useState<SourceItem[]>([]);
-  const [useExternalResearch, setUseExternalResearch] = useState(false);
-  const [workflowFromPrompt, setWorkflowFromPrompt] = useState(false);
-  const [retrievalPreset, setRetrievalPreset] = useState<RetrievalPreset>("medium");
-  const [retrievalDepth, setRetrievalDepth] = useState(RETRIEVAL_PRESET_CONFIG.medium.topK);
-  const [workflowObjective, setWorkflowObjective] = useState("");
+  const [chatFeedback, setChatFeedback] = useState<Record<string, MessageFeedbackState>>({});
 
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [authForm, setAuthForm] = useState({
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authForm, setAuthForm] = useState<AuthFormState>({
     name: "",
+    tenant: "",
+    inviteToken: "",
     email: "",
     password: "",
-    tenant_name: "",
     role: "lawyer",
   });
-  const [workspaceEntered, setWorkspaceEntered] = useState(false);
-  const [workspaceClientId, setWorkspaceClientId] = useState<number | null>(null);
-  const [workspaceCaseId, setWorkspaceCaseId] = useState<number | null>(null);
-  const [workspaceSelecting, setWorkspaceSelecting] = useState(false);
 
-  const [uploading, setUploading] = useState(false);
-  const [voiceUploading, setVoiceUploading] = useState(false);
-  const [recordingAudio, setRecordingAudio] = useState(false);
-  const [intakeBuilding, setIntakeBuilding] = useState(false);
-
-  const [authLoading, setAuthLoading] = useState(false);
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [caseContextLoading, setCaseContextLoading] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [copilotLoading, setCopilotLoading] = useState(false);
-  const [workflowLoading, setWorkflowLoading] = useState(false);
-  const [showComposerMenu, setShowComposerMenu] = useState(false);
-  const [agentModeEnabled, setAgentModeEnabled] = useState(false);
+  const [uploadingPdf, setUploadingPdf] = useState(false);
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  const [uploadingScannedPhotos, setUploadingScannedPhotos] = useState(false);
+  const [runScannedAuthenticityCheck, setRunScannedAuthenticityCheck] = useState(false);
+  const [recordingVoice, setRecordingVoice] = useState(false);
+  const [composerRecording, setComposerRecording] = useState(false);
+  const [composerTranscribing, setComposerTranscribing] = useState(false);
   const [optimizingPrompt, setOptimizingPrompt] = useState(false);
-  const [semanticTranslationBusy, setSemanticTranslationBusy] = useState(false);
+  const [savingPromptTemplate, setSavingPromptTemplate] = useState(false);
+  const [promptLibraryDeleteId, setPromptLibraryDeleteId] = useState<number | null>(null);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [chatHistoryOpen, setChatHistoryOpen] = useState(false);
+  const [reviewDecisionBusyId, setReviewDecisionBusyId] = useState<number | null>(null);
 
-  const [providerStatus, setProviderStatus] = useState<ProviderStatusResponse | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [artifactContext, setArtifactContext] = useState<ArtifactContext | null>(null);
-  const [artifactVersions, setArtifactVersions] = useState<ArtifactVersion[]>([]);
-  const [artifactEditorContent, setArtifactEditorContent] = useState("");
-  const [artifactInstruction, setArtifactInstruction] = useState("");
-  const [artifactLoading, setArtifactLoading] = useState(false);
-  const [artifactSaving, setArtifactSaving] = useState(false);
-  const [translationCache, setTranslationCache] = useState<Record<string, string>>({});
-  const [localizedUiCopy, setLocalizedUiCopy] = useState<Record<string, string>>(UI_BASE_COPY);
-
+  const pdfInputRef = useRef<HTMLInputElement | null>(null);
+  const audioInputRef = useRef<HTMLInputElement | null>(null);
+  const scannedPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
-  const documentUploadInputRef = useRef<HTMLInputElement | null>(null);
-  const audioUploadInputRef = useRef<HTMLInputElement | null>(null);
-  const languageSwitchInitializedRef = useRef(false);
+  const composerRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const composerDictationSeedRef = useRef("");
+  const composerDictationFinalRef = useRef("");
+  const composerRecorderRef = useRef<MediaRecorder | null>(null);
+  const composerStreamRef = useRef<MediaStream | null>(null);
+  const composerChunksRef = useRef<Blob[]>([]);
+  const messageStreamRef = useRef<HTMLDivElement | null>(null);
+  const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const messageAnimationTimeoutsRef = useRef<Record<string, number>>({});
 
-  const t = (key: string, fallback: string) => localizedUiCopy[key] || UI_BASE_COPY[key] || fallback;
-  const dateLocale = uiLanguage === "de" ? "de-DE" : uiLanguage === "ar" ? "ar-TN" : "en-US";
-  const formatUiDate = (value?: string | null) => {
-    if (!value) return t("noDate", "No date");
-    try {
-      return new Intl.DateTimeFormat(dateLocale, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      }).format(new Date(value));
-    } catch {
-      return t("noDate", "No date");
-    }
-  };
+  const t = useCallback(
+    (key: string, fallback: string) => APP_TEXT[language]?.[key] || APP_TEXT.en[key] || fallback,
+    [language]
+  );
+  const dateLocale = language === "de" ? "de-DE" : language === "ar" ? "ar-TN" : "en-US";
+  const chatSessionsByCase = chatState.sessionsByCase;
+  const activeSessionIdByCase = chatState.activeSessionIdByCase;
 
-  const selectedCase = useMemo(() => cases.find((item) => item.id === selectedCaseId) ?? null, [cases, selectedCaseId]);
+  const selectedCase = useMemo(
+    () => cases.find((item) => item.id === selectedCaseId) || null,
+    [cases, selectedCaseId]
+  );
   const selectedClient = useMemo(() => {
-    if (!selectedCase) return null;
-    return clients.find((item) => item.id === selectedCase.client_id) ?? null;
-  }, [clients, selectedCase]);
-  const casesForWorkspaceClient = useMemo(() => {
-    if (!workspaceClientId) return [];
-    return cases.filter((item) => item.client_id === workspaceClientId);
-  }, [cases, workspaceClientId]);
-  const selectedDocument = useMemo(() => documents.find((item) => item.id === selectedDocumentId) ?? null, [documents, selectedDocumentId]);
-  const selectedRecording = useMemo(() => voiceRecordings.find((item) => item.id === selectedRecordingId) ?? null, [voiceRecordings, selectedRecordingId]);
-  const selectedConsultationRequest = useMemo(() => {
-    if (!selectedRecordingId) return consultationRequests[0] ?? null;
-    return (
-      consultationRequests.find((item) => item.voice_recording_id === selectedRecordingId) ??
-      consultationRequests[0] ??
-      null
-    );
-  }, [consultationRequests, selectedRecordingId]);
-  const latestUserMessage = useMemo(
-    () => [...chatMessages].reverse().find((item) => item.role === "user") ?? null,
-    [chatMessages]
+    if (selectedCase) {
+      return clients.find((item) => item.id === selectedCase.client_id) || null;
+    }
+    return clients.find((item) => item.id === selectedClientId) || null;
+  }, [clients, selectedCase, selectedClientId]);
+  const selectedDocument = useMemo(
+    () => documents.find((item) => item.id === selectedDocumentId) || documents[0] || null,
+    [documents, selectedDocumentId]
   );
-  const latestAssistantMessage = useMemo(() => [...chatMessages].reverse().find((item) => item.role === "assistant") ?? null, [chatMessages]);
-  const activeAgentName = inferAgentFromIntent(latestAssistantMessage?.meta?.parsedIntent);
-  const externalResearchCount = useMemo(
-    () => activeSources.filter((source) => source.document_id === null && Boolean(extractSourceUrl(source))).length,
-    [activeSources]
+  const activeSessions = useMemo(
+    () => (selectedCaseId ? chatSessionsByCase[selectedCaseId] || [] : []),
+    [chatSessionsByCase, selectedCaseId]
   );
-  const filteredThreads = useMemo(() => {
-    const needle = normalizeForSearch(historyQuery);
-    if (!needle) return chatThreads;
-    return chatThreads.filter((thread) => {
-      if (normalizeForSearch(thread.title).includes(needle)) return true;
-      return thread.messages.some((message) => normalizeForSearch(message.content).includes(needle));
-    });
-  }, [chatThreads, historyQuery]);
-  const inConversationMode = useMemo(() => copilotLoading || chatMessages.some((item) => item.role === "user"), [chatMessages, copilotLoading]);
-  const activeJurisdiction = useMemo(() => {
-    const fromMessage = latestAssistantMessage?.meta?.jurisdiction;
-    if (fromMessage) return fromMessage;
-    if (!selectedCase) return null;
-    return {
-      country_code: selectedCase.jurisdiction_country,
-      country_display_name: formatJurisdictionCountry(selectedCase.jurisdiction_country),
-      constitutional_references: [],
-      legal_guardrails: [],
-      risk_focus_areas: [],
-    };
-  }, [latestAssistantMessage, selectedCase]);
-  const normalizedUserRole = (user?.role || "assistant").toLowerCase();
-  const canRunOperationalActions = WRITE_ACTION_ROLES.has(normalizedUserRole);
-  const activeRetrievalConfig = RETRIEVAL_PRESET_CONFIG[retrievalPreset];
-  const retrievalGuidanceByPreset: Record<RetrievalPreset, string> = {
-    low: t("reasoningGuideLow", "Low value (1-3): faster but less complete answers."),
-    medium: t("reasoningGuideMedium", "Medium value (4-7): balanced speed and accuracy."),
-    high: t("reasoningGuideHigh", "High value (8-10): deeper coverage, slower and sometimes noisy."),
-    extra_high: t("reasoningGuideExtraHigh", "Extra High: maximum retrieval depth for the most complete pass."),
-  };
-  const pendingDocumentCount = useMemo(
-    () => documents.filter((item) => (item.processing_status || "").toLowerCase() !== "completed").length,
-    [documents]
+  const activeChatSessionId = useMemo(() => {
+    if (!selectedCaseId) return null;
+    const explicit = activeSessionIdByCase[selectedCaseId];
+    if (explicit && activeSessions.some((session) => session.id === explicit)) {
+      return explicit;
+    }
+    return [...activeSessions]
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.id ?? null;
+  }, [activeSessionIdByCase, activeSessions, selectedCaseId]);
+  const activeSession = useMemo(
+    () => activeSessions.find((session) => session.id === activeChatSessionId) || null,
+    [activeSessions, activeChatSessionId]
   );
-  const pendingConsultationCount = useMemo(
-    () =>
-      consultationRequests.filter((item) =>
-        ["new", "submitted", "ready_for_review"].includes((item.status || "").toLowerCase())
-      ).length,
-    [consultationRequests]
-  );
-  const failedRecordingCount = useMemo(
-    () =>
-      voiceRecordings.filter(
-        (item) => (item.transcription_status || "").toLowerCase() === "failed"
-      ).length,
-    [voiceRecordings]
-  );
-  const selectedCaseDocuments = useMemo(() => {
-    if (!selectedCase) return [];
-    return documents.filter((item) => item.case_id === selectedCase.id);
-  }, [documents, selectedCase]);
-  const selectedCaseConsultations = useMemo(() => {
-    if (!selectedCase) return [];
-    return consultationRequests.filter((item) => item.case_id === selectedCase.id);
-  }, [consultationRequests, selectedCase]);
-  const caseTimelineItems = useMemo(() => {
-    if (!selectedCase) return [];
-
-    const documentEvents = selectedCaseDocuments.map((item) => ({
-      id: `doc-${item.id}`,
-      title: `Document: ${item.filename}`,
-      detail: `Status ${item.processing_status}`,
-      date: item.upload_timestamp,
-    }));
-    const consultationEvents = selectedCaseConsultations.map((item) => ({
-      id: `consult-${item.id}`,
-      title: "Consultation request",
-      detail: `${item.urgency_level} urgency · ${item.status}`,
-      date: item.created_at,
-    }));
-    const recordingEvents = voiceRecordings
-      .filter((item) => item.case_id === selectedCase.id)
-      .map((item) => ({
-        id: `voice-${item.id}`,
-        title: `Voice note: ${item.filename}`,
-        detail: `Transcription ${item.transcription_status}`,
-        date: item.created_at,
+  const activeMessages = activeSession?.messages || [];
+  const latestMessageContent = activeMessages[activeMessages.length - 1]?.content || "";
+  const historyPreview = useMemo(() => {
+    return [...activeSessions]
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .slice(0, 12)
+      .map((session) => ({
+        id: session.id,
+        title: session.title,
+        content: truncateText(session.messages[session.messages.length - 1]?.content || "", 92),
+        timestamp: session.updatedAt,
+        promptCount: session.messages.filter((message) => message.role === "user").length,
       }));
-
-    return [...documentEvents, ...consultationEvents, ...recordingEvents]
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, 7);
-  }, [selectedCase, selectedCaseConsultations, selectedCaseDocuments, voiceRecordings]);
-  const riskSignals = useMemo(() => {
-    if (!selectedCase) return ["Select a case to view risks."];
-
-    const rows: string[] = [];
-    const normalizedStatus = (selectedCase.status || "").toLowerCase();
-    if (["open", "in_progress", "new", "ready_for_review"].includes(normalizedStatus)) {
-      rows.push(`Case status is ${selectedCase.status.replace(/_/g, " ")} and still operational.`);
-    }
-
-    const pendingDocs = selectedCaseDocuments.filter(
-      (item) => (item.processing_status || "").toLowerCase() !== "completed"
-    ).length;
-    if (pendingDocs > 0) {
-      rows.push(`${pendingDocs} document(s) are still processing.`);
-    }
-
-    const pendingConsultations = selectedCaseConsultations.filter((item) =>
-      ["new", "submitted", "ready_for_review"].includes((item.status || "").toLowerCase())
-    ).length;
-    if (pendingConsultations > 0) {
-      rows.push(`${pendingConsultations} consultation request(s) await legal review.`);
-    }
-
-    if (rows.length === 0) rows.push("No immediate risk flags detected from current workspace telemetry.");
-    return rows;
-  }, [selectedCase, selectedCaseConsultations, selectedCaseDocuments]);
-  const evidenceReferences = useMemo(() => {
-    const scoped = activeSources.filter(
-      (source) =>
-        !selectedCaseId ||
-        source.case_id === null ||
-        source.case_id === selectedCaseId ||
-        source.document_id === selectedDocumentId
+  }, [activeSessions]);
+  const latestAssistantMessage = useMemo(
+    () => [...activeMessages].reverse().find((message) => message.role === "assistant") || null,
+    [activeMessages]
+  );
+  const visionUnavailableReason = useMemo(() => {
+    if (providerStatus?.vision_available) return null;
+    return (
+      providerStatus?.vision_reason_unavailable ||
+      t("visionUnavailable", "Image analysis is unavailable right now.")
     );
-    return scoped.slice(0, 6).map((source, index) => ({
-      id: `${source.document_id ?? "external"}-${index}`,
-      title: source.filename,
-      reference: source.chunk_index !== null ? `chunk ${source.chunk_index}` : "external",
-      snippet: summarizePreview(source.snippet, 110),
-    }));
-  }, [activeSources, selectedCaseId, selectedDocumentId]);
-  const missingInformation = useMemo(() => {
-    if (!selectedCase) return ["Select a case to evaluate missing information."];
-    const rows: string[] = [];
-
-    if (!(selectedCase.description || "").trim()) {
-      rows.push("Case description is missing.");
-    }
-    if (selectedCaseDocuments.length === 0) {
-      rows.push("No uploaded documents linked to this case.");
-    }
-    if (selectedCaseConsultations.length === 0) {
-      rows.push("No consultation request attached yet.");
-    }
-    if (!selectedDocumentAnalysis?.summary_short) {
-      rows.push("Document intelligence summary is not available.");
-    }
-    if (rows.length === 0) rows.push("No major information gaps detected.");
-    return rows;
-  }, [selectedCase, selectedCaseConsultations.length, selectedCaseDocuments.length, selectedDocumentAnalysis?.summary_short]);
-  const contradictionSignals = useMemo(() => {
-    if (!selectedCase) return ["Select a case to inspect contradictions."];
-
-    const rows: string[] = [];
-    const normalizedStatus = (selectedCase.status || "").toLowerCase();
-    const hasActiveConsultation = selectedCaseConsultations.some((item) =>
-      ["new", "submitted", "ready_for_review", "in_progress"].includes((item.status || "").toLowerCase())
-    );
-
-    if (normalizedStatus === "closed" && hasActiveConsultation) {
-      rows.push("Case marked closed while consultation requests are still active.");
-    }
-    if (selectedCaseDocuments.length === 0 && evidenceReferences.length > 0) {
-      rows.push("Evidence snippets exist but no case documents are currently listed.");
-    }
-    if (rows.length === 0) rows.push("No structural contradictions detected in current workspace state.");
-    return rows;
-  }, [selectedCase, selectedCaseConsultations, selectedCaseDocuments.length, evidenceReferences.length]);
-  const recommendedActions = useMemo(() => {
-    const rows: string[] = [];
-    if (!selectedCase) return ["Select a case to generate recommendations."];
-
-    if (selectedConsultationRequest?.issue_summary?.trim()) {
-      rows.push(`Address consultation issue: ${summarizePreview(selectedConsultationRequest.issue_summary, 82)}`);
-    }
-    if (riskSignals.some((item) => item.includes("processing") || item.includes("await"))) {
-      rows.push("Review pending uploads and follow up with the legal team.");
-    }
-    if (!useExternalResearch) {
-      rows.push("Enable web research for broader precedent coverage.");
-    }
-    if (!agentWorkflow) {
-      rows.push("Run full agent workflow to generate verified case summary.");
-    }
-    if (rows.length === 0) rows.push("Continue monitoring timeline updates and maintain current strategy.");
-    return rows.slice(0, 4);
-  }, [selectedCase, selectedConsultationRequest?.issue_summary, riskSignals, useExternalResearch, agentWorkflow]);
-  const flowActiveIndex = useMemo(() => {
-    const activeLower = activeAgentName.toLowerCase();
-    const stageKeyJoined = Object.keys(agentWorkflow?.stages || {}).join(" ").toLowerCase();
-
-    if (!latestUserMessage && !chatInput.trim()) return 0;
-    if (!copilotLoading && !workflowLoading && latestAssistantMessage) return 6;
-    if (activeLower.includes("prompt optimizer")) return 2;
-    if (activeLower.includes("rag") || activeLower.includes("retrieval")) return 3;
-    if (
-      activeLower.includes("case reasoning") ||
-      activeLower.includes("timeline") ||
-      activeLower.includes("booking") ||
-      activeLower.includes("comparison") ||
-      activeLower.includes("drafting")
-    ) {
-      return 4;
-    }
-    if (activeLower.includes("verifier") || stageKeyJoined.includes("verify")) return 5;
-    if (copilotLoading || workflowLoading) return 1;
-    return 0;
-  }, [activeAgentName, agentWorkflow?.stages, chatInput, copilotLoading, latestAssistantMessage, latestUserMessage, workflowLoading]);
-  const flowSteps = useMemo(() => {
-    const rows = [
-      {
-        label: "User Prompt",
-        detail: summarizePreview(latestUserMessage?.content || chatInput || workflowObjective || "Awaiting user prompt.", 96),
-      },
-      {
-        label: "Correction",
-        detail: "PromptCorrectionAgent sanitizes legal scope and intent.",
-      },
-      {
-        label: "Optimization",
-        detail: "PromptOptimizerAgent tunes retrieval and reasoning directives.",
-      },
-      {
-        label: "Retrieval",
-        detail: `RetrievalAgent gathers evidence (top_k=${activeRetrievalConfig.topK}).`,
-      },
-      {
-        label: "Reasoning",
-        detail: "Case and specialist agents synthesize legal conclusions.",
-      },
-      {
-        label: "Verification",
-        detail: "VerifierAgent validates grounding before answer release.",
-      },
-      {
-        label: "Final Answer",
-        detail: summarizePreview(
-          latestAssistantMessage?.content || agentWorkflow?.verified_summary || "Waiting for verified answer.",
-          96
-        ),
-      },
-    ];
-
-    return rows.map((row, index) => ({
-      ...row,
-      state: index < flowActiveIndex ? "done" : index === flowActiveIndex ? "active" : "idle",
-    }));
-  }, [activeRetrievalConfig.topK, agentWorkflow?.verified_summary, chatInput, flowActiveIndex, latestAssistantMessage?.content, latestUserMessage?.content, workflowObjective]);
-  const aiEngineCards = useMemo(() => {
-    const activeIntent = (latestAssistantMessage?.meta?.parsedIntent || "").toLowerCase();
-    const activeName = activeAgentName.toLowerCase();
-    const stageRows = Object.entries(agentWorkflow?.stages || {});
-    const inputPreview = summarizePreview(
-      chatInput.trim() || latestUserMessage?.content || workflowObjective || "No recent input available.",
-      88
-    );
-    const defaultOutput = summarizePreview(
-      latestAssistantMessage?.content || agentWorkflow?.verified_summary || "No output produced yet.",
-      88
-    );
-
-    return AI_ENGINE_AGENTS.map((agent) => {
-      const stage = stageRows.find(([key]) =>
-        agent.stageHints.some((hint) => key.toLowerCase().includes(hint))
-      )?.[1];
-
-      const intentMatch = agent.intentHints.some((hint) => activeIntent.includes(hint));
-      const nameMatch = agent.activeNameHints.some((hint) => activeName.includes(hint));
-
-      let status: "active" | "idle" | "processing" = "idle";
-      if (workflowLoading || copilotLoading) {
-        if (intentMatch || nameMatch || (stage && !stage.success && !stage.error)) {
-          status = "processing";
-        }
-      } else if (stage?.success || intentMatch || nameMatch) {
-        status = "active";
-      }
-
-      const stageOutput = stage?.trace?.length
-        ? stage.trace[stage.trace.length - 1]
-        : null;
-      const confidence = stage?.success
-        ? 0.9
-        : intentMatch || nameMatch
-          ? confidenceToScore(latestAssistantMessage?.meta?.confidence)
-          : 0.56;
-
-      return {
-        name: agent.name,
-        role: agent.role,
-        status,
-        inputPreview,
-        outputPreview: summarizePreview(stageOutput || defaultOutput, 92),
-        confidence,
-      };
-    });
-  }, [activeAgentName, agentWorkflow?.stages, agentWorkflow?.verified_summary, chatInput, copilotLoading, latestAssistantMessage, latestUserMessage?.content, workflowLoading, workflowObjective]);
+  }, [providerStatus, t]);
+  const visionFeaturesEnabled = Boolean(providerStatus?.vision_available);
+  const visionUiDisabled = !visionFeaturesEnabled;
+  const hasPendingImageBatch = useMemo(
+    () => imageBatches.some((batch) => batch.status === "queued" || batch.status === "processing"),
+    [imageBatches]
+  );
+  const filteredCases = useMemo(() => {
+    if (!selectedClientId) return cases;
+    return cases.filter((item) => item.client_id === selectedClientId);
+  }, [cases, selectedClientId]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -1252,958 +760,592 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    localStorage.setItem(UI_LANGUAGE_STORAGE_KEY, uiLanguage);
-    document.documentElement.setAttribute("dir", uiLanguage === "ar" ? "rtl" : "ltr");
-  }, [uiLanguage]);
+    document.documentElement.lang = language;
+  }, [language]);
 
   useEffect(() => {
-    localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? "1" : "0");
-  }, [sidebarCollapsed]);
+    document.documentElement.setAttribute("dir", language === "ar" ? "rtl" : "ltr");
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+  }, [language]);
 
   useEffect(() => {
-    const nextTopK = RETRIEVAL_PRESET_CONFIG[retrievalPreset].topK;
-    if (nextTopK !== retrievalDepth) {
-      setRetrievalDepth(nextTopK);
-    }
-  }, [retrievalDepth, retrievalPreset]);
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatState));
+  }, [chatState]);
 
-  useEffect(() => {
-    if (!canRunOperationalActions && workflowFromPrompt) {
-      setWorkflowFromPrompt(false);
-    }
-  }, [canRunOperationalActions, workflowFromPrompt]);
-
-  useEffect(() => {
-    if (!languageSwitchInitializedRef.current) {
-      languageSwitchInitializedRef.current = true;
-      return;
-    }
-    if (!token || !selectedCaseId) return;
-    startNewChat();
-  }, [uiLanguage]);
-
-  useEffect(() => {
-    function hydrateUiCopy() {
-      const staticFallback = STATIC_UI_COPY[uiLanguage] || UI_BASE_COPY;
-      setLocalizedUiCopy(staticFallback);
-    }
-
-    hydrateUiCopy();
-  }, [uiLanguage]);
-
-  useEffect(() => {
-    if (!token || uiLanguage === "en") return;
-
-    const candidateTexts: string[] = [];
-    const addCandidate = (text?: string | null) => {
-      const cleaned = (text || "").trim();
-      if (!cleaned) return;
-      candidateTexts.push(cleaned.length > 900 ? `${cleaned.slice(0, 900)}...` : cleaned);
-    };
-
-    addCandidate(selectedCase?.title);
-    addCandidate(selectedCase?.description);
-    addCandidate(selectedDocumentAnalysis?.summary_short);
-    addCandidate(selectedConsultationRequest?.issue_summary);
-    addCandidate(selectedRecording?.transcript_text);
-    addCandidate(error);
-    activeSources.slice(0, 8).forEach((source) => addCandidate(source.snippet));
-    chatMessages
-      .filter((message) => message.role === "assistant")
-      .slice(-6)
-      .forEach((message) => addCandidate(message.content));
-
-    if (candidateTexts.length === 0) return;
-    const deduped = [...new Set(candidateTexts)].slice(0, 24);
-    void translateSemantically(deduped, "legal_content");
-  }, [
-    activeSources,
-    chatMessages,
-    selectedCase?.description,
-    selectedCase?.title,
-    selectedConsultationRequest?.issue_summary,
-    selectedDocumentAnalysis?.summary_short,
-    selectedRecording?.transcript_text,
-    error,
-    token,
-    uiLanguage,
-  ]);
-
-  useEffect(() => {
-    if (!token) return;
-    void bootstrapWorkspace(token);
-  }, [token]);
-
-  useEffect(() => {
-    if (!token) return;
-    void refreshProviderStatus(token);
-  }, [token]);
-
-  useEffect(() => {
-    if (!user) {
-      setChatThreads([]);
-      setActiveThreadId(null);
-      return;
-    }
-    try {
-      const payload = JSON.parse(localStorage.getItem(CHAT_THREADS_STORAGE_KEY) || "{}") as Record<string, ChatThread[]>;
-      const ownerKey = `${user.tenant_id}:${user.id}`;
-      const rows = Array.isArray(payload[ownerKey]) ? payload[ownerKey] : [];
-      setChatThreads(rows);
-      if (rows.length > 0) {
-        const latest = [...rows].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-        setActiveThreadId(latest.id);
-        setChatMessages(latest.messages);
-      }
-    } catch {
-      setChatThreads([]);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    const ownerKey = `${user.tenant_id}:${user.id}`;
-    let payload: Record<string, ChatThread[]> = {};
-    try {
-      payload = JSON.parse(localStorage.getItem(CHAT_THREADS_STORAGE_KEY) || "{}") as Record<string, ChatThread[]>;
-    } catch {
-      payload = {};
-    }
-    payload[ownerKey] = chatThreads;
-    localStorage.setItem(CHAT_THREADS_STORAGE_KEY, JSON.stringify(payload));
-  }, [chatThreads, user]);
-
-  useEffect(() => {
-    if (!activeThreadId) return;
-    setChatThreads((current) =>
-      current.map((thread) =>
-        thread.id === activeThreadId
-          ? { ...thread, messages: chatMessages, title: deriveThreadTitle(chatMessages, thread.title), updatedAt: nowIso() }
-          : thread
-      )
-    );
-  }, [chatMessages, activeThreadId]);
-
-  function createThread(options?: { caseId?: number | null; title?: string; messages?: ChatMessage[] }) {
-    const thread: ChatThread = {
-      id: crypto.randomUUID(),
-      title: options?.title || t("newChat", "New chat"),
-      caseId: options?.caseId ?? selectedCaseId ?? null,
-      messages: options?.messages || [buildWelcomeMessage(selectedCase?.title)],
-      createdAt: nowIso(),
-      updatedAt: nowIso(),
-    };
-    setChatThreads((current) => [thread, ...current]);
-    setActiveThreadId(thread.id);
-    setChatMessages(thread.messages);
-    return thread;
-  }
-
-  function openThread(threadId: string) {
-    const thread = chatThreads.find((item) => item.id === threadId);
-    if (!thread) return;
-    setActiveThreadId(thread.id);
-    setChatMessages(thread.messages);
-    if (thread.caseId && token && thread.caseId !== selectedCaseId) {
-      void selectCase(token, thread.caseId, undefined, true);
-    }
-  }
-
-  function startNewChat() {
-    createThread({
-      caseId: selectedCaseId ?? null,
-      title: t("newChat", "New chat"),
-      messages: [buildWelcomeMessage(selectedCase?.title)],
-    });
-  }
-
-  function findPromptForAssistantMessage(messageId: string): string {
-    const index = chatMessages.findIndex((item) => item.id === messageId);
-    if (index <= 0) return "";
-    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-      const row = chatMessages[cursor];
-      if (row.role === "user" && row.content.trim()) {
-        return row.content.trim();
-      }
-    }
-    return "";
-  }
-
-  async function submitAssistantFeedback(message: ChatMessage, feedbackValue: FeedbackValue) {
-    if (!token || message.role !== "assistant") return;
-
-    setMessageFeedback((current) => ({
-      ...current,
-      [message.id]: {
-        value: feedbackValue,
-        status: "saving",
-      },
-    }));
-
-    try {
-      const promptText = findPromptForAssistantMessage(message.id) || "No prompt context available.";
-      await api.createCopilotFeedback(token, {
-        message_id: message.id,
-        case_id: selectedCaseId ?? null,
-        document_id: selectedDocumentId ?? null,
-        prompt_text: promptText,
-        response_text: message.meta?.rawAnswer?.trim() || message.content,
-        parsed_intent: message.meta?.parsedIntent ?? null,
-        confidence: message.meta?.confidence ?? null,
-        feedback_value: feedbackValue,
-        source_count: message.meta?.sources?.length ?? 0,
-        metadata: {
-          ui_language: uiLanguage,
-          has_sources: Boolean(message.meta?.sources?.length),
-          used_external_research: useExternalResearch,
-          workflow_mode: workflowFromPrompt,
-        },
+  useEffect(
+    () => () => {
+      Object.values(messageAnimationTimeoutsRef.current).forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
       });
-      setMessageFeedback((current) => ({
-        ...current,
-        [message.id]: {
-          value: feedbackValue,
-          status: "submitted",
-        },
-      }));
-    } catch (caught) {
-      setMessageFeedback((current) => ({
-        ...current,
-        [message.id]: {
-          value: feedbackValue,
-          status: "error",
-        },
-      }));
-      setError(caught instanceof Error ? caught.message : "Unable to save message feedback.");
-    }
-  }
-
-  async function translateSemantically(texts: string[], domain: "legal_ui" | "legal_content" | "general" = "legal_content") {
-    const cleaned = texts.map((text) => text.trim());
-    if (uiLanguage === "en" || !token) return cleaned;
-
-    const cacheSnapshot = { ...translationCache };
-    const keys = cleaned.map((text) => `${uiLanguage}:${domain}:${text}`);
-    const missing = keys.map((key, idx) => ({ key, idx })).filter((item) => !(item.key in cacheSnapshot));
-
-    if (missing.length > 0) {
-      try {
-        setSemanticTranslationBusy(true);
-        const response = await api.semanticTranslate(token, {
-          texts: missing.map((row) => cleaned[row.idx]),
-          target_language: uiLanguage,
-          source_language: "auto",
-          domain,
-        });
-        missing.forEach((row, index) => {
-          cacheSnapshot[row.key] = response.translations[index] || cleaned[row.idx];
-        });
-        setTranslationCache((current) => ({ ...current, ...cacheSnapshot }));
-      } catch {
-        return cleaned;
-      } finally {
-        setSemanticTranslationBusy(false);
+      messageAnimationTimeoutsRef.current = {};
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      composerStreamRef.current?.getTracks().forEach((track) => track.stop());
+      if (composerRecognitionRef.current) {
+        try {
+          composerRecognitionRef.current.abort();
+        } catch {
+          // Ignore cleanup errors from browser speech recognition.
+        }
+        composerRecognitionRef.current = null;
       }
+    },
+    []
+  );
+
+  useEffect(() => {
+    const stream = messageStreamRef.current;
+    if (!stream) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (messageEndRef.current) {
+        messageEndRef.current.scrollIntoView({ block: "end" });
+        return;
+      }
+      stream.scrollTop = stream.scrollHeight;
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeMessages.length, latestMessageContent, selectedCaseId, copilotLoading]);
+
+  useEffect(() => {
+    if (copilotLoading || activeMessages.length > 0) {
+      setChatHistoryOpen(true);
     }
+  }, [copilotLoading, activeMessages.length]);
 
-    return keys.map((key, idx) => cacheSnapshot[key] || cleaned[idx]);
-  }
-
-  function localizedText(value?: string | null, domain: "legal_ui" | "legal_content" | "general" = "legal_content") {
-    if (!value) return "";
-    const cleaned = value.trim();
-    if (!cleaned || uiLanguage === "en") return cleaned;
-    const key = `${uiLanguage}:${domain}:${cleaned}`;
-    return translationCache[key] || cleaned;
-  }
-
-  async function refreshProviderStatus(currentToken: string) {
-    try {
-      const status = await api.providerStatus(currentToken);
-      setProviderStatus(status);
-    } catch {
-      setProviderStatus(null);
+  useEffect(() => {
+    if (notice || error) {
+      const timeout = window.setTimeout(() => {
+        setNotice(null);
+        setError(null);
+      }, 4200);
+      return () => window.clearTimeout(timeout);
     }
-  }
-
-  async function bootstrapWorkspace(currentToken: string) {
-    try {
+    return undefined;
+  }, [notice, error]);
+  const bootstrapWorkspace = useCallback(
+    async (activeToken: string) => {
       setWorkspaceLoading(true);
       setError(null);
-
-      const [me, caseList, clientList] = await Promise.all([
-        api.me(currentToken),
-        api.listCases(currentToken),
-        api.listClients(currentToken),
-      ]);
-      setUser(me);
-      setCases(caseList);
-      setClients(clientList);
-      const preferredCase =
-        (selectedCaseId && caseList.find((item) => item.id === selectedCaseId)) ||
-        caseList[0] ||
-        null;
-      if (preferredCase) {
-        setWorkspaceClientId(preferredCase.client_id);
-        setWorkspaceCaseId(preferredCase.id);
-      } else {
-        setWorkspaceClientId(clientList[0]?.id ?? null);
-        setWorkspaceCaseId(null);
-      }
-      setWorkspaceEntered(false);
-      setDocuments([]);
-      setVoiceRecordings([]);
-      setConsultationRequests([]);
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Unable to initialize workspace.";
-      setError(message);
-      localStorage.removeItem(TOKEN_STORAGE_KEY);
-      setToken(null);
-    } finally {
-      setWorkspaceLoading(false);
-    }
-  }
-
-  async function refreshWorkspaceEntities(currentToken: string) {
-    const [caseList, clientList] = await Promise.all([
-      api.listCases(currentToken),
-      api.listClients(currentToken),
-    ]);
-    setCases(caseList);
-    setClients(clientList);
-    return { caseList, clientList };
-  }
-
-  async function applyStructuredUiTriggers(response: {
-    parsed_intent?: string;
-    structured_result?: Record<string, unknown>;
-  }) {
-    if (!token) return;
-    const payload = response.structured_result;
-    if (!payload || typeof payload !== "object") return;
-
-    const triggers = Array.isArray(payload.ui_triggers)
-      ? (payload.ui_triggers as Array<Record<string, unknown>>)
-      : [];
-    if (triggers.length === 0) return;
-
-    let shouldRefreshCases = false;
-    let shouldRefreshClients = false;
-    let shouldOpenDocumentUpload = false;
-    let shouldOpenAudioUpload = false;
-    let caseToSelect: number | null = null;
-
-    for (const trigger of triggers) {
-      const type = String(trigger?.type || "").trim();
-      if (!type) continue;
-
-      if (type === "refresh_cases") {
-        shouldRefreshCases = true;
-        continue;
-      }
-      if (type === "refresh_clients") {
-        shouldRefreshClients = true;
-        continue;
-      }
-      if (type === "refresh_workspace") {
-        shouldRefreshCases = true;
-        shouldRefreshClients = true;
-        continue;
-      }
-      if (type === "select_case") {
-        const candidateCaseId = Number(trigger.case_id);
-        if (Number.isInteger(candidateCaseId) && candidateCaseId > 0) {
-          caseToSelect = candidateCaseId;
-        }
-        continue;
-      }
-      if (type === "open_upload") {
-        const target = String(trigger.target || "").toLowerCase();
-        if (target === "document") {
-          shouldOpenDocumentUpload = true;
-        } else if (target === "audio") {
-          shouldOpenAudioUpload = true;
-        }
-      }
-    }
-
-    let refreshedCaseList = cases;
-    if (shouldRefreshCases || shouldRefreshClients) {
       try {
-        const refreshed = await refreshWorkspaceEntities(token);
-        refreshedCaseList = refreshed.caseList;
-      } catch {
-        // Keep the chat flow stable; request errors are already surfaced in the assistant response.
-      }
-    }
-
-    if (!caseToSelect && payload.case && typeof payload.case === "object") {
-      const candidateId = Number((payload.case as Record<string, unknown>).id);
-      if (Number.isInteger(candidateId) && candidateId > 0) {
-        caseToSelect = candidateId;
-      }
-    }
-
-    if (caseToSelect && refreshedCaseList.some((item) => item.id === caseToSelect)) {
-      await selectCase(token, caseToSelect, refreshedCaseList);
-    }
-
-    if (shouldOpenDocumentUpload) {
-      documentUploadInputRef.current?.click();
-    }
-    if (shouldOpenAudioUpload) {
-      audioUploadInputRef.current?.click();
-    }
-  }
-
-  async function selectCase(
-    currentToken: string,
-    caseId: number,
-    availableCases = cases,
-    preserveCurrentThread = false
-  ) {
-    const targetCase = availableCases.find((item) => item.id === caseId) ?? null;
-    setSelectedCaseId(caseId);
-    setSelectedDocumentId(null);
-    setSelectedRecordingId(null);
-    setSelectedDocumentAnalysis(null);
-    setActiveSources([]);
-    setAgentWorkflow(null);
-    clearArtifactWorkspace();
-
-    if (!preserveCurrentThread) {
-      const latestCaseThread = [...chatThreads]
-        .filter((thread) => thread.caseId === caseId)
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-      if (latestCaseThread) {
-        setActiveThreadId(latestCaseThread.id);
-        setChatMessages(latestCaseThread.messages);
-      } else {
-        createThread({
-          caseId,
-          title: targetCase?.title || "New chat",
-          messages: [buildWelcomeMessage(targetCase?.title)],
-        });
-      }
-    }
-
-    const [docs, recordings, requests] = await Promise.all([
-      api.listCaseDocuments(currentToken, caseId),
-      api.listVoiceRecordings(currentToken, caseId),
-      api.listConsultationRequests(currentToken, caseId),
-    ]);
-    setDocuments(docs);
-    setVoiceRecordings(recordings);
-    setConsultationRequests(requests);
-
-    if (recordings.length > 0) setSelectedRecordingId(recordings[0].id);
-    if (docs.length > 0) await selectDocument(currentToken, docs[0].id, docs);
-  }
-
-  async function enterWorkspace() {
-    if (!token) return;
-    if (!workspaceCaseId) {
-      setError("Select a case before entering the workspace.");
-      return;
-    }
-    try {
-      setWorkspaceSelecting(true);
-      setError(null);
-      await selectCase(token, workspaceCaseId, cases);
-      setWorkspaceEntered(true);
-    } finally {
-      setWorkspaceSelecting(false);
-    }
-  }
-
-  async function selectDocument(currentToken: string, documentId: number, availableDocuments = documents) {
-    setSelectedDocumentId(documentId);
-    const exists = availableDocuments.some((item) => item.id === documentId);
-    if (!exists) {
-      setSelectedDocumentAnalysis(null);
-      return;
-    }
-    try {
-      const analysis = await api.getDocumentAnalysis(currentToken, documentId);
-      setSelectedDocumentAnalysis(analysis);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to load document analysis.");
-      setSelectedDocumentAnalysis(null);
-    }
-  }
-
-  function clearArtifactWorkspace() {
-    setArtifactContext(null);
-    setArtifactVersions([]);
-    setArtifactEditorContent("");
-    setArtifactInstruction("");
-  }
-
-  function applyArtifactVersionState(payload: {
-    artifact_type: "document_summary" | "case_email";
-    case_id: number | null;
-    document_id: number | null;
-    selected_version_id: number | null;
-    versions: ArtifactVersion[];
-  }) {
-    const selectedVersion =
-      payload.versions.find((item) => item.id === payload.selected_version_id) ??
-      payload.versions[payload.versions.length - 1] ??
-      null;
-    setArtifactContext({
-      artifact_type: payload.artifact_type,
-      case_id: payload.case_id,
-      document_id: payload.document_id,
-      selected_version_id: payload.selected_version_id,
-      version_count: payload.versions.length,
-      latest_version: selectedVersion,
-    });
-    setArtifactVersions(payload.versions);
-    setArtifactEditorContent(selectedVersion?.content || "");
-  }
-
-  async function loadArtifactVersionsForContext(currentToken: string, context: ArtifactContext) {
-    try {
-      setArtifactLoading(true);
-      const payload = await api.listArtifactVersions(currentToken, {
-        artifactType: context.artifact_type,
-        caseId: context.case_id,
-        documentId: context.document_id,
-      });
-      applyArtifactVersionState(payload);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to load artifact versions.");
-    } finally {
-      setArtifactLoading(false);
-    }
-  }
-
-  async function saveManualArtifactEdit() {
-    if (!token || !artifactContext || !artifactEditorContent.trim()) return;
-    try {
-      setArtifactSaving(true);
-      const response = await api.editArtifactVersion(token, {
-        artifact_type: artifactContext.artifact_type,
-        case_id: artifactContext.case_id,
-        document_id: artifactContext.document_id,
-        content: artifactEditorContent.trim(),
-        edit_instruction: artifactInstruction.trim() || null,
-        parent_version_id: artifactContext.selected_version_id,
-      });
-      applyArtifactVersionState(response);
-      if (response.document_id) await selectDocument(token, response.document_id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to save edited version.");
-    } finally {
-      setArtifactSaving(false);
-    }
-  }
-
-  async function reviseArtifactWithAgent() {
-    if (!token || !artifactContext || !artifactInstruction.trim()) return;
-    try {
-      setArtifactSaving(true);
-      const response = await api.reviseArtifactVersionWithAgent(token, {
-        artifact_type: artifactContext.artifact_type,
-        case_id: artifactContext.case_id,
-        document_id: artifactContext.document_id,
-        instruction: artifactInstruction.trim(),
-        base_version_id: artifactContext.selected_version_id,
-      });
-      applyArtifactVersionState(response);
-      if (response.document_id) await selectDocument(token, response.document_id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to revise version with AI.");
-    } finally {
-      setArtifactSaving(false);
-    }
-  }
-
-  async function selectArtifactVersion(versionId: number) {
-    if (!token || !artifactContext) return;
-    try {
-      setArtifactSaving(true);
-      const response = await api.selectArtifactVersion(token, versionId);
-      applyArtifactVersionState(response);
-      if (response.document_id) await selectDocument(token, response.document_id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to switch selected version.");
-    } finally {
-      setArtifactSaving(false);
-    }
-  }
-
-  async function handleAuthSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setAuthLoading(true);
-    setError(null);
-    try {
-      if (authMode === "register") {
-        await api.register(authForm);
-      }
-      const loginResponse = await api.login(authForm.email, authForm.password);
-      localStorage.setItem(TOKEN_STORAGE_KEY, loginResponse.access_token);
-      setToken(loginResponse.access_token);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Authentication failed.");
-    } finally {
-      setAuthLoading(false);
-    }
-  }
-
-  async function submitCopilotPrompt() {
-    if (!token || !chatInput.trim()) return;
-    if (!activeThreadId) {
-      createThread({
-        caseId: selectedCaseId ?? null,
-        title: "New chat",
-        messages: chatMessages.length > 0 ? chatMessages : [buildWelcomeMessage(selectedCase?.title)],
-      });
-    }
-
-    const input = chatInput.trim();
-    const hasExplicitTarget = /\bcase\s*#?\s*\d+\b|\bdocument\s*#?\s*\d+\b/i.test(input);
-    const scopedMessage = hasExplicitTarget || !selectedCaseId ? input : `${input} for case #${selectedCaseId}`;
-
-    setChatMessages((current) => [
-      ...current,
-      {
-        id: crypto.randomUUID(),
-        role: "user",
-        timestamp: nowIso(),
-        content: input,
-      },
-    ]);
-    setChatInput("");
-    setCopilotLoading(true);
-    setShowComposerMenu(false);
-
-    try {
-      setError(null);
-      const referencedCaseId = extractReferencedCaseId(scopedMessage);
-      if (referencedCaseId && !cases.some((item) => item.id === referencedCaseId)) {
-        const suggestion = selectedCaseId
-          ? `Try running the same prompt with case #${selectedCaseId}.`
-          : "Select a case from the sidebar first, then retry.";
-        const validationMessage = `Case #${referencedCaseId} is not available in your workspace. ${suggestion}`;
-        const [translatedValidation] = await translateSemantically([validationMessage], "general");
-        setChatMessages((current) => [
-          ...current,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            timestamp: nowIso(),
-            content: translatedValidation,
-            meta: {
-              parsedIntent: "validation_error",
-              confidence: "high",
-              fallbackReason: "Invalid case id in prompt",
-              sources: [],
-            },
-          },
+        const [me, clientsRows, caseRows] = await Promise.all([
+          api.me(activeToken),
+          api.listClients(activeToken),
+          api.listCases(activeToken),
         ]);
-        setError(validationMessage);
+        setUser(me);
+        setClients(clientsRows);
+        setCases(caseRows);
+
+        try {
+          const provider = await api.providerStatus(activeToken);
+          setProviderStatus(provider);
+        } catch {
+          setProviderStatus(null);
+        }
+
+        try {
+          const promptLibraryRows = await api.listPromptLibrary(activeToken);
+          setPromptLibraryEntries(promptLibraryRows);
+        } catch {
+          setPromptLibraryEntries([]);
+        }
+
+        setSelectedClientId((current) => {
+          if (current && clientsRows.some((client) => client.id === current)) return current;
+          return clientsRows[0]?.id ?? null;
+        });
+      } catch (caught) {
+        setError(normalizeError(caught, t("unableLoadWorkspace", "Unable to load workspace.")));
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        setToken(null);
+        setUser(null);
+      } finally {
+        setWorkspaceLoading(false);
+      }
+    },
+    [t]
+  );
+
+  const loadCaseContext = useCallback(
+    async (caseId: number) => {
+      if (!token) return;
+      setCaseContextLoading(true);
+      try {
+        const [docs, voiceRows, consultationRows, imageBatchRows, reviewRows, reviewTableRows] = await Promise.all([
+          api.listCaseDocuments(token, caseId),
+          api.listVoiceRecordings(token, caseId),
+          api.listConsultationRequests(token, caseId),
+          api.listCaseImageBatches(token, caseId),
+          api.listEvidenceReviews(token, caseId),
+          api.getCaseReviewTable(token, caseId),
+        ]);
+        setDocuments(docs);
+        setRecordings(voiceRows);
+        setConsultations(consultationRows);
+        setImageBatches(imageBatchRows);
+        setEvidenceReviews(reviewRows.reviews || []);
+        setCaseReviewTable(reviewTableRows);
+        setSelectedDocumentId((current) => {
+          if (current && docs.some((document) => document.id === current)) return current;
+          return docs[0]?.id ?? null;
+        });
+      } catch (caught) {
+        setError(normalizeError(caught, t("unableLoadCaseContext", "Unable to load case context.")));
+      } finally {
+        setCaseContextLoading(false);
+      }
+    },
+    [token, t]
+  );
+
+  useEffect(() => {
+    if (token) {
+      void bootstrapWorkspace(token);
+    }
+  }, [token, bootstrapWorkspace]);
+
+  useEffect(() => {
+    if (!filteredCases.length) {
+      setSelectedCaseId(null);
+      return;
+    }
+    setSelectedCaseId((current) => {
+      if (current && filteredCases.some((item) => item.id === current)) return current;
+      return filteredCases[0].id;
+    });
+  }, [filteredCases]);
+
+  useEffect(() => {
+    if (!selectedCaseId) {
+      setDocuments([]);
+      setRecordings([]);
+      setConsultations([]);
+      setImageBatches([]);
+      setEvidenceReviews([]);
+      setCaseReviewTable(null);
+      setSelectedAnalysis(null);
+      return;
+    }
+    void loadCaseContext(selectedCaseId);
+  }, [selectedCaseId, loadCaseContext]);
+
+  useEffect(() => {
+    if (!token || !selectedCaseId || !hasPendingImageBatch) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+    let timeoutId: number | undefined;
+    let pollCycles = 0;
+
+    const pollCaseContext = async () => {
+      if (isCancelled) {
         return;
       }
 
-      if (workflowFromPrompt) {
-        const crudLikePrompt = /\b(create|add|upload|attach|update|change|set|schedule|book)\b[\s\S]{0,80}\b(case|client|document|audio|voice|status|appointment|consultation)\b/i.test(
-          input
+      if (pollCycles >= IMAGE_BATCH_POLL_MAX_CYCLES) {
+        setNotice(
+          t(
+            "imageBatchPollingPaused",
+            "Automatic refresh paused because image processing is taking longer than expected. Refresh the case context manually."
+          )
         );
-        if (crudLikePrompt) {
-          // Keep workflow mode enabled, but allow explicit action commands to go through agent routing.
-        } else {
-          if (!selectedCaseId) {
-            setError("Select a case first to run workflow mode.");
-            return;
-          }
-          await runAgentWorkflow(input);
-          return;
+        return;
+      }
+
+      pollCycles += 1;
+      await loadCaseContext(selectedCaseId);
+
+      if (isCancelled) {
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        void pollCaseContext();
+      }, IMAGE_BATCH_POLL_INTERVAL_MS);
+    };
+
+    timeoutId = window.setTimeout(() => {
+      void pollCaseContext();
+    }, IMAGE_BATCH_POLL_INTERVAL_MS);
+
+    return () => {
+      isCancelled = true;
+      if (typeof timeoutId === "number") {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [token, selectedCaseId, hasPendingImageBatch, loadCaseContext, t]);
+
+  useEffect(() => {
+    if (!token || !selectedDocumentId) {
+      setSelectedAnalysis(null);
+      return;
+    }
+    let active = true;
+    setAnalysisLoading(true);
+    void api
+      .getDocumentAnalysis(token, selectedDocumentId)
+      .then((analysis) => {
+        if (active) setSelectedAnalysis(analysis);
+      })
+      .catch(() => {
+        if (active) setSelectedAnalysis(null);
+      })
+      .finally(() => {
+        if (active) setAnalysisLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedDocumentId, token]);
+
+  const createChatSession = useCallback((caseId: number, seedPrompt?: string) => {
+    const now = new Date().toISOString();
+    const sessionId = generateId();
+    const session: ChatSession = {
+      id: sessionId,
+      title: truncateText((seedPrompt || "").trim(), 52) || t("newChat", "New chat"),
+      createdAt: now,
+      updatedAt: now,
+      messages: [],
+    };
+
+    setChatState((current) => ({
+      sessionsByCase: {
+        ...current.sessionsByCase,
+        [caseId]: [session, ...(current.sessionsByCase[caseId] || [])],
+      },
+      activeSessionIdByCase: {
+        ...current.activeSessionIdByCase,
+        [caseId]: sessionId,
+      },
+    }));
+
+    return sessionId;
+  }, [t]);
+
+  const selectChatSession = useCallback((caseId: number, sessionId: string) => {
+    setChatState((current) => ({
+      sessionsByCase: current.sessionsByCase,
+      activeSessionIdByCase: {
+        ...current.activeSessionIdByCase,
+        [caseId]: sessionId,
+      },
+    }));
+  }, []);
+
+  const appendMessage = useCallback((caseId: number, sessionId: string, message: ChatMessage) => {
+    setChatState((current) => {
+      const sessions = current.sessionsByCase[caseId] || [];
+      const nextSessions = sessions.map((session) => {
+        if (session.id !== sessionId) return session;
+        const nextMessages = [...session.messages, message];
+        return {
+          ...session,
+          title:
+            session.messages.length === 0 && message.role === "user"
+              ? truncateText(message.content, 52) || t("newChat", "New chat")
+              : session.title,
+          updatedAt: message.timestamp,
+          messages: nextMessages,
+        };
+      });
+
+      return {
+        sessionsByCase: {
+          ...current.sessionsByCase,
+          [caseId]: nextSessions,
+        },
+        activeSessionIdByCase: {
+          ...current.activeSessionIdByCase,
+          [caseId]: sessionId,
+        },
+      };
+    });
+  }, [t]);
+
+  const updateMessageContent = useCallback((caseId: number, sessionId: string, messageId: string, content: string) => {
+    setChatState((current) => {
+      const sessions = current.sessionsByCase[caseId] || [];
+      return {
+        sessionsByCase: {
+          ...current.sessionsByCase,
+          [caseId]: sessions.map((session) => (
+            session.id === sessionId
+              ? {
+                ...session,
+                messages: session.messages.map((message) => (
+                  message.id === messageId
+                    ? {
+                      ...message,
+                      content,
+                    }
+                    : message
+                )),
+              }
+              : session
+          )),
+        },
+        activeSessionIdByCase: current.activeSessionIdByCase,
+      };
+    });
+  }, []);
+
+  const animateAssistantMessage = useCallback((caseId: number, sessionId: string, message: ChatMessage) => {
+    const fullContent = Array.from(message.content);
+    const messageId = message.id;
+    const existingTimeout = messageAnimationTimeoutsRef.current[messageId];
+    if (existingTimeout) {
+      window.clearTimeout(existingTimeout);
+      delete messageAnimationTimeoutsRef.current[messageId];
+    }
+
+    appendMessage(caseId, sessionId, {
+      ...message,
+      content: "",
+    });
+
+    if (!fullContent.length) {
+      return;
+    }
+
+    const chunkSize =
+      fullContent.length > 1800 ? 20 :
+        fullContent.length > 1000 ? 12 :
+          fullContent.length > 500 ? 6 :
+            3;
+    const baseDelay =
+      fullContent.length > 1800 ? 14 :
+        fullContent.length > 1000 ? 18 :
+          24;
+
+    let cursor = 0;
+    const tick = () => {
+      cursor = Math.min(fullContent.length, cursor + chunkSize);
+      updateMessageContent(caseId, sessionId, messageId, fullContent.slice(0, cursor).join(""));
+
+      if (cursor >= fullContent.length) {
+        delete messageAnimationTimeoutsRef.current[messageId];
+        return;
+      }
+
+      const previousToken = fullContent[cursor - 1] || "";
+      const delay =
+        previousToken === "\n"
+          ? baseDelay + 60
+          : /[.!?]/.test(previousToken)
+            ? baseDelay + 40
+            : baseDelay;
+
+      messageAnimationTimeoutsRef.current[messageId] = window.setTimeout(tick, delay);
+    };
+
+    messageAnimationTimeoutsRef.current[messageId] = window.setTimeout(tick, 110);
+  }, [appendMessage, updateMessageContent]);
+
+  const sendMessage = useCallback(
+    async (promptText: string) => {
+      if (!token || !selectedCaseId) return;
+      const trimmed = promptText.trim();
+      if (!trimmed) return;
+
+      const outboundPrompt = trimmed;
+      const sessionId = activeChatSessionId || createChatSession(selectedCaseId, outboundPrompt);
+      const userMessage = createMessage("user", outboundPrompt);
+      const caseMessages = activeSession?.messages || [];
+      appendMessage(selectedCaseId, sessionId, userMessage);
+      setChatInput("");
+      setAttachmentMenuOpen(false);
+      setCopilotLoading(true);
+      setError(null);
+
+      try {
+        const response = await api.copilot(token, outboundPrompt, {
+          topK: REASONING_TOP_K[reasoningLevel],
+          useExternalResearch: externalModeEnabled || workspaceMode === "legal_search" || workspaceMode === "agent",
+          mode: workspaceMode === "legal_search" ? "legal_search" : "default",
+          legalSearchMultilingualOutput: workspaceMode === "legal_search",
+          agentMode: workspaceMode === "agent",
+          workspaceCaseId: selectedCaseId,
+          workspaceDocumentId: selectedDocumentId,
+          conversationHistory: [...caseMessages, userMessage]
+            .slice(-12)
+            .map((message) => ({
+              role: message.role,
+              content: message.content,
+              parsed_intent: message.meta?.parsedIntent,
+              case_id: selectedCaseId,
+              document_id: selectedDocumentId,
+            })),
+        });
+
+        const assistantMessage = createMessage("assistant", response.answer || response.message, {
+          parsedIntent: response.parsed_intent,
+          confidence: response.confidence,
+          fallbackReason: response.fallback_reason,
+          actionCategory: response.action_category,
+          actionStatus: response.action_status,
+          permissionDenied: response.permission_denied,
+          steps: response.steps,
+          structuredResult: response.structured_result,
+          sources: response.sources,
+          citations: response.citations,
+          executionTrace: response.execution_trace,
+          cache: response.cache,
+          jobId: response.job_id,
+          caseSnapshotVersion: response.case_snapshot_version,
+          artifact: response.artifact,
+          jurisdiction: response.jurisdiction,
+          rawAnswer: response.answer,
+        });
+
+        animateAssistantMessage(selectedCaseId, sessionId, assistantMessage);
+      } catch (caught) {
+        setError(normalizeError(caught, t("copilotFailed", "Copilot request failed.")));
+      } finally {
+        setCopilotLoading(false);
+      }
+    },
+    [
+      token,
+      selectedCaseId,
+      activeChatSessionId,
+      activeSession,
+      appendMessage,
+      animateAssistantMessage,
+      createChatSession,
+      reasoningLevel,
+      workspaceMode,
+      selectedDocumentId,
+      externalModeEnabled,
+      t,
+    ]
+  );
+  const handleFeedback = useCallback(
+    async (message: ChatMessage, value: FeedbackValue) => {
+      if (!token || !selectedCaseId) return;
+      const caseMessages = activeMessages;
+      const messageIndex = caseMessages.findIndex((row) => row.id === message.id);
+      if (messageIndex < 0) return;
+
+      let promptText = "No prompt context";
+      for (let index = messageIndex - 1; index >= 0; index -= 1) {
+        if (caseMessages[index].role === "user") {
+          promptText = caseMessages[index].content;
+          break;
         }
       }
 
-      const conversationHistory = chatMessages.slice(-18).map((item) => ({
-        role: item.role,
-        content: item.content,
-        parsed_intent: item.meta?.parsedIntent,
-        case_id: selectedCaseId ?? undefined,
-        document_id: selectedDocumentId ?? undefined,
+      setChatFeedback((current) => ({
+        ...current,
+        [message.id]: { value, status: "saving" },
       }));
 
-      const response = await api.copilot(token, scopedMessage, {
-        topK: retrievalDepth,
-        useExternalResearch,
-        agentMode: agentModeEnabled,
-        workspaceCaseId: selectedCaseId,
-        workspaceDocumentId: selectedDocumentId,
-        conversationHistory,
-      });
-      const [translatedAnswer] = await translateSemantically([response.answer], "legal_content");
-
-      setChatMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          timestamp: nowIso(),
-          content: translatedAnswer,
-          meta: {
-            parsedIntent: response.parsed_intent,
-            confidence: response.confidence,
-            fallbackReason: response.fallback_reason,
-            actionCategory: response.action_category,
-            actionStatus: response.action_status,
-            permissionDenied: response.permission_denied,
-            steps: response.steps,
-            structuredResult: response.structured_result,
-            sources: response.sources,
-            artifact: response.artifact || null,
-            jurisdiction: response.jurisdiction || null,
-            rawAnswer: response.answer,
-          },
-        },
-      ]);
-      setActiveSources(response.sources);
-      await applyStructuredUiTriggers(response);
-
-      if (response.permission_denied) {
-        setError(response.answer);
-      }
-
-      if (response.artifact) {
-        setArtifactContext(response.artifact);
-        await loadArtifactVersionsForContext(token, response.artifact);
-      }
-
-      const topSource = response.sources[0];
-      if (topSource?.document_id) {
-        await selectDocument(token, topSource.document_id);
-      }
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Copilot request failed.";
-      setError(message);
-      const [translatedFailure] = await translateSemantically([`I could not answer this request: ${message}`], "general");
-      setChatMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          timestamp: nowIso(),
-          content: translatedFailure,
-          meta: {
-            parsedIntent: "request_error",
-            confidence: "low",
-            fallbackReason: message,
-            sources: [],
-          },
-        },
-      ]);
-    } finally {
-      setCopilotLoading(false);
-    }
-  }
-
-  async function optimizePromptInput() {
-    if (!token || !chatInput.trim()) return;
-    try {
-      setOptimizingPrompt(true);
-      setError(null);
-      const basePrompt = chatInput.trim();
-      const caseSuffix = selectedCaseId ? ` for case #${selectedCaseId}` : "";
-      const response = await api.copilot(token, `Optimize prompt: ${basePrompt}${caseSuffix}`, {
-        topK: retrievalDepth,
-        useExternalResearch,
-        agentMode: false,
-        workspaceCaseId: selectedCaseId,
-        workspaceDocumentId: selectedDocumentId,
-        conversationHistory: [],
-      });
-      if (response.parsed_intent !== "optimize_prompt") {
-        throw new Error("Prompt optimizer mode was not applied.");
-      }
-      const normalizedAnswer = (response.answer || "").replace(/^\[intent=.*?\]\s*/i, "").trim();
-      const extracted = normalizedAnswer.match(/optimized prompt:\s*(.+)$/im)?.[1]?.trim();
-      const cleaned = (extracted || normalizedAnswer).split(/\n\s*notes\s*:/i)[0].trim();
-      if (cleaned) setChatInput(cleaned);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to optimize prompt.");
-    } finally {
-      setOptimizingPrompt(false);
-    }
-  }
-
-  async function runAgentWorkflow(objectiveOverride?: string) {
-    if (!token || !selectedCaseId) return;
-    const resolvedObjective = (objectiveOverride ?? workflowObjective).trim();
-    try {
-      setWorkflowLoading(true);
-      setError(null);
-      if (resolvedObjective) setWorkflowObjective(resolvedObjective);
-      const response = await api.runAgentWorkflow(token, selectedCaseId, resolvedObjective || undefined, retrievalDepth);
-      setAgentWorkflow(response);
-      setActiveSources(response.sources);
-      const [translatedSummary] = await translateSemantically([response.verified_summary], "legal_content");
-      setChatMessages((current) => [
-        ...current,
-        {
-          id: crypto.randomUUID(),
-          role: "assistant",
-          timestamp: nowIso(),
-          content: translatedSummary,
-          meta: {
-            parsedIntent: "agent_workflow",
-            confidence: "high",
-            fallbackReason: null,
-            sources: response.sources,
-            rawAnswer: response.verified_summary,
-          },
-        },
-      ]);
-
-      if (response.client_email?.trim()) {
-        const context: ArtifactContext = {
-          artifact_type: "case_email",
+      try {
+        await api.createCopilotFeedback(token, {
+          message_id: message.id,
           case_id: selectedCaseId,
-          document_id: null,
-          selected_version_id: null,
-          version_count: 0,
-          latest_version: null,
-        };
-        setArtifactContext(context);
-        await loadArtifactVersionsForContext(token, context);
+          document_id: selectedDocumentId,
+          prompt_text: promptText,
+          response_text: message.content,
+          parsed_intent: message.meta?.parsedIntent || null,
+          confidence: message.meta?.confidence || null,
+          feedback_value: value,
+          source_count: message.meta?.sources?.length || 0,
+          metadata: {
+            mode: workspaceMode,
+            action_category: message.meta?.actionCategory || null,
+            action_status: message.meta?.actionStatus || null,
+          },
+        });
+        setChatFeedback((current) => ({
+          ...current,
+          [message.id]: { value, status: "submitted" },
+        }));
+      } catch {
+        setChatFeedback((current) => ({
+          ...current,
+          [message.id]: { value, status: "error" },
+        }));
+      }
+    },
+    [activeMessages, selectedCaseId, selectedDocumentId, token, workspaceMode]
+  );
+
+  const handleCopy = useCallback((message: ChatMessage) => {
+    void navigator.clipboard.writeText(message.content);
+    setNotice(t("copiedClipboard", "Copied to clipboard."));
+  }, [t]);
+
+  const handleRegenerate = useCallback(
+    (message: ChatMessage) => {
+      if (!selectedCaseId) return;
+      const caseMessages = activeMessages;
+      const index = caseMessages.findIndex((row) => row.id === message.id);
+      if (index < 1) return;
+      for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+        if (caseMessages[cursor].role === "user") {
+          const prompt = caseMessages[cursor].content;
+          void sendMessage(prompt);
+          return;
+        }
+      }
+    },
+    [activeMessages, selectedCaseId, sendMessage]
+  );
+
+  const clearActiveCaseHistory = useCallback(() => {
+    if (!selectedCaseId || !activeChatSessionId) return;
+    setChatState((current) => {
+      const nextSessions = (current.sessionsByCase[selectedCaseId] || []).filter((session) => session.id !== activeChatSessionId);
+      const nextActiveId = nextSessions[0]?.id;
+      const nextActiveSessionIdByCase = { ...current.activeSessionIdByCase };
+      if (nextActiveId) {
+        nextActiveSessionIdByCase[selectedCaseId] = nextActiveId;
+      } else {
+        delete nextActiveSessionIdByCase[selectedCaseId];
+      }
+      return {
+        sessionsByCase: {
+          ...current.sessionsByCase,
+          [selectedCaseId]: nextSessions,
+        },
+        activeSessionIdByCase: nextActiveSessionIdByCase,
+      };
+    });
+    setChatFeedback({});
+    setNotice(`${t("chatHistory", "Chat History")}: ${t("clearHistory", "Clear history")}`);
+  }, [activeChatSessionId, selectedCaseId, t]);
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (authMode === "register") {
+        await api.register({
+          name: authForm.name,
+          email: authForm.email,
+          password: authForm.password,
+          tenant_name: authForm.tenant || undefined,
+          invite_token: authForm.inviteToken || undefined,
+          role: authForm.role,
+        });
+        setNotice(t("accountCreated", "Account created. Sign in to continue."));
+        setAuthMode("login");
+      } else {
+        const auth = await api.login(authForm.email, authForm.password);
+        localStorage.setItem(TOKEN_STORAGE_KEY, auth.access_token);
+        setToken(auth.access_token);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to run workflow.");
+      setError(normalizeError(caught, t("authFailed", "Authentication failed.")));
     } finally {
-      setWorkflowLoading(false);
-    }
-  }
-
-  async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    if (!token) return;
-    if (!selectedCaseId) {
-      setError("Select a case first before uploading documents.");
-      return;
-    }
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    try {
-      const uploadResult = await api.uploadDocument(token, selectedCaseId, file);
-      const nextDocuments = [uploadResult.document, ...documents];
-      setDocuments(nextDocuments);
-      await selectDocument(token, uploadResult.document.id, nextDocuments);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Upload failed.");
-    } finally {
-      setUploading(false);
-      event.target.value = "";
-    }
-  }
-
-  async function uploadVoiceFile(file: File) {
-    if (!token) return;
-    if (!selectedCaseId) {
-      setError("Select a case first before uploading voice notes.");
-      return;
-    }
-
-    setVoiceUploading(true);
-    try {
-      const normalizedFile = await normalizeAudioFileToWav(file);
-      const uploadResult = await api.uploadVoiceRecording(token, selectedCaseId, normalizedFile);
-      const nextRecordings = [uploadResult.recording, ...voiceRecordings];
-      setVoiceRecordings(nextRecordings);
-      setSelectedRecordingId(uploadResult.recording.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Voice upload failed.");
-    } finally {
-      setVoiceUploading(false);
-    }
-  }
-
-  async function handleVoiceUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    await uploadVoiceFile(file);
-    event.target.value = "";
-  }
-
-  async function buildConsultationFromSelectedRecording() {
-    if (!token || !selectedRecordingId) return;
-    setIntakeBuilding(true);
-    try {
-      const response = await api.createConsultationFromRecording(token, selectedRecordingId);
-      setConsultationRequests((current) => {
-        const rest = current.filter((item) => item.id !== response.consultation_request.id);
-        return [response.consultation_request, ...rest];
-      });
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to build intake.");
-    } finally {
-      setIntakeBuilding(false);
-    }
-  }
-
-  async function startRecording() {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setError("This browser does not support microphone recording.");
-      return;
-    }
-    if (!selectedCaseId) {
-      setError("Select a case first before recording.");
-      return;
-    }
-
-    try {
-      setError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = getPreferredRecordingMimeType();
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-      mediaChunksRef.current = [];
-
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) mediaChunksRef.current.push(event.data);
-      };
-
-      recorder.onstop = async () => {
-        const resolvedMimeType = recorder.mimeType || mimeType || "audio/webm";
-        const blob = new Blob(mediaChunksRef.current, { type: resolvedMimeType });
-        const extension = getAudioExtension(blob.type || resolvedMimeType);
-        const file = new File([blob], `voice-note-${Date.now()}.${extension}`, {
-          type: blob.type || resolvedMimeType,
-        });
-        stream.getTracks().forEach((track) => track.stop());
-        mediaRecorderRef.current = null;
-        mediaChunksRef.current = [];
-        setRecordingAudio(false);
-        await uploadVoiceFile(file);
-      };
-
-      recorder.start();
-      setRecordingAudio(true);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to start recording.");
-    }
-  }
-
-  function stopRecording() {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
-  }
-
-  async function handleChatSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await submitCopilotPrompt();
-  }
-
-  function handleChatInputKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      void submitCopilotPrompt();
+      setAuthBusy(false);
     }
   }
 
@@ -2211,924 +1353,1426 @@ export default function App() {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     setToken(null);
     setUser(null);
-    setCases([]);
     setClients([]);
+    setCases([]);
     setDocuments([]);
-    setVoiceRecordings([]);
-    setConsultationRequests([]);
+    setRecordings([]);
+    setConsultations([]);
+    setImageBatches([]);
+    setEvidenceReviews([]);
+    setPromptLibraryEntries([]);
+    setCaseReviewTable(null);
     setSelectedCaseId(null);
+    setSelectedClientId(null);
     setSelectedDocumentId(null);
-    setSelectedRecordingId(null);
-    setSelectedDocumentAnalysis(null);
-    setWorkspaceEntered(false);
-    setWorkspaceClientId(null);
-    setWorkspaceCaseId(null);
-    setChatThreads([]);
-    setActiveThreadId(null);
-    setChatMessages([buildWelcomeMessage()]);
-    setMessageFeedback({});
-    setHistoryQuery("");
-    setActiveSources([]);
-    clearArtifactWorkspace();
-    setProviderStatus(null);
-    setAgentWorkflow(null);
+    setSelectedAnalysis(null);
+    setChatInput("");
+    setExternalModeEnabled(false);
+    setWorkspaceMode("chat");
   }
 
-  if (!token || !user) {
+  function buildPromptTemplateTitle(prompt: string) {
+    const clean = prompt.replace(/\s+/g, " ").trim();
+    if (!clean) return "Saved prompt";
+    return truncateText(clean, 48);
+  }
+
+  async function uploadPdfFile(file: File) {
+    if (!token || !selectedCaseId) return;
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setError(t("uploadPdfOnly", "Only PDF files are allowed."));
+      return;
+    }
+    setUploadingPdf(true);
+    setError(null);
+    try {
+      const response = await api.uploadDocument(token, selectedCaseId, file);
+      await loadCaseContext(selectedCaseId);
+      setNotice(
+        response.job?.id
+          ? `${t("uploadPdfSuccess", "PDF uploaded and queued for processing.")} Job: ${response.job.id}`
+          : t("uploadPdfSuccess", "PDF uploaded and queued for processing.")
+      );
+    } catch (caught) {
+      setError(normalizeError(caught, t("uploadPdfFailed", "Unable to upload PDF.")));
+    } finally {
+      setUploadingPdf(false);
+    }
+  }
+
+  async function uploadAudioFile(file: File) {
+    if (!token || !selectedCaseId) return;
+    setUploadingAudio(true);
+    setError(null);
+    try {
+      const response = await api.uploadVoiceRecording(token, selectedCaseId, file);
+      await loadCaseContext(selectedCaseId);
+      setNotice(
+        response.job?.id
+          ? `${t("uploadAudioSuccess", "Voice file uploaded. Transcription is running.")} Job: ${response.job.id}`
+          : t("uploadAudioSuccess", "Voice file uploaded. Transcription is running.")
+      );
+    } catch (caught) {
+      setError(normalizeError(caught, t("uploadAudioFailed", "Unable to upload audio.")));
+    } finally {
+      setUploadingAudio(false);
+    }
+  }
+
+  const focusComposer = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      const textarea = composerTextareaRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      const length = textarea.value.length;
+      textarea.setSelectionRange(length, length);
+    });
+  }, []);
+
+  function onPdfFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    void uploadPdfFile(file);
+    event.target.value = "";
+  }
+
+  function onAudioFileSelected(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    void uploadAudioFile(file);
+    event.target.value = "";
+  }
+
+  async function uploadScannedPhotoFiles(files: File[]) {
+    if (!token || !selectedCaseId || !files.length) return;
+    if (!providerStatus?.vision_available) {
+      setError(
+        providerStatus?.vision_reason_unavailable
+        || t("visionUnavailable", "Image analysis is unavailable right now.")
+      );
+      return;
+    }
+    setUploadingScannedPhotos(true);
+    setError(null);
+    try {
+      const response = await api.uploadImageBatch(token, selectedCaseId, files, {
+        title: selectedCase ? `${selectedCase.title} - scanned photos` : "Scanned photos",
+        generateDocument: true,
+        runAuthenticityCheck: runScannedAuthenticityCheck,
+      });
+      await loadCaseContext(selectedCaseId);
+      setNotice(
+        response.job?.id
+          ? `Scanned photos uploaded and queued for OCR${runScannedAuthenticityCheck ? " with authenticity screening" : ""}. Job: ${response.job.id}`
+          : `Scanned photos uploaded and queued for OCR${runScannedAuthenticityCheck ? " with authenticity screening" : ""}.`
+      );
+    } catch (caught) {
+      setError(normalizeError(caught, "Unable to upload scanned photos."));
+    } finally {
+      setUploadingScannedPhotos(false);
+    }
+  }
+
+  function onScannedPhotosSelected(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    event.target.value = "";
+    if (!files.length) return;
+    void uploadScannedPhotoFiles(files);
+  }
+
+  function releaseComposerRecorder() {
+    composerStreamRef.current?.getTracks().forEach((track) => track.stop());
+    composerStreamRef.current = null;
+    composerRecorderRef.current = null;
+    composerChunksRef.current = [];
+  }
+
+  function releaseComposerRecognition() {
+    if (composerRecognitionRef.current) {
+      try {
+        composerRecognitionRef.current.abort();
+      } catch {
+        // Ignore cleanup errors from browser speech recognition.
+      }
+    }
+    composerRecognitionRef.current = null;
+    composerDictationSeedRef.current = "";
+    composerDictationFinalRef.current = "";
+  }
+
+  async function optimizePromptDraft() {
+    if (!token) return;
+    const trimmed = chatInput.trim();
+    if (!trimmed) return;
+
+    setOptimizingPrompt(true);
+    setError(null);
+
+    try {
+      const response = await api.optimizePrompt(token, {
+        prompt: trimmed,
+        workspaceCaseId: selectedCaseId,
+        workspaceDocumentId: selectedDocumentId,
+      });
+      setChatInput(response.optimized_prompt || trimmed);
+      setNotice(t("promptOptimizedNotice", "Prompt optimized for clearer legal reasoning."));
+      focusComposer();
+    } catch (caught) {
+      setError(normalizeError(caught, t("promptOptimizeFailed", "Unable to optimize the prompt.")));
+    } finally {
+      setOptimizingPrompt(false);
+    }
+  }
+
+  async function saveCurrentPromptToLibrary() {
+    if (!token) return;
+    const trimmed = chatInput.trim();
+    if (!trimmed) return;
+
+    setSavingPromptTemplate(true);
+    setError(null);
+
+    try {
+      const entry = await api.createPromptLibraryEntry(token, {
+        title: buildPromptTemplateTitle(trimmed),
+        prompt_text: trimmed,
+        description: selectedCase ? `Saved from case #${selectedCase.id} (${selectedCase.title})` : null,
+        category: workspaceMode === "legal_search" ? "research" : workspaceMode === "agent" ? "workflow" : "general",
+        is_favorite: false,
+      });
+      setPromptLibraryEntries((current) => [entry, ...current.filter((item) => item.id !== entry.id)]);
+      setNotice("Prompt saved to the library.");
+    } catch (caught) {
+      setError(normalizeError(caught, "Unable to save the prompt."));
+    } finally {
+      setSavingPromptTemplate(false);
+    }
+  }
+
+  async function deletePromptLibraryEntry(entryId: number) {
+    if (!token) return;
+    setPromptLibraryDeleteId(entryId);
+    setError(null);
+    try {
+      await api.deletePromptLibraryEntry(token, entryId);
+      setPromptLibraryEntries((current) => current.filter((entry) => entry.id !== entryId));
+      setNotice("Prompt removed from the library.");
+    } catch (caught) {
+      setError(normalizeError(caught, "Unable to remove the prompt."));
+    } finally {
+      setPromptLibraryDeleteId(null);
+    }
+  }
+
+  function applyPromptLibraryEntry(entry: PromptLibraryEntry) {
+    setChatInput(entry.prompt_text);
+    setAttachmentMenuOpen(false);
+    setNotice(`Loaded prompt: ${entry.title}`);
+    focusComposer();
+  }
+
+  async function handleEvidenceReviewDecision(reviewId: number, decision: "approved" | "rejected") {
+    if (!token || !selectedCaseId) return;
+    setReviewDecisionBusyId(reviewId);
+    setError(null);
+    try {
+      await api.decideEvidenceReview(token, reviewId, { decision });
+      await loadCaseContext(selectedCaseId);
+      setNotice(`Evidence review ${decision}.`);
+    } catch (caught) {
+      setError(normalizeError(caught, "Unable to update the evidence review."));
+    } finally {
+      setReviewDecisionBusyId(null);
+    }
+  }
+
+  async function startComposerRecording() {
+    if (recordingVoice) {
+      setError(t("stopCaseRecordingFirst", "Stop the case voice recording before starting prompt dictation."));
+      return;
+    }
+
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognitionCtor) {
+      try {
+        setError(null);
+        composerDictationSeedRef.current = chatInput.trim() ? `${chatInput.trim()} ` : "";
+        composerDictationFinalRef.current = "";
+
+        const recognition = new SpeechRecognitionCtor();
+        recognition.lang = language === "de" ? "de-DE" : language === "ar" ? "ar-TN" : "en-US";
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+
+        recognition.onresult = (event) => {
+          let finalTranscript = composerDictationFinalRef.current;
+          let interimTranscript = "";
+
+          for (let index = event.resultIndex; index < event.results.length; index += 1) {
+            const result = event.results[index];
+            const transcript = String(result?.[0]?.transcript || "").trim();
+            if (!transcript) continue;
+
+            if (result?.isFinal) {
+              finalTranscript = `${finalTranscript}${transcript} `;
+            } else {
+              interimTranscript = `${interimTranscript}${transcript} `;
+            }
+          }
+
+          composerDictationFinalRef.current = finalTranscript;
+          const nextValue = `${composerDictationSeedRef.current}${finalTranscript}${interimTranscript}`
+            .replace(/\s+/g, " ")
+            .trim();
+          setChatInput(nextValue);
+        };
+
+        recognition.onerror = (event) => {
+          const errorCode = String(event?.error || "").trim().toLowerCase();
+          setComposerRecording(false);
+          composerRecognitionRef.current = null;
+
+          if (errorCode && errorCode !== "aborted" && errorCode !== "no-speech") {
+            setError(t("voiceTranscriptFailed", "Unable to transcribe your voice input."));
+          }
+        };
+
+        recognition.onend = () => {
+          setComposerRecording(false);
+          composerRecognitionRef.current = null;
+          composerDictationSeedRef.current = "";
+          composerDictationFinalRef.current = "";
+          focusComposer();
+        };
+
+        composerRecognitionRef.current = recognition;
+        setComposerRecording(true);
+        setNotice(t("liveVoiceInputNotice", "Live voice dictation is active."));
+        recognition.start();
+        focusComposer();
+        return;
+      } catch (caught) {
+        releaseComposerRecognition();
+        setComposerRecording(false);
+        setError(normalizeError(caught, t("micAccessFailed", "Unable to access microphone.")));
+        return;
+      }
+    }
+
+    if (!token) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError(t("micUnsupported", "Microphone recording is not supported in this browser."));
+      return;
+    }
+
+    try {
+      setError(null);
+      setNotice(t("liveVoiceFallbackNotice", "Live dictation is unavailable in this browser. Using slower transcription fallback."));
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+
+      composerRecorderRef.current = recorder;
+      composerStreamRef.current = stream;
+      composerChunksRef.current = [];
+      setComposerRecording(true);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          composerChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const extension = mimeType.includes("wav") ? "wav" : mimeType.includes("ogg") ? "ogg" : "webm";
+        const blob = new Blob(composerChunksRef.current, { type: mimeType });
+        const file = new File([blob], `prompt-dictation-${Date.now()}.${extension}`, { type: mimeType });
+
+        releaseComposerRecorder();
+        setComposerRecording(false);
+        setComposerTranscribing(true);
+
+        void api.transcribeVoiceInput(token, file)
+          .then((response) => {
+            const transcript = response.transcript_text.trim();
+            if (!response.success || !transcript) {
+              throw new Error(response.error || t("voiceTranscriptFailed", "Unable to transcribe your voice input."));
+            }
+
+            setChatInput((current) => current.trim() ? `${current.trim()} ${transcript}` : transcript);
+            setNotice(t("voiceTranscriptInserted", "Voice transcript added to the prompt."));
+            focusComposer();
+          })
+          .catch((caught) => {
+            setError(normalizeError(caught, t("voiceTranscriptFailed", "Unable to transcribe your voice input.")));
+          })
+          .finally(() => {
+            setComposerTranscribing(false);
+          });
+      };
+
+      recorder.start();
+    } catch (caught) {
+      releaseComposerRecorder();
+      setComposerRecording(false);
+      setComposerTranscribing(false);
+      setError(normalizeError(caught, t("micAccessFailed", "Unable to access microphone.")));
+    }
+  }
+
+  function stopComposerRecording() {
+    if (composerRecognitionRef.current) {
+      try {
+        composerRecognitionRef.current.stop();
+      } catch {
+        releaseComposerRecognition();
+        setComposerRecording(false);
+      }
+      return;
+    }
+
+    if (composerRecorderRef.current && composerRecorderRef.current.state !== "inactive") {
+      composerRecorderRef.current.stop();
+    }
+  }
+
+  async function startVoiceRecording() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError(t("micUnsupported", "Microphone recording is not supported in this browser."));
+      return;
+    }
+
+    try {
+      setError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+
+      mediaRecorderRef.current = recorder;
+      mediaStreamRef.current = stream;
+      mediaChunksRef.current = [];
+      setRecordingVoice(true);
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          mediaChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const mimeType = recorder.mimeType || "audio/webm";
+        const extension = mimeType.includes("wav") ? "wav" : mimeType.includes("ogg") ? "ogg" : "webm";
+        const blob = new Blob(mediaChunksRef.current, { type: mimeType });
+        const file = new File([blob], `recorded-voice-${Date.now()}.${extension}`, { type: mimeType });
+
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+        mediaRecorderRef.current = null;
+        mediaChunksRef.current = [];
+        setRecordingVoice(false);
+        void uploadAudioFile(file);
+      };
+
+      recorder.start();
+    } catch (caught) {
+      setRecordingVoice(false);
+      setError(normalizeError(caught, t("micAccessFailed", "Unable to access microphone.")));
+    }
+  }
+
+  function stopVoiceRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void sendMessage(chatInput);
+    }
+  }
+
+  const topMetaLine = useMemo(() => {
+    const provider = providerStatus
+      ? `${providerStatus.provider_name} | ${providerStatus.model || t("modelLabel", "model")}`
+      : t("providerUnavailable", "Provider unavailable");
+    const caseLabel = selectedCase ? `${t("caseLabel", "Case")} #${selectedCase.id}` : t("noCaseSelected", "No case selected");
+    return `${provider} | ${caseLabel}`;
+  }, [providerStatus, selectedCase, t]);
+  const roleLabel = useMemo(() => {
+    if (!user?.role) return "Workspace view";
+    return `${user.role.charAt(0).toUpperCase()}${user.role.slice(1)} view`;
+  }, [user?.role]);
+  const caseStatusLabel = useMemo(() => {
+    if (!selectedCase) return "No active case";
+    return `${selectedCase.jurisdiction_country} | ${selectedCase.status}`;
+  }, [selectedCase]);
+  const workspaceModules = useMemo(
+    () => [
+      { title: "Assistant", detail: `${activeMessages.filter((item) => item.role === "assistant").length} replies`, accent: "ai" },
+      { title: "Vault", detail: `${documents.length} docs | ${imageBatches.length} batches`, accent: "neutral" },
+      { title: "Review", detail: `${caseReviewTable?.row_count ?? 0} rows | ${evidenceReviews.length} reviews`, accent: "warning" },
+      { title: "Workflows", detail: `${consultations.length} consultations | ${recordings.length} voice notes`, accent: "stable" },
+      { title: "Library", detail: `${promptLibraryEntries.length} saved prompts`, accent: "neutral" },
+    ],
+    [activeMessages, documents.length, imageBatches.length, caseReviewTable?.row_count, evidenceReviews.length, consultations.length, recordings.length, promptLibraryEntries.length]
+  );
+  const workspaceSnapshot = useMemo(
+    () => [
+      { label: "Documents", value: String(documents.length), meta: selectedDocument ? `Focused: ${truncateText(selectedDocument.filename, 28)}` : "No focused document" },
+      { label: "Open reviews", value: String(evidenceReviews.filter((review) => review.status === "ready_for_review").length), meta: `${imageBatches.length} scanned batch${imageBatches.length === 1 ? "" : "es"}` },
+      { label: "Matter activity", value: String(consultations.length + recordings.length), meta: `${consultations.length} consultations | ${recordings.length} recordings` },
+      { label: "Prompt assets", value: String(promptLibraryEntries.length), meta: `${historyPreview.length} active chat${historyPreview.length === 1 ? "" : "s"}` },
+    ],
+    [documents.length, selectedDocument, evidenceReviews, imageBatches.length, consultations.length, recordings.length, promptLibraryEntries.length, historyPreview.length]
+  );
+  const suggestedActions = useMemo(
+    () => [
+      selectedCase ? `Summarize case #${selectedCase.id}` : "Summarize this matter",
+      "List the main legal risks",
+      "Draft a client update email",
+      "Show missing evidence and next steps",
+    ],
+    [selectedCase]
+  );
+  if (!token) {
     return (
       <div className="auth-shell">
-        <div className="auth-panel">
-          <div className="auth-hero">
-            <div className="eyebrow">{t("loginEyebrow", "Case-Centric Legal AI")}</div>
-            <h1>{t("loginTitle", "Grounded legal workspaces for cases, documents, and evidence-driven AI.")}</h1>
-            <p>{t("loginSubtitle", "Sign in to your legal workspace and run case-aware AI workflows.")}</p>
+        <section className="auth-hero">
+          <p className="hero-kicker">{t("authKicker", "Next-Gen Legal AI Workspace")}</p>
+          <h1>{t("authTitle", "Calm. Intelligent. Powerful.")}</h1>
+          <p>
+            {t("authSubtitle", "A premium legal copilot with case-grounded reasoning, structured insights, and evidence-aware drafting.")}
+          </p>
+          <div className="hero-points">
+            <span>{t("authPoint1", "AI-native legal chat")}</span>
+            <span>{t("authPoint2", "Case intelligence dashboard")}</span>
+            <span>{t("authPoint3", "Document + voice ingestion")}</span>
+          </div>
+        </section>
+
+        <section className="auth-panel">
+          <header>
+            <h2>{authMode === "login" ? t("signIn", "Sign in") : t("createAccountTitle", "Create account")}</h2>
+            <p>{t("secureAccess", "Secure access to your legal workspace.")}</p>
+          </header>
+
+          <div className="auth-switch">
+            <button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")} type="button">
+              {t("login", "Login")}
+            </button>
+            <button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")} type="button">
+              {t("register", "Register")}
+            </button>
           </div>
 
-          <div className="auth-card">
-            <div className="theme-row">
-              <button
-                className="ghost-button theme-toggle"
-                onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-                type="button"
-              >
-                {theme === "dark" ? t("lightMode", "Light mode") : t("darkMode", "Dark mode")}
-              </button>
-            </div>
+          <form className="auth-form" onSubmit={handleAuthSubmit}>
+            {authMode === "register" ? (
+              <>
+                <label>
+                  {t("fullName", "Full name")}
+                  <input
+                    required
+                    value={authForm.name}
+                    onChange={(event) => setAuthForm((current) => ({ ...current, name: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  {t("tenant", "Tenant / Firm")}
+                  <input
+                    placeholder="Required only for the first bootstrap admin"
+                    value={authForm.tenant}
+                    onChange={(event) => setAuthForm((current) => ({ ...current, tenant: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Invite token
+                  <input
+                    placeholder="Required for invited staff registration"
+                    value={authForm.inviteToken}
+                    onChange={(event) => setAuthForm((current) => ({ ...current, inviteToken: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  {t("role", "Role")}
+                  <select
+                    value={authForm.role}
+                    onChange={(event) =>
+                      setAuthForm((current) => ({
+                        ...current,
+                        role: event.target.value as AuthFormState["role"],
+                      }))
+                    }
+                  >
+                    <option value="lawyer">{t("lawyer", "Lawyer")}</option>
+                    <option value="assistant">{t("assistant", "Assistant")}</option>
+                    <option value="admin">{t("admin", "Admin")}</option>
+                  </select>
+                </label>
+              </>
+            ) : null}
 
-            <div className="auth-tabs">
-              <button className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")} type="button">
-                {t("login", "Login")}
-              </button>
-              <button className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")} type="button">
-                {t("register", "Register")}
-              </button>
-            </div>
-
-            <form className="auth-form" onSubmit={handleAuthSubmit}>
-              {authMode === "register" ? (
-                <>
-                  <label>
-                    {t("fullName", "Full name")}
-                    <input
-                      value={authForm.name}
-                      onChange={(event) => setAuthForm((current) => ({ ...current, name: event.target.value }))}
-                      required
-                    />
-                  </label>
-                  <label>
-                    {t("firmName", "Tenant / firm name")}
-                    <input
-                      value={authForm.tenant_name}
-                      onChange={(event) => setAuthForm((current) => ({ ...current, tenant_name: event.target.value }))}
-                      required
-                    />
-                  </label>
-                  <label>
-                    {t("role", "Role")}
-                    <select
-                      value={authForm.role}
-                      onChange={(event) => setAuthForm((current) => ({ ...current, role: event.target.value }))}
-                    >
-                      <option value="lawyer">{t("lawyer", "Lawyer")}</option>
-                      <option value="assistant">{t("assistant", "Assistant")}</option>
-                      <option value="admin">{t("admin", "Admin")}</option>
-                    </select>
-                  </label>
-                </>
-              ) : null}
-
-              <label>
-                {t("email", "Email")}
-                <input
-                  type="email"
-                  value={authForm.email}
-                  onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
-                  required
-                />
-              </label>
-
-              <label>
-                {t("password", "Password")}
-                <input
-                  type="password"
-                  value={authForm.password}
-                  onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
-                  required
-                />
-              </label>
-
-              <button className="primary-button" disabled={authLoading} type="submit">
-                {authLoading ? t("working", "Working...") : authMode === "login" ? t("enterWorkspace", "Enter workspace") : t("createAccount", "Create account")}
-              </button>
-            </form>
-
-            {error ? <div className="error-banner">{localizedText(error, "general")}</div> : null}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!workspaceEntered) {
-    return (
-      <div className={`workspace-entry-shell ${uiLanguage === "ar" ? "rtl-layout" : ""}`}>
-        <div className="workspace-entry-card">
-          <div className="workspace-entry-top">
-            <div>
-              <div className="eyebrow">{t("workspaceSelection", "Workspace Selection")}</div>
-              <h1>{t("appTitle", "Legal Copilot")}</h1>
-              <p>{t("selectCaseToStart", "Select a case to start your copilot workspace.")}</p>
-            </div>
-            <div className="workspace-entry-actions">
-              <select value={uiLanguage} onChange={(event) => setUiLanguage(event.target.value as UiLanguage)}>
-                <option value="en">{t("languageEnglish", "English")}</option>
-                <option value="de">{t("languageGerman", "Deutsch")}</option>
-                <option value="ar">{t("languageArabic", "Arabic")}</option>
-              </select>
-              <button className="secondary-button" onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))} type="button">
-                {theme === "dark" ? t("lightMode", "Light mode") : t("darkMode", "Dark mode")}
-              </button>
-              <button className="ghost-button" onClick={logout} type="button">
-                {t("logout", "Logout")}
-              </button>
-            </div>
-          </div>
-
-          <div className="workspace-entry-grid">
             <label>
-              {t("chooseClient", "Choose client")}
-              <select
-                value={workspaceClientId ?? ""}
-                onChange={(event) => {
-                  const nextClientId = event.target.value ? Number(event.target.value) : null;
-                  setWorkspaceClientId(nextClientId);
-                  const firstCase = cases.find((item) => item.client_id === nextClientId) || null;
-                  setWorkspaceCaseId(firstCase?.id ?? null);
-                }}
-              >
-                <option value="">{t("chooseClient", "Choose client")}</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {client.name}
-                  </option>
-                ))}
-              </select>
+              {t("email", "Email")}
+              <input
+                required
+                type="email"
+                value={authForm.email}
+                onChange={(event) => setAuthForm((current) => ({ ...current, email: event.target.value }))}
+              />
             </label>
 
             <label>
-              {t("chooseCase", "Choose case")}
-              <select value={workspaceCaseId ?? ""} onChange={(event) => setWorkspaceCaseId(event.target.value ? Number(event.target.value) : null)}>
-                <option value="">{t("chooseCase", "Choose case")}</option>
-                {casesForWorkspaceClient.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.title}
-                  </option>
-                ))}
-              </select>
+              {t("password", "Password")}
+              <input
+                required
+                type="password"
+                value={authForm.password}
+                onChange={(event) => setAuthForm((current) => ({ ...current, password: event.target.value }))}
+              />
             </label>
-          </div>
 
-          {clients.length === 0 ? <div className="error-banner">{t("noClientsAvailable", "No clients found. Create clients from the clients page first.")}</div> : null}
-          {clients.length > 0 && casesForWorkspaceClient.length === 0 ? (
-            <div className="error-banner">{t("noCasesAvailable", "No cases found for this client. Create cases from the cases page first.")}</div>
-          ) : null}
+            <button className="primary-button" disabled={authBusy} type="submit">
+              {authBusy ? t("working", "Working...") : authMode === "login" ? t("enterWorkspace", "Enter Workspace") : t("createAccount", "Create Account")}
+            </button>
+          </form>
 
-          <button className="primary-button workspace-entry-cta" disabled={!workspaceCaseId || workspaceSelecting} onClick={() => void enterWorkspace()} type="button">
-            {workspaceSelecting ? t("preparingWorkspace", "Preparing workspace...") : t("enterWorkspace", "Enter workspace")}
-          </button>
-          {error ? <div className="error-banner">{localizedText(error, "general")}</div> : null}
-        </div>
+          {notice ? <p className="notice-banner">{notice}</p> : null}
+          {error ? <p className="error-banner">{error}</p> : null}
+        </section>
       </div>
     );
   }
 
   return (
-    <div className={`chatgpt-shell ${uiLanguage === "ar" ? "rtl-layout" : ""} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className={`chatgpt-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
-        {sidebarCollapsed ? (
-          <div className="icon-sidebar">
-            <button
-              className="icon-sidebar-button"
-              onClick={() => setSidebarCollapsed(false)}
-              title={t("expandSidebar", "Expand sidebar")}
-              type="button"
-            >
-              <SidebarIcon icon="toggle" />
-            </button>
-            <div className="icon-sidebar-brand" title={t("appTitle", "Legal Copilot")}>
-              LA
-            </div>
-            <button className="icon-sidebar-button" onClick={startNewChat} title={t("newChat", "New chat")} type="button">
-              <SidebarIcon icon="chat" />
-            </button>
-            <button className="icon-sidebar-button" onClick={() => setSidebarCollapsed(false)} title={t("chatHistory", "Chat history")} type="button">
-              <SidebarIcon icon="history" />
-            </button>
-            <button className="icon-sidebar-button" onClick={() => setSidebarCollapsed(false)} title={t("cases", "Cases")} type="button">
-              <SidebarIcon icon="cases" />
-            </button>
-            <button className="icon-sidebar-button" onClick={() => setSidebarCollapsed(false)} title={t("features", "Features")} type="button">
-              <SidebarIcon icon="features" />
-            </button>
-            <button className="icon-sidebar-button" onClick={() => documentUploadInputRef.current?.click()} title={t("uploadPdf", "Upload document")} type="button">
-              <SidebarIcon icon="document" />
-            </button>
-            <button className="icon-sidebar-button" onClick={() => audioUploadInputRef.current?.click()} title={t("uploadAudio", "Upload audio")} type="button">
-              <SidebarIcon icon="audio" />
-            </button>
-            <button
-              className="icon-sidebar-button"
-              onClick={() => void (recordingAudio ? stopRecording() : startRecording())}
-              title={recordingAudio ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
-              type="button"
-            >
-              <SidebarIcon icon="audio" />
-            </button>
-            <button
-              className="icon-sidebar-button"
-              disabled={!selectedCaseId || workflowLoading || !canRunOperationalActions}
-              onClick={() => void runAgentWorkflow()}
-              title={
-                !canRunOperationalActions
-                  ? "Your role is read-only for workflow execution."
-                  : workflowLoading
-                    ? t("running", "Running...")
-                    : t("runWorkflow", "Run workflow")
-              }
-              type="button"
-            >
-              <SidebarIcon icon="features" />
-            </button>
-            <button
-              className={`icon-sidebar-button ${useExternalResearch ? "active" : ""}`}
-              onClick={() => setUseExternalResearch((current) => !current)}
-              title={t("webResearch", "Web research")}
-              type="button"
-            >
-              <SidebarIcon icon="evidence" />
-            </button>
+    <div className="workspace-shell">
+      <aside className="left-rail glass">
+        <header className="left-brand">
+          <div className="brand-mark">H</div>
+          <div>
+            <strong>Legal AI</strong>
+            <small>{t("premiumWorkspace", "Legal Copilot Workspace")}</small>
           </div>
-        ) : (
-          <>
-            <div className="sidebar-brand">
-              <div className="brand-mark">LA</div>
-              <div>
-                <strong>{t("appTitle", "Legal Copilot")}</strong>
-                <small>{user.name}</small>
-              </div>
+        </header>
+
+        <section className="left-section">
+          <h3>{t("matterNavigator", "Matter Navigator")}</h3>
+          <label>
+            {t("client", "Client")}
+            <select
+              value={selectedClientId ?? ""}
+              onChange={(event) => setSelectedClientId(event.target.value ? Number(event.target.value) : null)}
+            >
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="case-list">
+            {filteredCases.length ? (
+              filteredCases.map((item) => (
+                <button
+                  key={item.id}
+                  className={`case-item ${selectedCaseId === item.id ? "active" : ""}`}
+                  onClick={() => setSelectedCaseId(item.id)}
+                  type="button"
+                >
+                  <strong>{item.title}</strong>
+                  <small>
+                    {t("caseLabel", "Case")} #{item.id} | {item.jurisdiction_country}
+                  </small>
+                </button>
+              ))
+            ) : (
+              <p className="muted">{t("noCasesForClient", "No cases found for selected client.")}</p>
+            )}
+          </div>
+        </section>
+
+        <section className="left-section">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">Modules</p>
+              <h3>Workspace Map</h3>
+            </div>
+            <span className="section-count">{workspaceModules.length}</span>
+          </div>
+          <div className="module-nav">
+            {workspaceModules.map((module) => (
+              <article key={module.title} className={`module-nav-item ${module.accent}`}>
+                <strong>{module.title}</strong>
+                <small>{module.detail}</small>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="left-section">
+          <div className="section-heading">
+            <div>
+              <p className="section-kicker">Matter</p>
+              <h3>Case Navigation</h3>
+            </div>
+            <span className="section-count">{filteredCases.length}</span>
+          </div>
+          <div className="history-heading-row">
+            <h3>{t("chatHistory", "Chat History")}</h3>
+            <div className="history-actions">
               <button
-                className="sidebar-toggle"
-                onClick={() => setSidebarCollapsed(true)}
-                title={t("collapseSidebar", "Collapse sidebar")}
+                className="ghost-button history-action"
+                disabled={!selectedCaseId}
+                onClick={() => {
+                  if (!selectedCaseId) return;
+                  createChatSession(selectedCaseId);
+                }}
                 type="button"
               >
-                <SidebarIcon icon="toggle" />
+                {t("newChat", "New chat")}
+              </button>
+              <button
+                className="ghost-button history-action"
+                disabled={!activeChatSessionId}
+                onClick={clearActiveCaseHistory}
+                type="button"
+              >
+                {t("clearHistory", "Clear history")}
               </button>
             </div>
+          </div>
+          <div className="history-list">
+            {historyPreview.length ? (
+              historyPreview.map((item) => (
+                <button
+                  key={item.id}
+                  className={`history-item ${item.id === activeChatSessionId ? "active" : ""}`}
+                  onClick={() => {
+                    if (!selectedCaseId) return;
+                    selectChatSession(selectedCaseId, item.id);
+                  }}
+                  type="button"
+                >
+                  <strong>{item.title}</strong>
+                  <p>{item.content}</p>
+                  <small>
+                    {compactDateTime(item.timestamp, dateLocale, t("noDate", "No date"))}
+                    {" · "}
+                    {item.promptCount} {item.promptCount === 1 ? t("promptLabel", "prompt") : t("promptsLabel", "prompts")}
+                  </small>
+                </button>
+              ))
+            ) : (
+              <p className="muted">{t("noHistory", "No messages yet for this case.")}</p>
+            )}
+          </div>
+        </section>
 
-            <button className="primary-button sidebar-new-chat" onClick={startNewChat} type="button">
-              {t("newChat", "New chat")}
-            </button>
+        <details className="left-extra-sections">
+          <summary>{t("moreWorkspaceTools", "More workspace tools")}</summary>
+          <div className="left-extra-body">
 
-            <input
-              placeholder={t("searchChats", "Search chats")}
-              value={historyQuery}
-              onChange={(event) => setHistoryQuery(event.target.value)}
-            />
-
-            <div className="sidebar-section">
-              <h4>{t("chatHistory", "Chat history")}</h4>
-              <div className="history-list">
-                {filteredThreads.length > 0 ? (
-                  filteredThreads.map((thread) => (
-                    <button
-                      key={thread.id}
-                      className={`history-item ${activeThreadId === thread.id ? "active" : ""}`}
-                      onClick={() => openThread(thread.id)}
-                      type="button"
-                    >
-                      <strong>{thread.title}</strong>
-                      <small>{formatUiDate(thread.updatedAt)}</small>
-                    </button>
-                  ))
-                ) : (
-                  <small className="muted">{t("noHistory", "No chats yet")}</small>
-                )}
-              </div>
-            </div>
-
-            <details className="sidebar-section" open>
-              <summary>{t("cases", "Cases")}</summary>
-              <div className="case-list compact-list">
-                {cases.map((item) => (
+            <section className="left-section">
+              <div className="history-heading-row">
+                <h3>Prompt Library</h3>
+                <div className="history-actions">
                   <button
-                    key={item.id}
-                    className={`case-card ${selectedCaseId === item.id ? "selected" : ""}`}
-                    onClick={() => {
-                      setWorkspaceClientId(item.client_id);
-                      setWorkspaceCaseId(item.id);
-                      token && void selectCase(token, item.id);
-                    }}
+                    className="ghost-button history-action"
+                    disabled={!chatInput.trim() || savingPromptTemplate}
+                    onClick={() => void saveCurrentPromptToLibrary()}
                     type="button"
                   >
-                    <strong>{item.title}</strong>
-                    <small>{formatJurisdictionCountry(item.jurisdiction_country)}</small>
+                    {savingPromptTemplate ? "Saving..." : "Save prompt"}
                   </button>
-                ))}
+                </div>
               </div>
-            </details>
+              <div className="history-list prompt-library-list">
+                {promptLibraryEntries.length ? (
+                  promptLibraryEntries.slice(0, 8).map((entry) => (
+                    <article key={entry.id} className="history-item prompt-library-item">
+                      <button className="prompt-library-main" onClick={() => applyPromptLibraryEntry(entry)} type="button">
+                        <strong>{entry.title}</strong>
+                        <p>{entry.description || truncateText(entry.prompt_text, 96)}</p>
+                        <small>
+                          {(entry.category || "general").toUpperCase()}
+                          {" · "}
+                          {compactDateTime(entry.updated_at, dateLocale, t("noDate", "No date"))}
+                        </small>
+                      </button>
+                      <button
+                        aria-label={`Delete ${entry.title}`}
+                        className="ghost-button history-action prompt-library-delete"
+                        disabled={promptLibraryDeleteId === entry.id}
+                        onClick={() => void deletePromptLibraryEntry(entry.id)}
+                        type="button"
+                      >
+                        {promptLibraryDeleteId === entry.id ? "..." : "Delete"}
+                      </button>
+                    </article>
+                  ))
+                ) : (
+                  <p className="muted">Save your best prompts here for drafting, legal research, and case workflows.</p>
+                )}
+              </div>
+            </section>
 
-            <details className="sidebar-section" open>
-              <summary>{t("features", "Features")}</summary>
-              <div className="quick-ingest-actions">
-                <button className="secondary-button" onClick={() => documentUploadInputRef.current?.click()} type="button">
-                  {uploading ? t("uploading", "Uploading...") : t("uploadPdf", "Upload PDF")}
-                </button>
-                <button className="secondary-button" onClick={() => audioUploadInputRef.current?.click()} type="button">
-                  {voiceUploading ? t("uploading", "Uploading...") : t("uploadAudio", "Upload audio")}
-                </button>
-                <button className="secondary-button" onClick={() => void (recordingAudio ? stopRecording() : startRecording())} type="button">
-                  {recordingAudio ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
+            <section className="left-section">
+              <h3>{t("evidenceFeed", "Evidence Feed")}</h3>
+              <div className="simple-list">
+                {documents.slice(0, 6).map((document) => (
+                  <article key={document.id}>
+                    <strong>{document.filename}</strong>
+                    <small>
+                      {t("documentsLabel", "Documents")} #{document.id} | {document.processing_status}
+                    </small>
+                  </article>
+                ))}
+                {!documents.length ? <p className="muted">{t("noEvidenceYet", "No evidence uploaded yet.")}</p> : null}
+              </div>
+            </section>
+            <section className="left-section">
+              <h3>Scanned Photos</h3>
+              <div className="simple-list image-batch-list">
+                {imageBatches.slice(0, 5).map((batch) => (
+                  <article key={batch.id} className={`image-batch-card ${batch.status}`}>
+                    <strong>{batch.title}</strong>
+                    <small>
+                      Batch #{batch.id} · {batch.asset_count} page{batch.asset_count === 1 ? "" : "s"} · {batch.status}
+                    </small>
+                    <small>
+                      OCR doc: {batch.generated_document_id ? `#${batch.generated_document_id}` : "pending"}
+                    </small>
+                    {batch.run_authenticity_check ? <small>Authenticity review requested</small> : null}
+                  </article>
+                ))}
+                {!imageBatches.length ? <p className="muted">No scanned photo batches yet.</p> : null}
+              </div>
+            </section>
+            <section className="left-section">
+              <h3>{t("ingestion", "Ingestion")}</h3>
+              <div className="quick-actions">
+                <button
+                  className="secondary-button"
+                  disabled={!selectedCaseId || uploadingPdf}
+                  onClick={() => pdfInputRef.current?.click()}
+                  type="button"
+                >
+                  {uploadingPdf ? t("uploadingPdf", "Uploading PDF...") : t("uploadPdf", "Upload PDF")}
                 </button>
                 <button
                   className="secondary-button"
-                  disabled={!selectedCaseId || workflowLoading || !canRunOperationalActions}
-                  onClick={() => void runAgentWorkflow()}
+                  disabled={!selectedCaseId || uploadingAudio}
+                  onClick={() => audioInputRef.current?.click()}
                   type="button"
                 >
-                  {!canRunOperationalActions
-                    ? "Run workflow (lawyer/admin only)"
-                    : workflowLoading
-                      ? t("running", "Running...")
-                      : t("runWorkflow", "Run workflow")}
+                  {uploadingAudio ? t("uploadingAudio", "Uploading audio...") : t("uploadAudioFile", "Upload audio file")}
                 </button>
-                <label className="toggle-control">
-                  <input checked={useExternalResearch} onChange={(event) => setUseExternalResearch(event.target.checked)} type="checkbox" />
-                  {t("webResearch", "Web research")}
-                </label>
+                <button
+                  className={`secondary-button ${recordingVoice ? "recording" : ""}`}
+                  disabled={!selectedCaseId || composerRecording || composerTranscribing}
+                  onClick={() => {
+                    if (recordingVoice) stopVoiceRecording();
+                    else void startVoiceRecording();
+                  }}
+                  type="button"
+                >
+                  {recordingVoice ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={!selectedCaseId || uploadingScannedPhotos || visionUiDisabled}
+                  onClick={() => scannedPhotoInputRef.current?.click()}
+                  type="button"
+                >
+                  {uploadingScannedPhotos
+                    ? "Uploading photos..."
+                    : visionUiDisabled
+                      ? "Scanned photos unavailable"
+                      : "Upload scanned photos"}
+                </button>
               </div>
-            </details>
-
-            <details className="sidebar-section">
-              <summary>{t("documents", "Documents")}</summary>
-              <div className="document-list">
-                {documents.map((document) => (
-                  <button
-                    key={document.id}
-                    className={`document-card ${selectedDocumentId === document.id ? "selected" : ""}`}
-                    onClick={() => token && void selectDocument(token, document.id)}
-                    type="button"
-                  >
-                    <strong>{document.filename}</strong>
-                    <small>
-                      {formatBytes(document.file_size)} - {localizedText(document.processing_status, "general")}
-                    </small>
-                  </button>
-                ))}
+              <label className="composer-save-toggle ingestion-toggle">
+                <input
+                  checked={runScannedAuthenticityCheck}
+                  onChange={(event) => setRunScannedAuthenticityCheck(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Run authenticity screening only when needed</span>
+              </label>
+              {visionUiDisabled ? (
+                <p className="muted">{visionUnavailableReason || "Scanned-photo OCR is unavailable right now."}</p>
+              ) : (
+                <p className="muted">
+                  {runScannedAuthenticityCheck
+                    ? "The upload will run OCR and an authenticity review before the lawyer checks the papers."
+                    : "The upload will run OCR only and skip authenticity screening."}
+                </p>
+              )}
+            </section>
+            <section className="left-section">
+              <h3>Review Queue</h3>
+              <div className="simple-list review-list">
+                {evidenceReviews.slice(0, 6).map((review) => {
+                  const canDecide = (user?.role === "lawyer" || user?.role === "admin") && review.status === "ready_for_review";
+                  return (
+                    <article key={review.id} className={`review-card review-${review.status}`}>
+                      <strong>Review #{review.id}</strong>
+                      <small>
+                        Risk {review.risk_score}/100 · {review.confidence} · {review.status}
+                      </small>
+                      <p>{truncateText(review.analysis_text, 120)}</p>
+                      {review.signals.length ? <small>Signals: {review.signals.slice(0, 2).join(" · ")}</small> : null}
+                      {canDecide ? (
+                        <div className="review-actions">
+                          <button
+                            className="ghost-button history-action"
+                            disabled={reviewDecisionBusyId === review.id}
+                            onClick={() => void handleEvidenceReviewDecision(review.id, "approved")}
+                            type="button"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            className="ghost-button history-action"
+                            disabled={reviewDecisionBusyId === review.id}
+                            onClick={() => void handleEvidenceReviewDecision(review.id, "rejected")}
+                            type="button"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+                {!evidenceReviews.length ? <p className="muted">No authenticity reviews yet.</p> : null}
               </div>
-              {selectedDocumentAnalysis ? (
-                <div className="analysis-block">
-                  <h4>{t("documentIntelligence", "Document intelligence")}</h4>
-                  <p>{localizedText(selectedDocumentAnalysis.summary_short, "legal_content") || t("noSummaryYet", "No summary available yet.")}</p>
-                </div>
-              ) : null}
-            </details>
+            </section>
 
-            <details className="sidebar-section">
-              <summary>{t("voiceIntake", "Voice and intake")}</summary>
-              <div className="voice-recording-list">
-                {voiceRecordings.map((recording) => (
-                  <button
-                    key={recording.id}
-                    className={`document-card ${selectedRecordingId === recording.id ? "selected" : ""}`}
-                    onClick={() => setSelectedRecordingId(recording.id)}
-                    type="button"
-                  >
-                    <strong>{recording.filename}</strong>
-                    <small>{localizedText(recording.transcription_status, "general")}</small>
-                  </button>
-                ))}
-              </div>
-              {selectedRecording ? (
-                <div className="analysis-block">
-                  <p>{localizedText(getRecordingTranscriptDisplay(selectedRecording), "legal_content")}</p>
-                  <button
-                    className="secondary-button"
-                    disabled={
-                      intakeBuilding ||
-                      selectedRecording.transcription_status !== "completed" ||
-                      !selectedRecording.transcript_text
-                    }
-                    onClick={() => void buildConsultationFromSelectedRecording()}
-                    type="button"
-                  >
-                    {intakeBuilding ? t("buildingIntake", "Building...") : t("createIntakeRequest", "Create intake request")}
-                  </button>
-                </div>
-              ) : null}
-              {selectedConsultationRequest ? (
-                <div className="analysis-block">
-                  <h4>{t("consultation", "Consultation")}</h4>
-                  <p>{localizedText(selectedConsultationRequest.issue_summary, "legal_content")}</p>
-                </div>
-              ) : null}
-            </details>
+            <section className="left-section">
+              <h3>{t("workspaceFacts", "Workspace Facts")}</h3>
+              <ul className="facts-list">
+                <li>{t("lawyerId", "Lawyer ID")}: {selectedCase?.lawyer_id ?? t("notAvailable", "N/A")}</li>
+                <li>{t("client", "Client")}: {selectedClient?.name || t("notAvailable", "N/A")}</li>
+                <li>{t("documentsLabel", "Documents")}: {documents.length}</li>
+                <li>{t("consultations", "Consultations")}: {consultations.length}</li>
+                <li>{t("voiceNotes", "Voice notes")}: {recordings.length}</li>
+                <li>Scanned batches: {imageBatches.length}</li>
+                <li>Pending reviews: {evidenceReviews.filter((review) => review.status === "ready_for_review").length}</li>
+                <li>{t("lastDocRefresh", "Last document refresh")}: {documents[0] ? compactDateTime(documents[0].upload_timestamp, dateLocale, t("noDate", "No date")) : t("notAvailable", "N/A")}</li>
+              </ul>
+            </section>
+          </div>
+        </details>
 
-            {artifactContext ? (
-              <details className="sidebar-section" open>
-                <summary>{t("drafts", "Versioned drafts")}</summary>
-                <div className="artifact-toolbar">
-                  <button
-                    className="secondary-button"
-                    disabled={artifactLoading || !token || !artifactContext}
-                    onClick={() => token && artifactContext && void loadArtifactVersionsForContext(token, artifactContext)}
-                    type="button"
-                  >
-                    {artifactLoading ? "Refreshing..." : t("refreshVersions", "Refresh versions")}
-                  </button>
-                </div>
-                <textarea className="artifact-editor" value={artifactEditorContent} onChange={(event) => setArtifactEditorContent(event.target.value)} />
-                <div className="artifact-actions">
-                  <input
-                    value={artifactInstruction}
-                    onChange={(event) => setArtifactInstruction(event.target.value)}
-                    placeholder={t("improvingPromptPlaceholder", "Tell the agent what to improve.")}
-                  />
-                  <button
-                    className="secondary-button"
-                    disabled={artifactSaving || !artifactInstruction.trim()}
-                    onClick={() => void reviseArtifactWithAgent()}
-                    type="button"
-                  >
-                    {t("reviseWithAgent", "Revise with agent")}
-                  </button>
-                  <button
-                    className="primary-button"
-                    disabled={artifactSaving || !artifactEditorContent.trim()}
-                    onClick={() => void saveManualArtifactEdit()}
-                    type="button"
-                  >
-                    {t("saveVersion", "Save version")}
-                  </button>
-                </div>
-                <div className="artifact-version-list">
-                  {artifactVersions.map((version) => (
-                    <button
-                      key={version.id}
-                      className={`artifact-version-card ${artifactContext.selected_version_id === version.id ? "selected" : ""}`}
-                      onClick={() => void selectArtifactVersion(version.id)}
-                      type="button"
-                    >
-                      <strong>V{version.version_number}</strong>
-                      <small>{version.source_kind.replace("_", " ")}</small>
-                    </button>
-                  ))}
-                </div>
-              </details>
-            ) : null}
-
-            <details className="sidebar-section">
-              <summary>{t("evidence", "Evidence")}</summary>
-              <div className="source-list">
-                {activeSources.slice(0, 8).map((source, index) => (
-                  <article key={`${source.document_id ?? "external"}-${index}`} className="source-card">
-                    <strong>{source.filename}</strong>
-                    <p>{localizedText(source.snippet, "legal_content")}</p>
-                  </article>
-                ))}
-              </div>
-              {activeJurisdiction?.constitutional_references?.length ? (
-                <div className="source-actions">
-                  {activeJurisdiction.constitutional_references.map((url) => (
-                    <a key={url} className="ghost-link" href={url} rel="noreferrer" target="_blank">
-                      {t("constitutionSource", "Constitution source")}
-                    </a>
-                  ))}
-                </div>
-              ) : null}
-            </details>
-          </>
-        )}
-
-        <input ref={documentUploadInputRef} type="file" accept="application/pdf" onChange={handleUpload} hidden />
-        <input
-          ref={audioUploadInputRef}
-          type="file"
-          accept="audio/webm,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/mp3,audio/ogg"
-          onChange={handleVoiceUpload}
-          hidden
-        />
+        <button className="ghost-button logout" onClick={logout} type="button">
+          {t("logout", "Logout")}
+        </button>
       </aside>
 
-      <main className={`chatgpt-main ${inConversationMode ? "conversation-mode" : "home-mode"} ${copilotLoading ? "processing" : ""}`}>
-        <header className="chatgpt-topbar">
+      <main className="center-panel glass">
+        <header className="workspace-topbar">
           <div>
-            <strong>{selectedCase?.title || t("appTitle", "Legal Copilot")}</strong>
-            <small>
+            <p className="meta">{t("setClientMatter", "Set client matter")}</p>
+            <h1>{t("workspaceBrand", "Legal AI")}</h1>
+            <p className="workspace-subtitle">
               {selectedCase
-                ? `${selectedClient?.name || t("noClient", "No client")} - ${formatJurisdictionCountry(selectedCase.jurisdiction_country)}`
-                : t("selectCaseFromSidebar", "Select a case from the sidebar")}
-            </small>
+                ? `${selectedCase.title} · ${topMetaLine}`
+                : t("workspaceTopDefault", "Select a case to start")}
+            </p>
+            <div className="workspace-context-chips">
+              <span className="context-chip role">{roleLabel}</span>
+              <span className="context-chip">{selectedCase ? `${t("caseLabel", "Case")} #${selectedCase.id}` : t("noCaseSelected", "No case selected")}</span>
+              <span className="context-chip">{caseStatusLabel}</span>
+            </div>
           </div>
-          <div className="topbar-actions">
+          <div className="toolbar-controls">
+            <label>
+              {t("language", "Language")}
+              <select value={language} onChange={(event) => setLanguage(event.target.value as UiLanguage)}>
+                <option value="en">{t("languageEnglish", "English")}</option>
+                <option value="de">{t("languageGerman", "German")}</option>
+                <option value="ar">{t("languageArabic", "Arabic")}</option>
+              </select>
+            </label>
+            <label>
+              {t("reasoning", "Reasoning")}
+              <select
+                value={reasoningLevel}
+                onChange={(event) => setReasoningLevel(event.target.value as ReasoningLevel)}
+              >
+                <option value="low">{t("reasoningLow", "Low")}</option>
+                <option value="medium">{t("reasoningMedium", "Medium")}</option>
+                <option value="high">{t("reasoningHigh", "High")}</option>
+              </select>
+            </label>
             <button
-              className="ghost-button sidebar-toggle-topbar"
-              onClick={() => setSidebarCollapsed((current) => !current)}
-              title={sidebarCollapsed ? t("expandSidebar", "Expand sidebar") : t("collapseSidebar", "Collapse sidebar")}
+              className="secondary-button"
+              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
               type="button"
             >
-              <SidebarIcon icon="toggle" />
-            </button>
-            <label className="reasoning-control">
-              <span>{t("retrievalReasoning", "Reasoning")}</span>
-              <select
-                value={retrievalPreset}
-                onChange={(event) => {
-                  const preset = event.target.value as RetrievalPreset;
-                  setRetrievalPreset(preset);
-                  setRetrievalDepth(RETRIEVAL_PRESET_CONFIG[preset].topK);
-                }}
-              >
-                <option value="low">
-                  {t("reasoningLow", "Low")} ({RETRIEVAL_PRESET_CONFIG.low.range})
-                </option>
-                <option value="medium">
-                  {t("reasoningMedium", "Medium")} ({RETRIEVAL_PRESET_CONFIG.medium.range})
-                </option>
-                <option value="high">
-                  {t("reasoningHigh", "High")} ({RETRIEVAL_PRESET_CONFIG.high.range})
-                </option>
-                <option value="extra_high">
-                  {t("reasoningExtraHigh", "Extra High")} ({RETRIEVAL_PRESET_CONFIG.extra_high.range})
-                </option>
-              </select>
-              <small>{retrievalGuidanceByPreset[retrievalPreset]}</small>
-              <strong>top_k={activeRetrievalConfig.topK}</strong>
-            </label>
-            <select value={uiLanguage} onChange={(event) => setUiLanguage(event.target.value as UiLanguage)}>
-              <option value="en">{t("languageEnglish", "English")}</option>
-              <option value="de">{t("languageGerman", "Deutsch")}</option>
-              <option value="ar">{t("languageArabic", "Arabic")}</option>
-            </select>
-            <button className="secondary-button" onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))} type="button">
-              {theme === "dark" ? t("lightMode", "Light mode") : t("darkMode", "Dark mode")}
-            </button>
-            <button className="ghost-button" onClick={logout} type="button">
-              {t("logout", "Logout")}
+              {theme === "dark" ? t("light", "Light") : t("dark", "Dark")}
             </button>
           </div>
         </header>
 
-        <section className="lawyer-kpi-strip">
-          <article>
-            <span>Case status</span>
-            <strong>{selectedCase ? selectedCase.status : "-"}</strong>
-          </article>
-          <article>
-            <span>Documents</span>
-            <strong>{documents.length}</strong>
-          </article>
-          <article>
-            <span>Pending documents</span>
-            <strong>{pendingDocumentCount}</strong>
-          </article>
-          <article>
-            <span>Open intakes</span>
-            <strong>{pendingConsultationCount}</strong>
-          </article>
-          <article>
-            <span>Transcription failures</span>
-            <strong>{failedRecordingCount}</strong>
-          </article>
-        </section>
-
-        <section className="legal-os-grid">
-          <div className="legal-os-primary">
-            <section className="chatgpt-canvas">
-              {inConversationMode ? (
-                <div className="message-stream message-stream-chatgpt">
-                  {chatMessages.map((message) => (
-                    <article key={message.id} className={`message ${message.role}`}>
-                      <div className="message-avatar">{message.role === "assistant" ? "AI" : t("you", "You")}</div>
-                      <div className="message-card">
-                        <p>{message.role === "assistant" ? localizedText(message.content, "legal_content") : message.content}</p>
-                        {message.meta ? (
-                          <div className="message-meta">
-                            <span>{inferAgentFromIntent(message.meta.parsedIntent)}</span>
-                            <span>{message.meta.confidence || "n/a"}</span>
-                            {message.meta.actionCategory ? <span>{message.meta.actionCategory}</span> : null}
-                            {message.meta.actionStatus ? <span>{message.meta.actionStatus}</span> : null}
-                            {message.meta.permissionDenied ? <span>permission denied</span> : null}
-                            {message.meta.fallbackReason ? <span>{message.meta.fallbackReason}</span> : null}
-                          </div>
-                        ) : null}
-                        {message.meta?.steps?.length ? (
-                          <div className="message-meta message-steps">
-                            <span>{message.meta.steps.slice(0, 3).join(" | ")}</span>
-                          </div>
-                        ) : null}
-                        {message.role === "assistant" ? (
-                          <div className="message-feedback-row">
-                            <button
-                              className={`message-feedback-button ${messageFeedback[message.id]?.value === "up" ? "active" : ""}`}
-                              disabled={messageFeedback[message.id]?.status === "saving"}
-                              onClick={() => void submitAssistantFeedback(message, "up")}
-                              type="button"
-                            >
-                              👍 {t("feedbackHelpful", "Helpful")}
-                            </button>
-                            <button
-                              className={`message-feedback-button ${messageFeedback[message.id]?.value === "down" ? "active" : ""}`}
-                              disabled={messageFeedback[message.id]?.status === "saving"}
-                              onClick={() => void submitAssistantFeedback(message, "down")}
-                              type="button"
-                            >
-                              👎 {t("feedbackNeedsWork", "Needs work")}
-                            </button>
-                            {messageFeedback[message.id]?.status === "saving" ? <small>{t("feedbackSaving", "Saving feedback...")}</small> : null}
-                            {messageFeedback[message.id]?.status === "submitted" ? <small>{t("feedbackSaved", "Feedback saved")}</small> : null}
-                            {messageFeedback[message.id]?.status === "error" ? <small>{t("feedbackFailed", "Feedback failed")}</small> : null}
-                          </div>
-                        ) : null}
-                      </div>
-                    </article>
-                  ))}
-                  {copilotLoading ? <div className="loading-bar">{t("processing", "Thinking...")}</div> : null}
-                </div>
-              ) : (
-                <div className="chatgpt-home-hero">
-                  <h1>{t("askCopilot", "Ask copilot")}</h1>
-                  <p>{semanticTranslationBusy ? `${t("smartTranslation", "Smart translation")}...` : t("alwaysReady", "Always ready to support legal work.")}</p>
-                </div>
-              )}
-            </section>
-          </div>
-
-          <aside className="legal-os-side">
-            <article className="legal-panel">
-              <div className="legal-panel-head">
-                <h3>Case Intelligence</h3>
-                <span>{selectedCase ? selectedCase.title : "No case selected"}</span>
+        <details className="workspace-collapsible">
+          <summary>{t("matterDetails", "Matter details")}</summary>
+          <section className="matter-overview-strip">
+            <div className="matter-overview-card">
+              <p className="section-kicker">Current Matter</p>
+              <h2>{selectedCase ? selectedCase.title : t("noCaseSelected", "No case selected")}</h2>
+              <div className="matter-overview-meta">
+                <span>{selectedClient ? selectedClient.name : t("notAvailable", "N/A")}</span>
+                <span>{selectedCase ? `${selectedCase.jurisdiction_country} · ${selectedCase.status}` : "Waiting for case selection"}</span>
+                <span>{providerStatus?.provider_name || t("providerUnavailable", "Provider unavailable")}</span>
               </div>
-
-              <div className="intelligence-grid">
-                <section className="intelligence-subpanel">
-                  <h4>Summary</h4>
-                  <p>
-                    {localizedText(
-                      selectedDocumentAnalysis?.summary_short ||
-                      selectedCase?.description ||
-                      "No case summary available. Upload documents or run workflow to enrich intelligence.",
-                      "legal_content"
-                    )}
-                  </p>
-                </section>
-
-                <section className="intelligence-subpanel">
-                  <h4>Risks</h4>
-                  <ul>
-                    {riskSignals.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </section>
-
-                <section className="intelligence-subpanel">
-                  <h4>Evidence</h4>
-                  {evidenceReferences.length > 0 ? (
-                    <div className="evidence-mini-list">
-                      {evidenceReferences.map((item) => (
-                        <article key={item.id}>
-                          <strong>{item.title}</strong>
-                          <small>{item.reference}</small>
-                          <p>{localizedText(item.snippet, "legal_content")}</p>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <p>No evidence references loaded yet.</p>
-                  )}
-                </section>
-
-                <section className="intelligence-subpanel">
-                  <h4>Missing information</h4>
-                  <ul>
-                    {missingInformation.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </section>
-
-                <section className="intelligence-subpanel">
-                  <h4>Contradictions</h4>
-                  <ul>
-                    {contradictionSignals.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </section>
-
-                <section className="intelligence-subpanel">
-                  <h4>Timeline</h4>
-                  {caseTimelineItems.length ? (
-                    <div className="timeline-mini-list">
-                      {caseTimelineItems.map((item) => (
-                        <article key={item.id}>
-                          <strong>{item.title}</strong>
-                          <small>{formatUiDate(item.date)}</small>
-                          <p>{item.detail}</p>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <p>No timeline events available yet.</p>
-                  )}
-                </section>
-
-                <section className="intelligence-subpanel">
-                  <h4>Recommended actions</h4>
-                  <ul>
-                    {recommendedActions.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </section>
-              </div>
-            </article>
-
-            <article className="legal-panel">
-              <div className="legal-panel-head">
-                <h3>Agent Flow Visualization</h3>
-                <span>User prompt to verified answer</span>
-              </div>
-
-              <div className="agent-flow-track">
-                {flowSteps.map((step, index) => (
-                  <div key={step.label} className={`flow-step ${step.state}`}>
-                    <div className="flow-index">{index + 1}</div>
-                    <div>
-                      <strong>{step.label}</strong>
-                      <small>{step.detail}</small>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="legal-panel ai-engine-panel">
-              <div className="legal-panel-head">
-                <h3>AI Engine Panel</h3>
-                <span>Agent transparency and traceability</span>
-              </div>
-
-              <div className="ai-agent-list">
-                {aiEngineCards.map((agent) => (
-                  <article key={agent.name} className="ai-agent-card">
-                    <header>
-                      <strong>{agent.name}</strong>
-                      <span className={`agent-status ${agent.status}`}>{agent.status}</span>
-                    </header>
-                    <p>{agent.role}</p>
-                    <div className="agent-io">
-                      <small>Input</small>
-                      <span>{agent.inputPreview}</span>
-                    </div>
-                    <div className="agent-io">
-                      <small>Output</small>
-                      <span>{agent.outputPreview}</span>
-                    </div>
-                    <div className="agent-confidence">
-                      <div className="agent-confidence-bar">
-                        <span style={{ width: `${Math.round(agent.confidence * 100)}%` }} />
-                      </div>
-                      <small>{Math.round(agent.confidence * 100)}% confidence</small>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </article>
-          </aside>
-        </section>
-
-        <footer className={`chatgpt-composer-dock ${copilotLoading ? "loading" : ""}`}>
-          {showComposerMenu ? (
-            <div className="composer-plus-menu">
-              <button className={`menu-item ${agentModeEnabled ? "active" : ""}`} onClick={() => setAgentModeEnabled((current) => !current)} type="button">
-                <span className="menu-item-left">
-                  <MenuIcon icon="agent" />
-                  <span>{t("modeAgent", "Mode agent")}</span>
-                </span>
-                <span className="menu-item-badge">{agentModeEnabled ? t("on", "On") : t("off", "Off")}</span>
-              </button>
-              <button
-                className={`menu-item ${useExternalResearch ? "active" : ""}`}
-                onClick={() => {
-                  setUseExternalResearch((current) => !current);
-                  setShowComposerMenu(false);
-                }}
-                type="button"
-              >
-                <span className="menu-item-left">
-                  <MenuIcon icon="web" />
-                  <span>{t("webResearch", "Web research")}</span>
-                </span>
-                <span className="menu-item-badge">{useExternalResearch ? t("on", "On") : t("off", "Off")}</span>
-              </button>
-              <button
-                className={`menu-item ${workflowFromPrompt ? "active" : ""}`}
-                disabled={!canRunOperationalActions}
-                onClick={() => {
-                  setWorkflowFromPrompt((current) => !current);
-                  setShowComposerMenu(false);
-                }}
-                type="button"
-              >
-                <span className="menu-item-left">
-                  <MenuIcon icon="workflow" />
-                  <span>{t("runWorkflow", "Run workflow")}</span>
-                </span>
-                <span className="menu-item-badge">
-                  {!canRunOperationalActions
-                    ? "Lawyer/Admin"
-                    : workflowFromPrompt
-                      ? t("on", "On")
-                      : t("off", "Off")}
-                </span>
-              </button>
             </div>
-          ) : null}
+            <div className="matter-stat-grid">
+              {workspaceSnapshot.map((item) => (
+                <article key={item.label} className="matter-stat-card">
+                  <small>{item.label}</small>
+                  <strong>{item.value}</strong>
+                  <span>{item.meta}</span>
+                </article>
+              ))}
+            </div>
+          </section>
+        </details>
 
-          <form className="chatgpt-composer" onSubmit={handleChatSubmit}>
-            <button className="composer-plus-trigger" type="button" onClick={() => setShowComposerMenu((current) => !current)}>
-              +
-            </button>
-            <div className="composer-input-column">
-              {useExternalResearch || workflowFromPrompt || agentModeEnabled ? (
-                <div className="composer-chip-row">
-                  {agentModeEnabled ? (
-                    <button className="composer-chip active" onClick={() => setAgentModeEnabled(false)} type="button">
-                      <MenuIcon icon="agent" />
-                      <span>{t("modeAgent", "Mode agent")}</span>
-                    </button>
-                  ) : null}
-                  {useExternalResearch ? (
-                    <button className="composer-chip active" onClick={() => setUseExternalResearch(false)} type="button">
-                      <MenuIcon icon="web" />
-                      <span>{t("webResearch", "Web research")}</span>
-                    </button>
-                  ) : null}
-                  {workflowFromPrompt ? (
-                    <button className="composer-chip active" onClick={() => setWorkflowFromPrompt(false)} type="button">
-                      <MenuIcon icon="workflow" />
-                      <span>{t("workflowMode", "Workflow mode")}</span>
-                    </button>
-                  ) : null}
+        <section className="copilot-shell">
+          <details className="workspace-collapsible center-secondary-collapsible">
+            <summary>{t("contextAnalysis", "Context and analysis")}</summary>
+            <div className="workspace-collapsible-body">
+              <header className="copilot-head">
+                <div>
+                  <h2>{t("copilotWorkspace", "Copilot Workspace")}</h2>
+                  <p>{t("copilotWorkspaceDesc", "AI-grounded legal drafting and reasoning for active matter.")}</p>
+                </div>
+                <div className="capability-pill-row">
+                  <span className="capability-pill">Grounded chat</span>
+                  <span className="capability-pill">Drafting copilot</span>
+                  <span className="capability-pill">Evidence OCR</span>
+                  <span className="capability-pill">Verifier agent</span>
+                </div>
+              </header>
+
+              {notice ? <div className="notice-banner">{notice}</div> : null}
+              {error ? <div className="error-banner">{error}</div> : null}
+
+              {selectedCase && caseReviewTable?.rows?.length ? (
+                <details className="workspace-collapsible">
+                  <summary>{t("reviewTable", "Review Table")} · {caseReviewTable.row_count} docs</summary>
+                  <section className="review-table-shell">
+                    <div className="review-table-head">
+                      <div>
+                        <h3>Review Table</h3>
+                        <p>Structured extraction across {caseReviewTable.row_count} document(s) in this matter.</p>
+                      </div>
+                    </div>
+                    <div className="review-table-wrap">
+                      <table className="review-table">
+                        <thead>
+                          <tr>
+                            <th>Document</th>
+                            <th>Type</th>
+                            <th>Parties</th>
+                            <th>Important Dates</th>
+                            <th>Risks</th>
+                            <th>Next Actions</th>
+                            <th>Source</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {caseReviewTable.rows.map((row) => (
+                            <tr key={row.document_id}>
+                              <td>
+                                <strong>{row.filename}</strong>
+                                <small>
+                                  Doc #{row.document_id} · {row.processing_status} · {row.summary_status}
+                                </small>
+                              </td>
+                              <td>
+                                <span>{row.document_type || "Unknown"}</span>
+                                {typeof row.document_type_confidence === "number" ? (
+                                  <small>{Math.round(row.document_type_confidence * 100)}% confidence</small>
+                                ) : null}
+                              </td>
+                              <td>
+                                <div className="table-chip-list">
+                                  {row.parties.length ? row.parties.map((party, index) => (
+                                    <span key={`${party}-${index}`} className="table-chip">{party}</span>
+                                  )) : <span className="table-empty">—</span>}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="table-chip-list">
+                                  {row.important_dates.length ? row.important_dates.map((item, index) => (
+                                    <span key={`${item}-${index}`} className="table-chip date">{item}</span>
+                                  )) : <span className="table-empty">—</span>}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="table-chip-list">
+                                  {row.legal_risks.length ? row.legal_risks.map((risk, index) => (
+                                    <span key={`${risk}-${index}`} className="table-chip risk">{risk}</span>
+                                  )) : <span className="table-empty">—</span>}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="table-chip-list">
+                                  {row.recommended_actions.length ? row.recommended_actions.map((item, index) => (
+                                    <span key={`${item}-${index}`} className="table-chip action">{item}</span>
+                                  )) : <span className="table-empty">—</span>}
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`table-chip ${row.source_kind === "ocr_generated" ? "warning" : "stable"}`}>
+                                  {row.source_kind === "ocr_generated" ? "Scanned OCR" : "Uploaded"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                </details>
+              ) : null}
+
+              {workspaceLoading || caseContextLoading ? (
+                <div className="workspace-skeleton-grid" aria-hidden="true">
+                  <div className="skeleton-card tall" />
+                  <div className="skeleton-card" />
+                  <div className="skeleton-card" />
                 </div>
               ) : null}
-              <textarea
-                onKeyDown={handleChatInputKeyDown}
-                placeholder={t("placeholder", "Ask anything about your case, document, risks, deadlines, or drafting.")}
-                value={chatInput}
-                onChange={(event) => setChatInput(event.target.value)}
-              />
             </div>
-            <div className="composer-action-group">
-              <button
-                className="ghost-button composer-optimize"
-                disabled={copilotLoading || optimizingPrompt || !chatInput.trim()}
-                onClick={() => void optimizePromptInput()}
-                title={t("optimizePrompt", "Optimize prompt")}
-                type="button"
-              >
-                <MenuIcon icon="agent" />
-              </button>
-              <button className="primary-button composer-send" disabled={copilotLoading || optimizingPrompt || workflowLoading || !chatInput.trim()} type="submit">
-                {t("askCopilot", "Ask copilot")}
-              </button>
-            </div>
-          </form>
+          </details>
 
-          {providerStatus ? (
-            <div className="composer-status">
-              {providerStatus.provider_name} - {providerStatus.model} - {activeAgentName} -{" "}
-              {activeJurisdiction?.country_display_name || t("noJurisdiction", "No jurisdiction")} - {externalResearchCount} {t("webSources", "web sources")}
-            </div>
-          ) : null}
-          {optimizingPrompt ? <div className="composer-status">{t("optimizingPrompt", "Optimizing...")}</div> : null}
-          {agentModeEnabled ? (
-            <div className="composer-status">
-              {t("modeAgent", "Mode agent")}:{" "}
-              {canRunOperationalActions
-                ? "analysis + query + authorized actions"
-                : "analysis + query only (read-only role)"}
-            </div>
-          ) : null}
-          {workspaceLoading ? <div className="composer-status">{t("loadingWorkspace", "Loading workspace...")}</div> : null}
-          {agentWorkflow ? <div className="composer-status">{t("workflowReady", "Workflow ready")}: {localizedText(agentWorkflow.objective, "general")}</div> : null}
-          {selectedDocument ? <div className="composer-status">{t("focusedDocument", "Focused document")}: {selectedDocument.filename}</div> : null}
-          {error ? <div className="error-banner inline-error">{localizedText(error, "general")}</div> : null}
-        </footer>
+          <div className="chat-surface">
+            <section className="workflow-primary">
+              <h3>{t("recommendedWorkflows", "Recommended workflows")}</h3>
+              <div className="workflow-grid">
+                {suggestedActions.slice(0, 4).map((action) => (
+                  <button key={action} className="workflow-card" onClick={() => setChatInput(action)} type="button">
+                    <strong>{action}</strong>
+                    <small>{t("draftLabel", "Draft")} · 2 steps</small>
+                  </button>
+                ))}
+              </div>
+              <div className="empty-chat-actions">
+                {suggestedActions.slice(4).map((action) => (
+                  <button key={action} className="ghost-button suggestion-chip" onClick={() => setChatInput(action)} type="button">
+                    {action}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <details className="composer-advanced">
+              <summary>{t("advancedPromptOptions", "Advanced prompt options")}</summary>
+              <div className="composer-tool-row">
+                <button
+                  className="composer-tool"
+                  onClick={() => setAttachmentMenuOpen((current) => !current)}
+                  type="button"
+                >
+                  {t("plusAttachmentsTitle", "Files and sources")}
+                </button>
+                <button
+                  className="composer-tool"
+                  onClick={() => setAttachmentMenuOpen(true)}
+                  type="button"
+                >
+                  {t("prompts", "Prompts")}
+                </button>
+                <button
+                  className="composer-tool"
+                  onClick={() => setAttachmentMenuOpen(true)}
+                  type="button"
+                >
+                  {t("customize", "Customize")}
+                </button>
+                <button
+                  className="composer-tool"
+                  onClick={() => setAttachmentMenuOpen(true)}
+                  type="button"
+                >
+                  {t("improve", "Improve")}
+                </button>
+              </div>
+              <div className="mode-chip-row">
+                <button
+                  className={`mode-chip ${externalModeEnabled ? "external" : ""}`}
+                  onClick={() => setExternalModeEnabled((current) => !current)}
+                  type="button"
+                >
+                  {t("deepResearch", "Deep research")}
+                </button>
+                <span className="mode-chip">
+                  {workspaceMode === "chat"
+                    ? t("modeChat", "Chat Mode")
+                    : workspaceMode === "agent"
+                      ? t("modeAgent", "Agent Mode")
+                      : t("modeLegalSearch", "Legal Search Mode")}
+                </span>
+                {externalModeEnabled ? <span className="mode-chip external">{t("modeExternal", "External Mode")}</span> : null}
+              </div>
+              <p className="composer-footnote">
+                {workspaceMode === "legal_search"
+                  ? t("legalSearchFootnote", "Legal Search Mode prioritizes jurisdiction-specific legal sources before fallback reasoning.")
+                  : workspaceMode === "agent"
+                    ? t("agentFootnote", "Agent Mode enables structured reasoning and legal workflow orchestration.")
+                    : t("chatFootnote", "Chat Mode provides conversational legal support grounded in your case context.")}
+              </p>
+            </details>
+
+            <details
+              className="workspace-collapsible chat-history-collapsible"
+              open={chatHistoryOpen}
+              onToggle={(event) => setChatHistoryOpen((event.currentTarget as HTMLDetailsElement).open)}
+            >
+              <summary>{t("conversationAndOutputs", "Conversation and outputs")}</summary>
+              <div ref={messageStreamRef} className="message-stream">
+                {workspaceLoading || caseContextLoading ? (
+                  <div className="loading-inline">{t("loadingWorkspace", "Loading workspace context...")}</div>
+                ) : null}
+
+                {!activeMessages.length && !copilotLoading ? (
+                  <div className="empty-chat conversation-empty">
+                    <h3>{t("noConversationYet", "No conversation yet")}</h3>
+                    <p>{t("conversationHint", "Use the prompt box above to start.")}</p>
+                  </div>
+                ) : null}
+
+                {activeMessages.map((message) => (
+                  <ChatMessageBubble
+                    key={message.id}
+                    feedback={chatFeedback[message.id]}
+                    language={language}
+                    message={message}
+                    onCopy={handleCopy}
+                    onFeedback={handleFeedback}
+                    onRegenerate={handleRegenerate}
+                  />
+                ))}
+
+                {copilotLoading ? <TypingIndicator /> : null}
+                <div ref={messageEndRef} aria-hidden="true" />
+              </div>
+            </details>
+
+            <footer className="composer-shell">
+              {attachmentMenuOpen ? (
+                <div className="attachment-menu">
+                  <div className="menu-group">
+                    <small className="menu-group-title">{t("plusModesTitle", "Modes")}</small>
+                    <button
+                      className={`menu-item mode ${workspaceMode === "chat" ? "active" : ""}`}
+                      onClick={() => {
+                        setWorkspaceMode("chat");
+                        setAttachmentMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <strong>{t("modeChat", "Chat Mode")}</strong>
+                      <small>{t("modeChatDesc", "Fast legal discussion")}</small>
+                    </button>
+                    <button
+                      className={`menu-item mode ${workspaceMode === "agent" ? "active" : ""}`}
+                      onClick={() => {
+                        setWorkspaceMode("agent");
+                        setAttachmentMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <strong>{t("modeAgent", "Agent Mode")}</strong>
+                      <small>{t("modeAgentDesc", "Step-by-step execution")}</small>
+                    </button>
+                    <button
+                      className={`menu-item mode ${workspaceMode === "legal_search" ? "active" : ""}`}
+                      onClick={() => {
+                        setWorkspaceMode("legal_search");
+                        setAttachmentMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <strong>{t("modeLegalSearch", "Legal Search Mode")}</strong>
+                      <small>{t("modeLegalSearchDesc", "Source-grounded legal answers")}</small>
+                    </button>
+                    <button
+                      className={`menu-item mode ${externalModeEnabled ? "active" : ""}`}
+                      onClick={() => {
+                        setExternalModeEnabled((current) => !current);
+                        setAttachmentMenuOpen(false);
+                      }}
+                      type="button"
+                    >
+                      <strong>{t("modeExternal", "External Mode")}</strong>
+                      <small>{t("modeExternalDesc", "Web-enhanced legal research")}</small>
+                    </button>
+                  </div>
+                  <div className="menu-group">
+                    <small className="menu-group-title">{t("plusAttachmentsTitle", "Attachments")}</small>
+                    <p className="muted">Chat image analysis was removed. Use scanned-photo upload from the case workspace instead.</p>
+                  </div>
+                </div>
+              ) : null}
+              <form
+                className={`composer ${copilotLoading || composerTranscribing || optimizingPrompt ? "busy" : ""}`}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void sendMessage(chatInput);
+                }}
+              >
+                <button
+                  className="composer-plus"
+                  onClick={() => setAttachmentMenuOpen((current) => !current)}
+                  type="button"
+                >
+                  +
+                </button>
+
+                <textarea
+                  ref={composerTextareaRef}
+                  value={chatInput}
+                  onChange={(event) => setChatInput(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  placeholder={t("askPlaceholder", "Ask about your case, risks, deadlines, or draft something...")}
+                />
+
+                <div className="composer-controls">
+                  <button
+                    aria-label={optimizingPrompt ? t("optimizingPrompt", "Optimizing...") : t("optimizePrompt", "Optimize")}
+                    className={`composer-optimize ${optimizingPrompt ? "busy" : ""}`}
+                    disabled={!chatInput.trim() || copilotLoading || composerRecording || composerTranscribing || optimizingPrompt}
+                    onClick={() => void optimizePromptDraft()}
+                    title={optimizingPrompt ? t("optimizingPrompt", "Optimizing...") : t("optimizePrompt", "Optimize")}
+                    type="button"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 20 20">
+                      <path d="M10 2.8 11.3 6l3.2 1.3-3.2 1.3L10 11.8 8.7 8.6 5.5 7.3 8.7 6 10 2.8Z" />
+                      <path d="M15.5 11.2 16.2 13l1.8.7-1.8.7-0.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z" />
+                      <path d="M5.1 11.8 5.7 13.3l1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6.6-1.5Z" />
+                    </svg>
+                  </button>
+                  <button
+                    aria-label={composerRecording ? t("stopVoiceInput", "Stop voice input") : t("voiceInput", "Voice input")}
+                    className={`composer-icon-button ${composerRecording ? "recording" : ""}`}
+                    disabled={!token || copilotLoading || composerTranscribing || optimizingPrompt || recordingVoice}
+                    onClick={() => {
+                      if (composerRecording) stopComposerRecording();
+                      else void startComposerRecording();
+                    }}
+                    title={
+                      composerTranscribing
+                        ? t("transcribingVoiceInput", "Transcribing...")
+                        : composerRecording
+                          ? t("stopVoiceInput", "Stop voice input")
+                          : t("voiceInput", "Voice input")
+                    }
+                    type="button"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 20 20">
+                      <rect x="7" y="3.2" width="6" height="9.2" rx="3" />
+                      <path d="M5.5 9.5a4.5 4.5 0 0 0 9 0" />
+                      <path d="M10 14v3" />
+                      <path d="M7 17h6" />
+                    </svg>
+                  </button>
+                  <button
+                    aria-label={t("send", "Send")}
+                    className="composer-send"
+                    disabled={!chatInput.trim() || copilotLoading || !selectedCaseId || composerRecording || composerTranscribing || optimizingPrompt}
+                    type="submit"
+                  >
+                    {t("askHarvey", "Ask Legal AI")}
+                  </button>
+                </div>
+              </form>
+              {(composerRecording || composerTranscribing) ? (
+                <div className="composer-status-row">
+                  <span className={`mode-chip ${composerRecording ? "external" : ""}`}>
+                    {composerRecording
+                      ? t("stopVoiceInput", "Stop voice input")
+                      : t("transcribingVoiceInput", "Transcribing...")}
+                  </span>
+                </div>
+              ) : null}
+
+              <div className="composer-selected-row">
+                <button
+                  className="selected-mode-chip primary"
+                  onClick={() => setAttachmentMenuOpen(true)}
+                  type="button"
+                >
+                  {workspaceMode === "chat"
+                    ? t("modeChat", "Chat Mode")
+                    : workspaceMode === "agent"
+                      ? t("modeAgent", "Agent Mode")
+                      : t("modeLegalSearch", "Legal Search Mode")}
+                  {" "}v
+                </button>
+                {externalModeEnabled ? (
+                  <button
+                    className="selected-mode-chip external"
+                    onClick={() => setExternalModeEnabled(false)}
+                    type="button"
+                  >
+                    {t("modeExternal", "External Mode")}
+                  </button>
+                ) : null}
+              </div>
+            </footer>
+          </div>
+        </section>
       </main>
+
+      <Suspense
+        fallback={
+          <aside className="right-panel glass">
+            <div className="loading-inline">{t("loadingWorkspace", "Loading workspace context...")}</div>
+          </aside>
+        }
+      >
+        <IntelligencePanel
+          analysis={selectedAnalysis}
+          caseItem={selectedCase}
+          client={selectedClient}
+          consultations={consultations}
+          documents={documents}
+          language={language}
+          latestAssistantMessage={latestAssistantMessage}
+          recordings={recordings}
+        />
+      </Suspense>
+
+      <input
+        ref={pdfInputRef}
+        accept=".pdf,application/pdf"
+        onChange={onPdfFileSelected}
+        style={{ display: "none" }}
+        type="file"
+      />
+      <input
+        ref={audioInputRef}
+        accept="audio/webm,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/mp3,audio/ogg,audio/m4a,audio/x-m4a"
+        onChange={onAudioFileSelected}
+        style={{ display: "none" }}
+        type="file"
+      />
+      <input
+        ref={scannedPhotoInputRef}
+        accept="image/*"
+        multiple
+        onChange={onScannedPhotosSelected}
+        style={{ display: "none" }}
+        type="file"
+      />
     </div>
   );
 }
+

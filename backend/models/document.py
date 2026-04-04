@@ -19,6 +19,7 @@ class Document(Base):
     file_size = Column(Integer, nullable=False)
     file_type = Column(String, nullable=False)
     upload_timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    source_image_batch_id = Column(Integer, nullable=True, index=True)
 
     case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)

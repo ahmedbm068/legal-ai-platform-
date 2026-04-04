@@ -12,6 +12,7 @@ import type {
   DocumentItem,
   FullDocumentAnalysis,
   LLMTestResponse,
+  PromptOptimizationResponse,
   ProviderStatusResponse,
   SemanticTranslateResponse,
   TokenResponse,
@@ -19,10 +20,29 @@ import type {
   UploadedVoiceRecordingResponse,
   User,
   JurisdictionCountry,
+  VoiceTranscriptionResponse,
   VoiceRecording,
 } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+function resolveApiBaseUrl(): string {
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configuredBaseUrl) {
+    return configuredBaseUrl;
+  }
+
+  if (import.meta.env.DEV) {
+    return "/api";
+  }
+
+  if (typeof window !== "undefined") {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:8000`;
+  }
+
+  return "http://127.0.0.1:8000";
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
 
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
@@ -65,6 +85,16 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     return undefined as T;
   }
 
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const text = await response.text();
+    throw new Error(
+      text.trim().startsWith("<")
+        ? "The app received an HTML page instead of API JSON. Restart the frontend dev server and refresh the browser."
+        : (text || "Unexpected non-JSON response from the server.")
+    );
+  }
+
   return response.json() as Promise<T>;
 }
 
@@ -79,7 +109,8 @@ export const api = {
     name: string;
     email: string;
     password: string;
-    tenant_name: string;
+    tenant_name?: string;
+    invite_token?: string;
     role: string;
   }) =>
     request<User>("/auth/register", {
@@ -160,6 +191,17 @@ export const api = {
     });
   },
 
+  transcribeVoiceInput: (token: string, file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    return request<VoiceTranscriptionResponse>("/voice/transcribe", {
+      method: "POST",
+      token,
+      formData,
+    });
+  },
+
   listConsultationRequests: (token: string, caseId: number) =>
     request<ConsultationRequest[]>(`/consultations/case/${caseId}`, {
       token,
@@ -182,6 +224,8 @@ export const api = {
     options?: {
       topK?: number;
       useExternalResearch?: boolean;
+      mode?: "default" | "legal_search";
+      legalSearchMultilingualOutput?: boolean;
       agentMode?: boolean;
       workspaceCaseId?: number | null;
       workspaceDocumentId?: number | null;
@@ -201,6 +245,8 @@ export const api = {
         message,
         top_k: options?.topK ?? 5,
         use_external_research: options?.useExternalResearch ?? true,
+        mode: options?.mode ?? "default",
+        legal_search_multilingual_output: options?.legalSearchMultilingualOutput ?? false,
         agent_mode: options?.agentMode ?? false,
         workspace_case_id: options?.workspaceCaseId ?? null,
         workspace_document_id: options?.workspaceDocumentId ?? null,
@@ -267,6 +313,24 @@ export const api = {
       method: "POST",
       token,
       body: payload,
+    }),
+
+  optimizePrompt: (
+    token: string,
+    payload: {
+      prompt: string;
+      workspaceCaseId?: number | null;
+      workspaceDocumentId?: number | null;
+    }
+  ) =>
+    request<PromptOptimizationResponse>("/ai/optimize-prompt", {
+      method: "POST",
+      token,
+      body: {
+        prompt: payload.prompt,
+        workspace_case_id: payload.workspaceCaseId ?? null,
+        workspace_document_id: payload.workspaceDocumentId ?? null,
+      },
     }),
 
   listArtifactVersions: (

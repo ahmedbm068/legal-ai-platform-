@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional
 from openai import APIError, AuthenticationError, RateLimitError
 from sqlalchemy.orm import Session
 
+from backend.core.config import settings
+from backend.services.cache_service import cache_service
 from backend.services.ai.agents.retrieval_agent import RetrievalAgent
 from backend.services.ai.agents.verifier_agent import verifier_agent
 from backend.services.ai.embedding_service import EmbeddingService
@@ -93,6 +95,29 @@ class RagService:
         ]
 
     @staticmethod
+    def _format_citations(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        citations: list[dict[str, Any]] = []
+        seen: set[tuple[Any, ...]] = set()
+        for item in results[:8]:
+            label = str(item.get("filename") or "Source").strip()
+            chunk_index = item.get("chunk_index")
+            if chunk_index is not None:
+                label = f"{label} - chunk {chunk_index}"
+            key = (label, item.get("document_id"), item.get("case_id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            citations.append(
+                {
+                    "label": label,
+                    "document_id": item.get("document_id"),
+                    "case_id": item.get("case_id"),
+                    "snippet": str(item.get("chunk_text") or "").strip()[:280],
+                }
+            )
+        return citations
+
+    @staticmethod
     def _estimate_confidence(results: List[Dict[str, Any]]) -> str:
         if not results:
             return "low"
@@ -132,6 +157,38 @@ class RagService:
 
         return results[0].get("chunk_text", "")[:500] or "I could not find enough evidence in the indexed documents."
 
+    @staticmethod
+    def _cache_backend() -> str:
+        return "redis" if cache_service.available else "memory"
+
+    def _build_cache_key(
+        self,
+        *,
+        tenant_id: int,
+        question: str,
+        top_k: int,
+        case_id: Optional[int],
+        document_id: Optional[int],
+    ) -> str:
+        return cache_service.build_key(
+            "rag_answer",
+            f"tenant={tenant_id}",
+            f"case={case_id or 'none'}",
+            f"document={document_id or 'none'}",
+            f"top_k={top_k}",
+            question.strip().lower(),
+        )
+
+    @staticmethod
+    def _with_cache_metadata(payload: Dict[str, Any], *, key: str, hit: bool) -> Dict[str, Any]:
+        response = dict(payload)
+        response["cache"] = {
+            "key": key,
+            "hit": hit,
+            "backend": RagService._cache_backend(),
+        }
+        return response
+
     def search_chunks(
         self,
         db: Session,
@@ -169,6 +226,16 @@ class RagService:
     ) -> Dict[str, Any]:
         safe_question = (question or "").strip()
         safe_top_k = self._sanitize_top_k(top_k)
+        cache_key = self._build_cache_key(
+            tenant_id=tenant_id,
+            question=safe_question,
+            top_k=safe_top_k,
+            case_id=case_id,
+            document_id=document_id,
+        )
+        cached_payload = cache_service.get_json(cache_key)
+        if isinstance(cached_payload, dict):
+            return self._with_cache_metadata(cached_payload, key=cache_key, hit=True)
 
         results = self.retrieve_context(
             db=db,
@@ -182,27 +249,34 @@ class RagService:
         scope = self._get_scope(case_id=case_id, document_id=document_id)
 
         if not results:
-            return {
+            response = {
                 "answer": "I could not find enough evidence in the indexed documents.",
                 "used_fallback": True,
                 "fallback_reason": "No relevant chunks found",
                 "confidence": "low",
                 "scope": scope,
-                "sources": []
+                "sources": [],
+                "citations": [],
             }
+            cache_service.set_json(cache_key, response, ttl_seconds=settings.CACHE_TTL_SECONDS)
+            return self._with_cache_metadata(response, key=cache_key, hit=False)
 
         confidence = self._estimate_confidence(results)
         formatted_sources = self._format_sources(results)
+        citations = self._format_citations(results)
 
         if confidence == "low":
-            return {
+            response = {
                 "answer": "I could not find enough evidence in the indexed documents.",
                 "used_fallback": True,
                 "fallback_reason": "Retrieval confidence too low",
                 "confidence": confidence,
                 "scope": scope,
-                "sources": formatted_sources
+                "sources": formatted_sources,
+                "citations": citations,
             }
+            cache_service.set_json(cache_key, response, ttl_seconds=settings.CACHE_TTL_SECONDS)
+            return self._with_cache_metadata(response, key=cache_key, hit=False)
 
         context = self._build_context(results)
 
@@ -224,19 +298,17 @@ Context:
 
         if not self.client:
             fallback_answer = self._extractive_fallback_answer(safe_question, results)
-            verification = verifier_agent.verify_answer(
-                question=safe_question,
-                answer=fallback_answer,
-                sources=formatted_sources,
-            )
-            return {
-                "answer": verification.payload.get("supported_answer") or fallback_answer,
+            response = {
+                "answer": fallback_answer,
                 "used_fallback": True,
                 "fallback_reason": "No LLM provider API key is configured",
-                "confidence": verification.payload.get("confidence") or confidence,
+                "confidence": confidence,
                 "scope": scope,
-                "sources": formatted_sources
+                "sources": formatted_sources,
+                "citations": citations,
             }
+            cache_service.set_json(cache_key, response, ttl_seconds=settings.CACHE_TTL_SECONDS)
+            return self._with_cache_metadata(response, key=cache_key, hit=False)
 
         try:
             response = self.client.responses.create(
@@ -248,59 +320,63 @@ Context:
             if not answer_text:
                 answer_text = self._extractive_fallback_answer(safe_question, results)
 
-            verification = verifier_agent.verify_answer(
-                question=safe_question,
-                answer=answer_text,
-                sources=formatted_sources,
-            )
+            verified_answer = answer_text
+            verified_confidence = confidence
+            used_fallback = False
+            fallback_reason = None
 
-            if not verification.success:
-                return {
-                    "answer": verification.payload.get("supported_answer") or self._extractive_fallback_answer(safe_question, results),
-                    "used_fallback": True,
-                    "fallback_reason": "Verifier agent flagged the generated answer as insufficiently grounded",
-                    "confidence": verification.payload.get("confidence") or confidence,
-                    "scope": scope,
-                    "sources": formatted_sources
-                }
+            if confidence != "high":
+                verification = verifier_agent.verify_answer(
+                    question=safe_question,
+                    answer=answer_text,
+                    sources=formatted_sources,
+                )
+                verified_answer = verification.payload.get("supported_answer") or answer_text
+                verified_confidence = verification.payload.get("confidence") or confidence
+                if not verification.success:
+                    verified_answer = verification.payload.get("supported_answer") or self._extractive_fallback_answer(
+                        safe_question,
+                        results,
+                    )
+                    used_fallback = True
+                    fallback_reason = "Verifier agent flagged the generated answer as insufficiently grounded"
 
-            return {
-                "answer": verification.payload.get("supported_answer") or answer_text,
-                "used_fallback": False,
-                "fallback_reason": None,
-                "confidence": verification.payload.get("confidence") or confidence,
+            payload = {
+                "answer": verified_answer,
+                "used_fallback": used_fallback,
+                "fallback_reason": fallback_reason,
+                "confidence": verified_confidence,
                 "scope": scope,
-                "sources": formatted_sources
+                "sources": formatted_sources,
+                "citations": citations,
             }
+            cache_service.set_json(cache_key, payload, ttl_seconds=settings.CACHE_TTL_SECONDS)
+            return self._with_cache_metadata(payload, key=cache_key, hit=False)
 
         except (RateLimitError, APIError, AuthenticationError) as exc:
             fallback_answer = self._extractive_fallback_answer(safe_question, results)
-            verification = verifier_agent.verify_answer(
-                question=safe_question,
-                answer=fallback_answer,
-                sources=formatted_sources,
-            )
-            return {
-                "answer": verification.payload.get("supported_answer") or fallback_answer,
+            payload = {
+                "answer": fallback_answer,
                 "used_fallback": True,
                 "fallback_reason": str(exc),
-                "confidence": verification.payload.get("confidence") or confidence,
+                "confidence": confidence,
                 "scope": scope,
-                "sources": formatted_sources
+                "sources": formatted_sources,
+                "citations": citations,
             }
+            cache_service.set_json(cache_key, payload, ttl_seconds=settings.CACHE_TTL_SECONDS)
+            return self._with_cache_metadata(payload, key=cache_key, hit=False)
 
         except Exception as exc:
             fallback_answer = self._extractive_fallback_answer(safe_question, results)
-            verification = verifier_agent.verify_answer(
-                question=safe_question,
-                answer=fallback_answer,
-                sources=formatted_sources,
-            )
-            return {
-                "answer": verification.payload.get("supported_answer") or fallback_answer,
+            payload = {
+                "answer": fallback_answer,
                 "used_fallback": True,
                 "fallback_reason": f"Unexpected generation error: {exc}",
-                "confidence": verification.payload.get("confidence") or confidence,
+                "confidence": confidence,
                 "scope": scope,
-                "sources": formatted_sources
+                "sources": formatted_sources,
+                "citations": citations,
             }
+            cache_service.set_json(cache_key, payload, ttl_seconds=settings.CACHE_TTL_SECONDS)
+            return self._with_cache_metadata(payload, key=cache_key, hit=False)

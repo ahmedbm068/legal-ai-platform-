@@ -1,4 +1,5 @@
 import type {
+  ClientPortalAssistantResponse,
   ClientPortalDashboard,
   ClientPortalMessageResponse,
   ClientPortalToken,
@@ -6,12 +7,63 @@ import type {
   PublicIntakeStatus,
 } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+function resolveApiBaseUrl(): string {
+  const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configuredBaseUrl) {
+    return configuredBaseUrl;
+  }
+
+  if (import.meta.env.DEV) {
+    return "/api";
+  }
+
+  if (typeof window !== "undefined") {
+    const { protocol, hostname } = window.location;
+    return `${protocol}//${hostname}:8000`;
+  }
+
+  return "http://127.0.0.1:8000";
+}
+
+const API_BASE_URL = resolveApiBaseUrl();
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "ApiError";
+  }
+}
 
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    let message = `Request failed with status ${response.status}`;
+
+    if (contentType.includes("application/json")) {
+      const payload = (await response.json()) as { detail?: string; message?: string; error?: string } | null;
+      message = payload?.detail || payload?.message || payload?.error || message;
+    } else {
+      const text = await response.text();
+      if (text?.trim()) {
+        message = text.trim();
+      }
+    }
+
+    throw new ApiError(response.status, message);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
     const text = await response.text();
-    throw new Error(text || `Request failed with status ${response.status}`);
+    throw new ApiError(
+      response.status,
+      text.trim().startsWith("<")
+        ? "The portal received an HTML page instead of API JSON. Restart the frontend dev server and refresh the browser."
+        : (text || "Unexpected non-JSON response from the server.")
+    );
   }
 
   return response.json() as Promise<T>;
@@ -33,6 +85,7 @@ export async function fetchIntakeStatus(reference: string): Promise<PublicIntake
 }
 
 export async function registerPortalAccount(payload: {
+  tenant_slug: string;
   full_name: string;
   email: string;
   password: string;
@@ -59,6 +112,16 @@ export async function requestPortalLoginCode(
   });
 
   return parseResponse<ClientPortalMessageResponse>(response);
+}
+
+export async function loginPortalAccount(email: string, password: string): Promise<ClientPortalToken> {
+  const response = await fetch(`${API_BASE_URL}/portal/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+
+  return parseResponse<ClientPortalToken>(response);
 }
 
 export async function verifyPortalLoginCode(email: string, code: string): Promise<ClientPortalToken> {
@@ -90,4 +153,40 @@ export async function submitAuthenticatedPortalIntake(
   });
 
   return parseResponse<ClientPortalDashboard>(response);
+}
+
+export async function uploadPortalCaseMaterials(
+  token: string,
+  caseId: number,
+  formData: FormData
+): Promise<ClientPortalDashboard> {
+  const response = await fetch(`${API_BASE_URL}/portal/cases/${caseId}/uploads`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+
+  return parseResponse<ClientPortalDashboard>(response);
+}
+
+export async function askPortalAssistant(
+  token: string,
+  payload: {
+    message: string;
+    case_id?: number | null;
+    document_id?: number | null;
+    conversation_history?: Array<{ role: "user" | "assistant"; content: string }>;
+    top_k?: number;
+  }
+): Promise<ClientPortalAssistantResponse> {
+  const response = await fetch(`${API_BASE_URL}/portal/assistant`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return parseResponse<ClientPortalAssistantResponse>(response);
 }

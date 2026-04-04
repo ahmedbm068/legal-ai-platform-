@@ -165,3 +165,23 @@ class SearchResultItem(BaseModel):
 class IntelligenceSearchResponse(BaseModel):
     query: str
     results: List[SearchResultItem]
+
+
+class ReviewTableRowOut(BaseModel):
+    document_id: int
+    filename: str
+    processing_status: str
+    summary_status: str
+    document_type: Optional[str] = None
+    document_type_confidence: Optional[float] = None
+    parties: List[str] = []
+    important_dates: List[str] = []
+    legal_risks: List[str] = []
+    recommended_actions: List[str] = []
+    source_kind: str = "uploaded"
+
+
+class CaseReviewTableResponse(BaseModel):
+    case_id: int
+    row_count: int
+    rows: List[ReviewTableRowOut]

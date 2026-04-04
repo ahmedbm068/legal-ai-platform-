@@ -21,16 +21,35 @@ from backend.services.ai.agents.prompt_correction_agent import prompt_correction
 from backend.services.ai.agents.timeline_agent import timeline_agent
 from backend.services.ai.artifact_versioning_service import artifact_versioning_service
 from backend.services.ai.command_parsing_service import command_parsing_service
+from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
 from backend.services.ai.external_research_service import external_research_service
 from backend.services.ai.jurisdiction_context_service import jurisdiction_context_service
+from backend.services.ai.legal_search_mode_service import legal_search_mode_service
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
 
 
 class CopilotService:
-    READ_ONLY_ROLES = {"admin", "lawyer", "assistant"}
+    READ_ONLY_ROLES = {"admin", "lawyer", "assistant", "client"}
     CASE_WRITE_ROLES = {"admin", "lawyer"}
+    CLIENT_ALLOWED_INTENTS = {
+        "list_cases",
+        "list_case_documents",
+        "list_case_appointments",
+        "summarize_case",
+        "summarize_document",
+        "summarize_and_analyze_risks_case",
+        "analyze_risks_case",
+        "list_deadlines_case",
+        "build_timeline_case",
+        "compare_case_documents",
+        "review_booking_case",
+        "ask_case",
+        "ask_document",
+        "ask_global",
+        "summarize_global",
+    }
     CRUD_INTENTS = {
         "create_case",
         "create_client",
@@ -64,6 +83,19 @@ class CopilotService:
         "ask_document": "query",
         "ask_global": "query",
         "summarize_global": "analysis",
+    }
+    LEGAL_SEARCH_ELIGIBLE_INTENTS = {
+        "ask_document",
+        "ask_case",
+        "ask_global",
+        "summarize_global",
+        "summarize_case",
+        "summarize_document",
+        "summarize_and_analyze_risks_case",
+        "analyze_risks_case",
+        "list_deadlines_case",
+        "build_timeline_case",
+        "compare_case_documents",
     }
     NUMBER_WORDS = {
         "one": 1,
@@ -100,15 +132,28 @@ class CopilotService:
         "evidence basis:",
     )
 
-    def __init__(self, rag_service: RagService):
+    def __init__(
+        self,
+        rag_service: RagService,
+        document_pipeline: Optional[DocumentAIPipeline] = None,
+    ):
         self.rag_service = rag_service
+        self.document_pipeline = document_pipeline or DocumentAIPipeline(
+            embedding_service=rag_service.embedding_service,
+            vector_store=rag_service.vector_store,
+        )
         self.client = llm_gateway.create_client()
         self.model = llm_gateway.default_model
 
     @staticmethod
     def _normalize_role(value: str | None) -> str:
         normalized = str(value or "").strip().lower()
-        return normalized if normalized in {"admin", "lawyer", "assistant"} else "assistant"
+        return normalized if normalized in {"admin", "lawyer", "assistant", "client"} else "assistant"
+
+    @staticmethod
+    def _normalize_mode(value: str | None) -> str:
+        normalized = str(value or "default").strip().lower()
+        return normalized or "default"
 
     def _permission_denied_response(self, *, user_role: str, action: str) -> Dict[str, Any]:
         return {
@@ -179,10 +224,17 @@ class CopilotService:
 
         return next_parsed
 
-    def _autocorrect_message(self, message: str, conversation_history: List[Dict[str, Any]] | None = None) -> str:
+    def _autocorrect_message(
+        self,
+        message: str,
+        conversation_history: List[Dict[str, Any]] | None = None,
+        *,
+        allow_llm: bool = False,
+    ) -> str:
         corrected = prompt_correction_agent.correct_query(
             raw_query=message,
             conversation_history=conversation_history or [],
+            allow_llm=allow_llm,
         )
         candidate = corrected.payload.get("corrected_query") if corrected.success else None
         normalized = str(candidate or "").strip()
@@ -307,41 +359,56 @@ class CopilotService:
         message: str,
         top_k: int = 5,
         use_external_research: bool = True,
+        mode: Optional[str] = None,
+        legal_search_multilingual_output: bool = False,
         agent_mode: bool = False,
         workspace_case_id: Optional[int] = None,
         workspace_document_id: Optional[int] = None,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
+        preparsed_command: Optional[Dict[str, Any]] = None,
+        skip_autocorrect: bool = False,
+        preoptimized_query: Optional[str] = None,
+        allowed_case_ids: Optional[List[int]] = None,
+        allowed_document_ids: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
-        # Preserve explicit intent commands (e.g. "Optimize prompt: ...") before any correction pass.
-        raw_parsed = command_parsing_service.parse(message)
-        if raw_parsed.get("intent") == "optimize_prompt":
-            parsed = raw_parsed
+        if isinstance(preparsed_command, dict):
+            parsed = dict(preparsed_command)
         else:
-            corrected_message = self._autocorrect_message(message=message, conversation_history=conversation_history)
-            parsed = command_parsing_service.parse(corrected_message)
-            # Guardrail: keep strong raw case intents if correction pass accidentally dilutes intent.
-            strong_case_intents = {
-                "create_case",
-                "create_client",
-                "summarize_and_analyze_risks_case",
-                "summarize_case",
-                "analyze_risks_case",
-                "list_deadlines_case",
-                "build_timeline_case",
-                "review_booking_case",
-                "draft_client_email_case",
-                "compare_case_documents",
-                "list_case_documents",
-                "list_case_appointments",
-                "request_document_upload",
-                "request_audio_upload",
-                "create_case_appointment",
-                "update_case_status",
-                "list_cases",
-                "list_clients",
-            }
-            if raw_parsed.get("intent") in strong_case_intents and parsed.get("intent") in {"ask_global", "summarize_global"}:
+            # Preserve explicit intent commands (e.g. "Optimize prompt: ...") before any correction pass.
+            raw_parsed = command_parsing_service.parse(message)
+            if raw_parsed.get("intent") == "optimize_prompt" or skip_autocorrect:
                 parsed = raw_parsed
+            else:
+                corrected_message = self._autocorrect_message(
+                    message=message,
+                    conversation_history=conversation_history,
+                    allow_llm=str(raw_parsed.get("confidence") or "").strip().lower() != "high",
+                )
+                parsed = command_parsing_service.parse(corrected_message)
+                # Guardrail: keep strong raw case intents if correction pass accidentally dilutes intent.
+                strong_case_intents = {
+                    "create_case",
+                    "create_client",
+                    "summarize_and_analyze_risks_case",
+                    "summarize_case",
+                    "analyze_risks_case",
+                    "list_deadlines_case",
+                    "build_timeline_case",
+                    "review_booking_case",
+                    "draft_client_email_case",
+                    "compare_case_documents",
+                    "list_case_documents",
+                    "list_case_appointments",
+                    "request_document_upload",
+                    "request_audio_upload",
+                    "create_case_appointment",
+                    "update_case_status",
+                    "list_cases",
+                    "list_clients",
+                }
+                if raw_parsed.get("intent") in strong_case_intents and parsed.get("intent") in {"ask_global", "summarize_global"}:
+                    parsed = raw_parsed
+
         history_context = self._build_history_context(conversation_history)
         parsed = self._apply_conversation_memory(
             parsed=parsed,
@@ -357,11 +424,30 @@ class CopilotService:
         )
         intent = parsed["intent"]
         normalized_role = self._normalize_role(user_role)
+        normalized_mode = self._normalize_mode(mode)
+        normalized_allowed_case_ids = self._normalize_allowed_ids(allowed_case_ids)
+        normalized_allowed_document_ids = self._normalize_allowed_ids(allowed_document_ids)
+        resolved_query = str(preoptimized_query or parsed.get("clean_query") or parsed.get("raw_message") or message).strip()
+        if resolved_query:
+            parsed["clean_query"] = resolved_query
+
         steps: List[str] = [
             f"Parsed intent: {intent}",
             f"Target: {parsed.get('target_type') or 'global'}",
             f"Role: {normalized_role}",
+            f"Mode: {normalized_mode}",
         ]
+
+        if normalized_role == "client" and intent not in self.CLIENT_ALLOWED_INTENTS:
+            return self._permission_denied_response(user_role=normalized_role, action=intent)
+
+        scope_error = self._validate_scope_permissions(
+            parsed=parsed,
+            allowed_case_ids=normalized_allowed_case_ids,
+            allowed_document_ids=normalized_allowed_document_ids,
+        )
+        if scope_error is not None:
+            return scope_error
 
         handlers = {
             "create_case": lambda: self._create_case_action(
@@ -387,6 +473,7 @@ class CopilotService:
             "list_cases": lambda: self._list_cases(
                 db=db,
                 tenant_id=tenant_id,
+                allowed_case_ids=normalized_allowed_case_ids,
             ),
             "list_clients": lambda: self._list_clients(
                 db=db,
@@ -484,7 +571,7 @@ class CopilotService:
             "ask_document": lambda: self._answer_with_optional_external_research(
                 db=db,
                 tenant_id=tenant_id,
-                question=parsed["clean_query"],
+                question=resolved_query,
                 top_k=top_k,
                 case_id=None,
                 document_id=parsed["document_id"],
@@ -492,11 +579,12 @@ class CopilotService:
                 intent="ask_document",
                 target_type="document",
                 target_id=parsed["document_id"],
+                already_optimized=bool(preoptimized_query),
             ),
             "ask_case": lambda: self._answer_with_optional_external_research(
                 db=db,
                 tenant_id=tenant_id,
-                question=parsed["clean_query"],
+                question=resolved_query,
                 top_k=top_k,
                 case_id=parsed["case_id"],
                 document_id=None,
@@ -504,11 +592,12 @@ class CopilotService:
                 intent="ask_case",
                 target_type="case",
                 target_id=parsed["case_id"],
+                already_optimized=bool(preoptimized_query),
             ),
             "ask_global": lambda: self._answer_with_optional_external_research(
                 db=db,
                 tenant_id=tenant_id,
-                question=parsed["clean_query"],
+                question=resolved_query,
                 top_k=top_k,
                 case_id=None,
                 document_id=None,
@@ -516,11 +605,12 @@ class CopilotService:
                 intent="ask_global",
                 target_type="global",
                 target_id=None,
+                already_optimized=bool(preoptimized_query),
             ),
             "summarize_global": lambda: self._answer_with_optional_external_research(
                 db=db,
                 tenant_id=tenant_id,
-                question=parsed["clean_query"],
+                question=resolved_query,
                 top_k=top_k,
                 case_id=None,
                 document_id=None,
@@ -528,14 +618,33 @@ class CopilotService:
                 intent="summarize_global",
                 target_type="global",
                 target_id=None,
+                already_optimized=bool(preoptimized_query),
             ),
         }
 
-        if intent in self.CRUD_INTENTS and not agent_mode:
+        is_legal_search_mode = normalized_mode == "legal_search" and intent in self.LEGAL_SEARCH_ELIGIBLE_INTENTS
+
+        if is_legal_search_mode:
+            result = legal_search_mode_service.run(
+                db=db,
+                tenant_id=tenant_id,
+                user_role=normalized_role,
+                message=resolved_query,
+                top_k=top_k,
+                case_id=parsed.get("case_id"),
+                document_id=parsed.get("document_id"),
+                conversation_history=conversation_history,
+                intent=intent,
+                target_type=parsed.get("target_type"),
+                target_id=parsed.get("target_id"),
+                retrieval_agent=self.rag_service.retrieval_agent,
+                multilingual_output=legal_search_multilingual_output,
+            )
+        elif intent in self.CRUD_INTENTS and not agent_mode:
             result = self._agent_mode_required_response(action=intent)
         else:
             result = handlers.get(intent, self._unsupported_intent_response)()
-        action_category = self.ACTION_CATEGORY_BY_INTENT.get(intent, "analysis")
+        action_category = "legal_search" if is_legal_search_mode else self.ACTION_CATEGORY_BY_INTENT.get(intent, "analysis")
         action_status = str(result.pop("action_status", "")).strip() or ("fallback" if result.get("used_fallback") else "completed")
         permission_denied = bool(result.pop("permission_denied", False))
         structured_result = result.pop("structured_result", {})
@@ -548,6 +657,7 @@ class CopilotService:
             "parsed_intent": parsed["intent"],
             "target_type": parsed["target_type"],
             "target_id": parsed["target_id"],
+            "mode": normalized_mode,
             "agent_mode": bool(agent_mode),
             "action_category": action_category,
             "action_status": action_status,
@@ -556,6 +666,55 @@ class CopilotService:
             "structured_result": structured_result if isinstance(structured_result, dict) else {},
             **result
         }
+
+    @staticmethod
+    def _normalize_allowed_ids(values: Optional[List[int]]) -> set[int] | None:
+        if values is None:
+            return None
+        normalized = {
+            int(value)
+            for value in values
+            if isinstance(value, int) or (isinstance(value, str) and str(value).isdigit())
+        }
+        return normalized
+
+    def _validate_scope_permissions(
+        self,
+        *,
+        parsed: Dict[str, Any],
+        allowed_case_ids: set[int] | None,
+        allowed_document_ids: set[int] | None,
+    ) -> Dict[str, Any] | None:
+        case_id = parsed.get("case_id")
+        document_id = parsed.get("document_id")
+
+        if allowed_case_ids is not None and isinstance(case_id, int) and case_id not in allowed_case_ids:
+            return {
+                **self._permission_denied_response(user_role="client", action="access_case"),
+                "answer": "This assistant can only access cases linked to your portal account.",
+                "scope": "case",
+                "structured_result": {
+                    "requested_case_id": case_id,
+                    "allowed_case_ids": sorted(allowed_case_ids),
+                },
+            }
+
+        if (
+            allowed_document_ids is not None
+            and isinstance(document_id, int)
+            and document_id not in allowed_document_ids
+        ):
+            return {
+                **self._permission_denied_response(user_role="client", action="access_document"),
+                "answer": "This assistant can only access documents linked to your portal account.",
+                "scope": "document",
+                "structured_result": {
+                    "requested_document_id": document_id,
+                    "allowed_document_ids": sorted(allowed_document_ids),
+                },
+            }
+
+        return None
 
     def _unsupported_intent_response(self) -> Dict[str, Any]:
         return {
@@ -996,17 +1155,35 @@ class CopilotService:
             },
         }
 
-    def _list_cases(self, *, db: Session, tenant_id: int) -> Dict[str, Any]:
-        rows = (
+    def _list_cases(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        allowed_case_ids: set[int] | None = None,
+    ) -> Dict[str, Any]:
+        query = (
             db.query(Case)
             .filter(
                 Case.tenant_id == tenant_id,
                 Case.deleted_at.is_(None),
             )
             .order_by(Case.updated_at.desc(), Case.id.desc())
-            .limit(40)
-            .all()
         )
+        if allowed_case_ids is not None:
+            if not allowed_case_ids:
+                return {
+                    "answer": "No cases are currently linked to your portal account.",
+                    "used_fallback": True,
+                    "fallback_reason": "No accessible cases found",
+                    "confidence": "medium",
+                    "scope": "tenant",
+                    "sources": [],
+                    "structured_result": {"cases": []},
+                }
+            query = query.filter(Case.id.in_(sorted(allowed_case_ids)))
+
+        rows = query.limit(40).all()
 
         if not rows:
             return {
@@ -1318,6 +1495,7 @@ class CopilotService:
             intent=intent,
             target_type=target_type,
             target_id=target_id,
+            allow_llm=True,
         )
 
         optimized_query = (
@@ -1348,12 +1526,14 @@ class CopilotService:
         intent: str | None,
         target_type: str | None,
         target_id: int | None,
+        allow_llm: bool = False,
     ) -> str:
         optimized = prompt_optimizer_agent.optimize_query(
             raw_query=question,
             intent=intent,
             target_type=target_type,
             target_id=target_id,
+            allow_llm=allow_llm,
         )
         candidate = optimized.payload.get("optimized_query") if optimized.success else ""
         return str(candidate or question).strip()
@@ -1371,6 +1551,7 @@ class CopilotService:
         intent: str | None,
         target_type: str | None,
         target_id: int | None,
+        already_optimized: bool = False,
     ) -> Dict[str, Any]:
         jurisdiction_context = self._resolve_jurisdiction_context(
             db=db,
@@ -1384,11 +1565,28 @@ class CopilotService:
             else ""
         )
 
-        optimized_question = self._optimize_prompt_for_query(
-            question=question,
-            intent=intent,
-            target_type=target_type,
-            target_id=target_id,
+        normalized_question = str(question or "").strip()
+        if not normalized_question:
+            return {
+                "answer": "I could not find enough detail in the request to run retrieval.",
+                "used_fallback": True,
+                "fallback_reason": "empty_query",
+                "confidence": "low",
+                "scope": "global",
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        optimized_question = (
+            normalized_question
+            if already_optimized
+            else self._optimize_prompt_for_query(
+                question=normalized_question,
+                intent=intent,
+                target_type=target_type,
+                target_id=target_id,
+                allow_llm=False,
+            )
         )
 
         base_result = self.rag_service.answer_question(
@@ -1435,6 +1633,8 @@ class CopilotService:
 
         merged_sources = list(base_result.get("sources") or [])
         merged_sources.extend(self._external_results_to_sources(external_results))
+        merged_citations = list(base_result.get("citations") or [])
+        merged_citations.extend(self._external_results_to_citations(external_results))
 
         return {
             "answer": synthesized_answer or base_result.get("answer", ""),
@@ -1443,6 +1643,8 @@ class CopilotService:
             "confidence": base_result.get("confidence", "medium"),
             "scope": base_result.get("scope", "global"),
             "sources": merged_sources[:20],
+            "citations": merged_citations[:12],
+            "cache": base_result.get("cache", {"hit": False, "backend": "none"}),
             "jurisdiction": jurisdiction_context,
         }
 
@@ -1554,6 +1756,25 @@ External research snippets (JSON):
                 }
             )
         return sources
+
+    @staticmethod
+    def _external_results_to_citations(external_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        citations: List[Dict[str, Any]] = []
+        for item in external_results[:6]:
+            title = str(item.get("title") or item.get("domain") or "Web Research").strip()
+            snippet = str(item.get("snippet") or "").strip()
+            url = str(item.get("url") or "").strip()
+            if url:
+                snippet = f"{snippet} ({url})".strip()
+            citations.append(
+                {
+                    "label": title[:120] or "Web Research",
+                    "document_id": None,
+                    "case_id": None,
+                    "snippet": snippet[:280],
+                }
+            )
+        return citations
 
     @staticmethod
     def _build_fallback_external_answer(*, internal_answer: str, external_results: List[Dict[str, Any]]) -> str:
@@ -1763,12 +1984,38 @@ External research snippets (JSON):
             return document
 
         if not (document.redacted_text or document.extracted_text):
+            try:
+                self.document_pipeline.process_document(document=document, db=db)
+                db.refresh(document)
+            except Exception:
+                return document
+
+        if not (document.redacted_text or document.extracted_text):
             return document
 
         try:
             return summarization_service.summarize_document(db=db, document=document)
         except Exception:
             return document
+
+    def _document_summary_unavailable_reason(self, document: Document) -> str:
+        processing_status = self._normalize_text(document.processing_status) or "unknown"
+        summary_status = self._normalize_text(document.summary_status) or "not_started"
+        processing_error = self._normalize_text(document.processing_error)
+        summary_error = self._normalize_text(document.summary_error)
+
+        notes: List[str] = []
+        if processing_error:
+            notes.append(f"processing error: {processing_error[:180]}")
+        if summary_error:
+            notes.append(f"summary error: {summary_error[:180]}")
+        if not (document.redacted_text or document.extracted_text):
+            notes.append("no extractable text detected")
+
+        details = "; ".join(notes) if notes else "summary generation is pending"
+        return (
+            f"{document.filename} (processing={processing_status}, summary={summary_status}): {details}."
+        )
 
     @staticmethod
     def _normalize_text(value: Optional[str]) -> str:
@@ -2092,8 +2339,12 @@ External research snippets (JSON):
         ).strip()
 
         if not summary_text:
+            status_note = self._document_summary_unavailable_reason(document)
             return {
-                "answer": "I could not summarize this document because no processed text is available.",
+                "answer": (
+                    "I could not summarize this document because no processed text is available yet. "
+                    f"{status_note}"
+                ),
                 "used_fallback": True,
                 "fallback_reason": "Document has no processed text",
                 "confidence": "low",
@@ -2143,12 +2394,12 @@ External research snippets (JSON):
                 "jurisdiction": jurisdiction_context,
             }
 
-        for document in documents:
-            self._ensure_document_summary(db=db, document=document)
+        documents = [self._ensure_document_summary(db=db, document=document) for document in documents]
         document_types: List[str] = []
         parties: List[str] = []
         paragraphs: List[str] = []
         sources: List[Dict[str, Any]] = []
+        unavailable_documents: List[str] = []
 
         for document in documents:
             insights = self._safe_load_insights(document)
@@ -2168,10 +2419,14 @@ External research snippets (JSON):
                 or self._normalize_text(insights.get("general_summary"))
                 or (document.redacted_text or document.extracted_text or "")[:1200]
             )
-            doc_paragraph = self._to_clean_summary_paragraph(
-                source_text,
-                fallback=f"No processed summary is available yet for {document.filename}.",
-            )
+            if source_text:
+                doc_paragraph = self._to_clean_summary_paragraph(
+                    source_text,
+                    fallback=f"A concise summary is not available yet for {document.filename}.",
+                )
+            else:
+                doc_paragraph = "Summary unavailable until document processing completes."
+                unavailable_documents.append(self._document_summary_unavailable_reason(document))
             paragraphs.append(f"Document {len(paragraphs) + 1} ({document.filename}): {doc_paragraph}")
             sources.append(self._build_source(document=document, snippet=doc_paragraph))
 
@@ -2189,12 +2444,26 @@ External research snippets (JSON):
         )
 
         answer = "\n\n".join([case_overview_paragraph, *paragraphs]).strip()
+        if unavailable_documents:
+            answer = (
+                f"{answer}\n\n"
+                "Document processing status:\n"
+                + "\n".join(f"- {item}" for item in unavailable_documents[:10])
+            ).strip()
+
+        complete_document_count = sum(1 for doc in documents if (doc.summary or "").strip())
+        if complete_document_count == len(documents):
+            confidence = "high"
+        elif complete_document_count == 0:
+            confidence = "low"
+        else:
+            confidence = "medium"
 
         return {
             "answer": answer,
-            "used_fallback": False,
-            "fallback_reason": None,
-            "confidence": "high" if all((doc.summary or "").strip() for doc in documents) else "medium",
+            "used_fallback": bool(unavailable_documents),
+            "fallback_reason": "documents_missing_processed_text" if unavailable_documents else None,
+            "confidence": confidence,
             "scope": "case",
             "sources": sources[:10],
             "jurisdiction": jurisdiction_context,

@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+    ApiError,
+    askPortalAssistant,
     fetchIntakeStatus,
     fetchPortalDashboard,
+    loginPortalAccount,
     registerPortalAccount,
     requestPortalLoginCode,
     submitAuthenticatedPortalIntake,
+    uploadPortalCaseMaterials,
     verifyPortalLoginCode,
 } from "./lib/api";
 import type {
+    ClientPortalAssistantResponse,
     ClientPortalCase,
     ClientPortalDashboard,
     ClientPortalDocument,
@@ -191,6 +196,40 @@ function documentInsights(
     };
 }
 
+function renderAssistantResponse(result: ClientPortalAssistantResponse | null, answer: string) {
+    return (
+        <div className="assistant-response-grid">
+            <div className="response-card">
+                <span>Assistant response</span>
+                <p>{answer}</p>
+            </div>
+
+            <div className="response-card">
+                <span>Grounding</span>
+                <p>Confidence: {label(result?.confidence)}</p>
+                <p>Scope: {label(result?.scope)}</p>
+                <p>Snapshot version: {result?.case_snapshot_version ?? "Pending"}</p>
+            </div>
+
+            <div className="response-card">
+                <span>Citations</span>
+                {result?.citations?.length ? (
+                    <ul>
+                        {result.citations.slice(0, 4).map((citation) => (
+                            <li key={`${citation.label}-${citation.snippet}`}>
+                                <strong>{citation.label}</strong>
+                                <p>{citation.snippet || "Grounded citation available."}</p>
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p>No citations available yet for this response.</p>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export default function App() {
     const [theme, setTheme] = useState<ThemeMode>(() => {
         const stored = localStorage.getItem(THEME_STORAGE_KEY);
@@ -204,8 +243,9 @@ export default function App() {
     const [authLoading, setAuthLoading] = useState(false);
     const [dashboardLoading, setDashboardLoading] = useState(false);
     const [submitLoading, setSubmitLoading] = useState(false);
+    const [caseUploadLoading, setCaseUploadLoading] = useState(false);
     const [statusLoading, setStatusLoading] = useState(false);
-    const [recording, setRecording] = useState(false);
+    const [recordingContext, setRecordingContext] = useState<"intake" | "case" | null>(null);
     const [assistantBusy, setAssistantBusy] = useState(false);
 
     const [error, setError] = useState<string | null>(null);
@@ -217,6 +257,7 @@ export default function App() {
     const [searchQuery, setSearchQuery] = useState("");
 
     const [authForm, setAuthForm] = useState({
+        tenant_slug: "",
         full_name: "",
         email: "",
         password: "",
@@ -234,13 +275,17 @@ export default function App() {
     const [statusResult, setStatusResult] = useState<PublicIntakeStatus | null>(null);
     const [voiceFile, setVoiceFile] = useState<File | null>(null);
     const [supportingDocument, setSupportingDocument] = useState<File | null>(null);
+    const [caseVoiceFile, setCaseVoiceFile] = useState<File | null>(null);
+    const [caseDocumentFile, setCaseDocumentFile] = useState<File | null>(null);
     const [assistantPrompt, setAssistantPrompt] = useState("");
     const [assistantAnswer, setAssistantAnswer] = useState(
         "Ask about status, risks, missing documents, or next legal steps."
     );
+    const [assistantResult, setAssistantResult] = useState<ClientPortalAssistantResponse | null>(null);
 
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaChunksRef = useRef<Blob[]>([]);
+    const recordingContextRef = useRef<"intake" | "case" | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
@@ -253,6 +298,18 @@ export default function App() {
             void loadDashboard(token);
         }
     }, [token]);
+
+    useEffect(() => {
+        if (!token || !dashboard?.jobs?.length) return;
+        const hasPendingJobs = dashboard.jobs.some((job) => !["completed", "failed"].includes(job.status));
+        if (!hasPendingJobs) return;
+
+        const timeout = window.setTimeout(() => {
+            void loadDashboard(token);
+        }, 4000);
+
+        return () => window.clearTimeout(timeout);
+    }, [dashboard?.jobs, token]);
 
     useEffect(() => {
         if (!dashboard?.cases.length) {
@@ -274,6 +331,11 @@ export default function App() {
             setSelectedDocumentId(firstForCase.id);
         }
     }, [dashboard?.documents, selectedCaseId, selectedDocumentId]);
+
+    useEffect(() => {
+        setAssistantResult(null);
+        setAssistantAnswer("Ask about status, risks, missing documents, or next legal steps.");
+    }, [selectedCaseId, selectedDocumentId]);
 
     useEffect(() => {
         function onKeyDown(event: KeyboardEvent) {
@@ -347,6 +409,9 @@ export default function App() {
         hasPayload: Boolean(voiceFile || supportingDocument),
         pendingDocuments: pendingDocumentCount,
     });
+    const isAnyRecording = recordingContext !== null;
+    const isIntakeRecording = recordingContext === "intake";
+    const isCaseRecording = recordingContext === "case";
 
     const insights = useMemo(
         () => documentInsights(selectedDocument, selectedCase, dashboard?.activity || []),
@@ -382,6 +447,7 @@ export default function App() {
                     throw new Error(PASSWORD_HINT);
                 }
                 const response = await registerPortalAccount({
+                    tenant_slug: authForm.tenant_slug.trim(),
                     full_name: authForm.full_name,
                     email: authForm.email,
                     password: authForm.password,
@@ -401,15 +467,34 @@ export default function App() {
             }
 
             if (!loginCodeRequested) {
-                const response = await requestPortalLoginCode(authForm.email, authForm.password);
-                setSuccess(response.message);
-                setLoginCodeRequested(true);
-                return;
+                try {
+                    const response = await loginPortalAccount(authForm.email, authForm.password);
+                    localStorage.setItem(TOKEN_STORAGE_KEY, response.access_token);
+                    setToken(response.access_token);
+                    setLoginCodeRequested(false);
+                    setAuthForm((current) => ({ ...current, login_code: "" }));
+                    return;
+                } catch (caught) {
+                    const shouldTriggerOneTimeCode =
+                        (caught instanceof ApiError && caught.status === 403) ||
+                        (caught instanceof Error && caught.message.toLowerCase().includes("verification code is required"));
+
+                    if (!shouldTriggerOneTimeCode) {
+                        throw caught;
+                    }
+
+                    const response = await requestPortalLoginCode(authForm.email, authForm.password);
+                    setSuccess(response.message);
+                    setLoginCodeRequested(true);
+                    return;
+                }
             }
 
             const response = await verifyPortalLoginCode(authForm.email, authForm.login_code);
             localStorage.setItem(TOKEN_STORAGE_KEY, response.access_token);
             setToken(response.access_token);
+            setLoginCodeRequested(false);
+            setAuthForm((current) => ({ ...current, login_code: "" }));
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : "Unable to authenticate.");
         } finally {
@@ -435,7 +520,11 @@ export default function App() {
 
             const next = await submitAuthenticatedPortalIntake(token, payload);
             setDashboard(next);
-            setSuccess("Consultation request submitted successfully.");
+            setSuccess(
+                next.jobs.length
+                    ? `Consultation request submitted. ${next.jobs.length} background job(s) queued.`
+                    : "Consultation request submitted successfully."
+            );
             setView("dashboard");
             setIntakeForm({ issue_summary: "", case_description: "", preferred_schedule: "" });
             setVoiceFile(null);
@@ -448,6 +537,44 @@ export default function App() {
             setError(caught instanceof Error ? caught.message : "Unable to submit consultation request.");
         } finally {
             setSubmitLoading(false);
+        }
+    }
+
+    async function handleCaseUploadSubmit(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        if (!token) return;
+        if (!selectedCase) {
+            setError("Choose a target case before uploading files.");
+            return;
+        }
+
+        if (!caseVoiceFile && !caseDocumentFile) {
+            setError("Add at least one file: a PDF or a voice note.");
+            return;
+        }
+
+        setCaseUploadLoading(true);
+        setError(null);
+        setSuccess(null);
+
+        try {
+            const payload = new FormData();
+            if (caseVoiceFile) payload.append("voice_note", caseVoiceFile);
+            if (caseDocumentFile) payload.append("supporting_document", caseDocumentFile);
+
+            const next = await uploadPortalCaseMaterials(token, selectedCase.id, payload);
+            setDashboard(next);
+            setSuccess(
+                next.jobs.length
+                    ? `Files uploaded. ${next.jobs.length} background job(s) queued for processing.`
+                    : "Files uploaded successfully to the selected case."
+            );
+            setCaseVoiceFile(null);
+            setCaseDocumentFile(null);
+        } catch (caught) {
+            setError(caught instanceof Error ? caught.message : "Unable to upload files for this case.");
+        } finally {
+            setCaseUploadLoading(false);
         }
     }
 
@@ -466,9 +593,13 @@ export default function App() {
         }
     }
 
-    async function startRecording() {
+    async function startRecording(target: "intake" | "case") {
         if (!navigator.mediaDevices?.getUserMedia) {
             setError("Microphone recording not supported.");
+            return;
+        }
+        if (recordingContextRef.current) {
+            setError("A recording is already in progress. Stop it before starting another one.");
             return;
         }
 
@@ -478,6 +609,8 @@ export default function App() {
             const recorder = new MediaRecorder(stream);
             mediaRecorderRef.current = recorder;
             mediaChunksRef.current = [];
+            recordingContextRef.current = target;
+            setRecordingContext(target);
 
             recorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
@@ -488,17 +621,26 @@ export default function App() {
             recorder.onstop = () => {
                 const blob = new Blob(mediaChunksRef.current, { type: recorder.mimeType || "audio/webm" });
                 const extension = blob.type.includes("wav") ? "wav" : blob.type.includes("ogg") ? "ogg" : "webm";
-                setVoiceFile(new File([blob], `client-voice-note-${Date.now()}.${extension}`, { type: blob.type || "audio/webm" }));
+                const recordedFile = new File([blob], `client-voice-note-${Date.now()}.${extension}`, {
+                    type: blob.type || "audio/webm",
+                });
+                if (recordingContextRef.current === "case") {
+                    setCaseVoiceFile(recordedFile);
+                } else {
+                    setVoiceFile(recordedFile);
+                }
                 stream.getTracks().forEach((track) => track.stop());
                 mediaRecorderRef.current = null;
                 mediaChunksRef.current = [];
-                setRecording(false);
+                recordingContextRef.current = null;
+                setRecordingContext(null);
             };
 
             recorder.start();
-            setRecording(true);
         } catch (caught) {
             setError(caught instanceof Error ? caught.message : "Unable to start recording.");
+            recordingContextRef.current = null;
+            setRecordingContext(null);
         }
     }
 
@@ -509,11 +651,29 @@ export default function App() {
     }
 
     async function runAssistantWithPrompt(prompt: string) {
-        if (!dashboard) return;
+        if (!dashboard || !token) return;
+        if (!selectedCase) {
+            setError("Select a case before using the assistant.");
+            return;
+        }
         setAssistantBusy(true);
-        await new Promise((resolve) => setTimeout(resolve, 220));
-        setAssistantAnswer(helperReply(prompt, dashboard, selectedCase));
-        setAssistantBusy(false);
+        setError(null);
+        try {
+            const response = await askPortalAssistant(token, {
+                message: prompt,
+                case_id: selectedCase.id,
+                document_id: selectedDocument?.id ?? null,
+                top_k: 5,
+            });
+            setAssistantResult(response);
+            setAssistantAnswer(response.answer);
+        } catch (caught) {
+            setAssistantResult(null);
+            setAssistantAnswer("I could not generate a grounded answer for this request.");
+            setError(caught instanceof Error ? caught.message : "Unable to query the portal assistant.");
+        } finally {
+            setAssistantBusy(false);
+        }
     }
 
     async function handleAssistantSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -533,8 +693,15 @@ export default function App() {
         setToken(null);
         setDashboard(null);
         setStatusResult(null);
+        setAssistantResult(null);
         setSuccess(null);
         setLoginCodeRequested(false);
+        setVoiceFile(null);
+        setSupportingDocument(null);
+        setCaseVoiceFile(null);
+        setCaseDocumentFile(null);
+        recordingContextRef.current = null;
+        setRecordingContext(null);
         setView("dashboard");
     }
 
@@ -552,6 +719,18 @@ export default function App() {
         event.preventDefault();
         const file = event.dataTransfer.files?.[0];
         if (file) setVoiceFile(file);
+    }
+
+    function onDropCaseDocument(event: React.DragEvent<HTMLLabelElement>) {
+        event.preventDefault();
+        const file = event.dataTransfer.files?.[0];
+        if (file) setCaseDocumentFile(file);
+    }
+
+    function onDropCaseVoice(event: React.DragEvent<HTMLLabelElement>) {
+        event.preventDefault();
+        const file = event.dataTransfer.files?.[0];
+        if (file) setCaseVoiceFile(file);
     }
 
     if (token && dashboardLoading && !dashboard) {
@@ -583,7 +762,7 @@ export default function App() {
                             Secure access to your legal timeline, document processing, and AI-guided next steps.
                         </p>
                         <div className="hero-pills">
-                            <span>Secure code login</span>
+                            <span>One-time secure verification</span>
                             <span>Case-by-case tracking</span>
                             <span>Document intelligence</span>
                             <span>Human-centered AI help</span>
@@ -605,7 +784,7 @@ export default function App() {
                         <div className="section-head">
                             <div>
                                 <h2>Portal access</h2>
-                                <p>Sign in using secure credentials and verification code.</p>
+                                <p>Sign in with email and password. Verification code is required only for first login.</p>
                             </div>
                             <button className="btn ghost" onClick={toggleTheme} type="button">
                                 {theme === "dark" ? "Light mode" : "Dark mode"}
@@ -638,6 +817,17 @@ export default function App() {
                         <form className="form-grid" onSubmit={handleAuthSubmit}>
                             {authMode === "register" ? (
                                 <>
+                                    <label>
+                                        Workspace slug
+                                        <input
+                                            required
+                                            placeholder="example-law-firm"
+                                            value={authForm.tenant_slug}
+                                            onChange={(event) =>
+                                                setAuthForm((current) => ({ ...current, tenant_slug: event.target.value }))
+                                            }
+                                        />
+                                    </label>
                                     <label>
                                         Full name
                                         <input
@@ -746,13 +936,19 @@ export default function App() {
                                 </label>
                             ) : null}
 
+                            {authMode === "login" && loginCodeRequested ? (
+                                <div className="password-note">
+                                    First-time verification only. Future logins will use email and password only.
+                                </div>
+                            ) : null}
+
                             <button className="btn primary full-row" disabled={authLoading} type="submit">
                                 {authLoading
                                     ? "Working..."
                                     : authMode === "login"
                                         ? loginCodeRequested
-                                            ? "Verify and enter portal"
-                                            : "Send access code"
+                                            ? "Verify first login"
+                                            : "Sign in"
                                         : "Create secure account"}
                             </button>
                         </form>
@@ -795,8 +991,8 @@ export default function App() {
                             <h3>Onboarding flow</h3>
                             <ol className="step-list">
                                 <li>Create account</li>
-                                <li>Request secure access code</li>
-                                <li>Verify and enter portal</li>
+                                <li>First login: request secure access code</li>
+                                <li>Verify once and enter portal</li>
                                 <li>Submit and track your request</li>
                             </ol>
                         </article>
@@ -998,12 +1194,7 @@ export default function App() {
                                         </button>
                                     </form>
 
-                                    <div className="assistant-response-grid">
-                                        <div className="response-card">
-                                            <span>Summary</span>
-                                            <p>{assistantAnswer}</p>
-                                        </div>
-                                    </div>
+                                    {renderAssistantResponse(assistantResult, assistantAnswer)}
                                 </article>
                             </section>
                         </>
@@ -1164,115 +1355,198 @@ export default function App() {
                     ) : null}
 
                     {view === "documents" ? (
-                        <div className="document-viewer-grid">
+                        <div className="documents-layout">
                             <article className="card">
                                 <div className="section-head">
                                     <div>
-                                        <h2>Documents</h2>
-                                        <p>Select a file to inspect processing and insights.</p>
+                                        <h2>Upload case materials</h2>
+                                        <p>Add PDF evidence, upload voice files, or record a voice note directly in the portal.</p>
                                     </div>
                                 </div>
-                                <div className="doc-list">
-                                    {visibleDocuments.length ? (
-                                        visibleDocuments.map((row) => (
-                                            <button
-                                                key={row.id}
-                                                className={`doc-item ${selectedDocument?.id === row.id ? "active" : ""}`}
-                                                onClick={() => setSelectedDocumentId(row.id)}
-                                                type="button"
+
+                                {sortedCases.length ? (
+                                    <form className="request-form" onSubmit={handleCaseUploadSubmit}>
+                                        <label>
+                                            Target case
+                                            <select
+                                                value={selectedCaseId ?? ""}
+                                                onChange={(event) => setSelectedCaseId(event.target.value ? Number(event.target.value) : null)}
                                             >
-                                                <div>
-                                                    <strong>{row.filename}</strong>
-                                                    <small>
-                                                        {formatBytes(row.file_size)} | {formatDate(row.upload_timestamp)}
-                                                    </small>
-                                                </div>
-                                                <StatusBadge value={row.processing_status} />
-                                            </button>
-                                        ))
-                                    ) : (
-                                        <p className="muted">No document matches this search for the selected case.</p>
-                                    )}
-                                </div>
-                            </article>
+                                                <option value="">Choose case</option>
+                                                {sortedCases.map((row) => (
+                                                    <option key={row.id} value={row.id}>
+                                                        {row.title}
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </label>
 
-                            <article className="card document-viewer">
-                                <div className="section-head">
-                                    <div>
-                                        <h2>Document intelligence viewer</h2>
-                                        <p>Highlights, extracted entities, and AI-generated insights.</p>
-                                    </div>
-                                    <div className="quick-actions">
-                                        <button
-                                            className="btn ghost"
-                                            onClick={() => void useSuggestion("Summarize my case")}
-                                            type="button"
-                                        >
-                                            Summarize
-                                        </button>
-                                        <button
-                                            className="btn ghost"
-                                            onClick={() => void useSuggestion("Find key clauses")}
-                                            type="button"
-                                        >
-                                            Find clause
-                                        </button>
-                                        <button
-                                            className="btn ghost"
-                                            onClick={() => void useSuggestion("Compare this with other case documents")}
-                                            type="button"
-                                        >
-                                            Compare
-                                        </button>
-                                    </div>
-                                </div>
+                                        <div className="upload-panel-grid">
+                                            <label
+                                                className="upload-drop"
+                                                onDragOver={(event) => event.preventDefault()}
+                                                onDrop={onDropCaseVoice}
+                                            >
+                                                <span>Voice file upload</span>
+                                                <input
+                                                    accept="audio/webm,audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/mp3,audio/ogg,audio/m4a,audio/x-m4a"
+                                                    onChange={(event) => setCaseVoiceFile(event.target.files?.[0] ?? null)}
+                                                    type="file"
+                                                />
+                                                <small>{caseVoiceFile ? caseVoiceFile.name : "Drag and drop or select file"}</small>
+                                            </label>
 
-                                {selectedDocument ? (
-                                    <>
-                                        <div className="viewer-headline">
-                                            <h3>{selectedDocument.filename}</h3>
-                                            <StatusBadge value={selectedDocument.processing_status} />
+                                            <div className="upload-drop action-drop">
+                                                <span>Record voice note</span>
+                                                <button
+                                                    className="btn secondary"
+                                                    disabled={isAnyRecording && !isCaseRecording}
+                                                    onClick={() => void (isCaseRecording ? stopRecording() : startRecording("case"))}
+                                                    type="button"
+                                                >
+                                                    {isCaseRecording ? "Stop recording" : "Record now"}
+                                                </button>
+                                                <small>{isCaseRecording ? "Recording..." : caseVoiceFile ? "Voice note ready" : "Optional"}</small>
+                                            </div>
+
+                                            <label
+                                                className="upload-drop"
+                                                onDragOver={(event) => event.preventDefault()}
+                                                onDrop={onDropCaseDocument}
+                                            >
+                                                <span>PDF document upload</span>
+                                                <input
+                                                    accept=".pdf,application/pdf"
+                                                    onChange={(event) => setCaseDocumentFile(event.target.files?.[0] ?? null)}
+                                                    type="file"
+                                                />
+                                                <small>{caseDocumentFile ? caseDocumentFile.name : "PDF only"}</small>
+                                            </label>
                                         </div>
 
-                                        <div className="viewer-grid">
-                                            <section className="viewer-panel">
-                                                <h4>Highlighted clauses</h4>
-                                                <div className="clause-chip-row">
-                                                    <span>Payment obligations</span>
-                                                    <span>Termination condition</span>
-                                                    <span>Jurisdiction clause</span>
-                                                </div>
-                                                <p className="muted">
-                                                    Highlights are generated from ingestion metadata and legal extraction pipeline outputs.
-                                                </p>
-                                            </section>
-
-                                            <section className="viewer-panel">
-                                                <h4>Extracted entities</h4>
-                                                <ul>
-                                                    <li>Case: {selectedCase?.title || "Unknown case"}</li>
-                                                    <li>File type: {selectedDocument.file_type}</li>
-                                                    <li>Uploaded: {formatDate(selectedDocument.upload_timestamp)}</li>
-                                                    <li>Document size: {formatBytes(selectedDocument.file_size)}</li>
-                                                </ul>
-                                            </section>
-
-                                            <section className="viewer-panel">
-                                                <h4>AI insights</h4>
-                                                <p>{insights?.summary || "No summary available yet."}</p>
-                                                <p>{insights?.riskText || "Risk insights unavailable."}</p>
-                                                <ul>
-                                                    {(insights?.dates || []).map((row) => (
-                                                        <li key={row}>{row}</li>
-                                                    ))}
-                                                </ul>
-                                            </section>
-                                        </div>
-                                    </>
+                                        <button
+                                            className="btn primary"
+                                            disabled={caseUploadLoading || !selectedCase || (!caseVoiceFile && !caseDocumentFile)}
+                                            type="submit"
+                                        >
+                                            {caseUploadLoading ? "Uploading..." : "Upload to selected case"}
+                                        </button>
+                                    </form>
                                 ) : (
-                                    <p className="muted">No document selected for this case.</p>
+                                    <p className="muted">No cases are available yet. Submit your first request in the Requests tab.</p>
                                 )}
                             </article>
+
+                            <div className="document-viewer-grid">
+                                <article className="card">
+                                    <div className="section-head">
+                                        <div>
+                                            <h2>Documents</h2>
+                                            <p>Select a file to inspect processing and insights.</p>
+                                        </div>
+                                    </div>
+                                    <div className="doc-list">
+                                        {visibleDocuments.length ? (
+                                            visibleDocuments.map((row) => (
+                                                <button
+                                                    key={row.id}
+                                                    className={`doc-item ${selectedDocument?.id === row.id ? "active" : ""}`}
+                                                    onClick={() => setSelectedDocumentId(row.id)}
+                                                    type="button"
+                                                >
+                                                    <div>
+                                                        <strong>{row.filename}</strong>
+                                                        <small>
+                                                            {formatBytes(row.file_size)} | {formatDate(row.upload_timestamp)}
+                                                        </small>
+                                                    </div>
+                                                    <StatusBadge value={row.processing_status} />
+                                                </button>
+                                            ))
+                                        ) : (
+                                            <p className="muted">No document matches this search for the selected case.</p>
+                                        )}
+                                    </div>
+                                </article>
+
+                                <article className="card document-viewer">
+                                    <div className="section-head">
+                                        <div>
+                                            <h2>Document intelligence viewer</h2>
+                                            <p>Highlights, extracted entities, and AI-generated insights.</p>
+                                        </div>
+                                        <div className="quick-actions">
+                                            <button
+                                                className="btn ghost"
+                                                onClick={() => void useSuggestion("Summarize my case")}
+                                                type="button"
+                                            >
+                                                Summarize
+                                            </button>
+                                            <button
+                                                className="btn ghost"
+                                                onClick={() => void useSuggestion("Find key clauses")}
+                                                type="button"
+                                            >
+                                                Find clause
+                                            </button>
+                                            <button
+                                                className="btn ghost"
+                                                onClick={() => void useSuggestion("Compare this with other case documents")}
+                                                type="button"
+                                            >
+                                                Compare
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {selectedDocument ? (
+                                        <>
+                                            <div className="viewer-headline">
+                                                <h3>{selectedDocument.filename}</h3>
+                                                <StatusBadge value={selectedDocument.processing_status} />
+                                            </div>
+
+                                            <div className="viewer-grid">
+                                                <section className="viewer-panel">
+                                                    <h4>Highlighted clauses</h4>
+                                                    <div className="clause-chip-row">
+                                                        <span>Payment obligations</span>
+                                                        <span>Termination condition</span>
+                                                        <span>Jurisdiction clause</span>
+                                                    </div>
+                                                    <p className="muted">
+                                                        Highlights are generated from ingestion metadata and legal extraction pipeline outputs.
+                                                    </p>
+                                                </section>
+
+                                                <section className="viewer-panel">
+                                                    <h4>Extracted entities</h4>
+                                                    <ul>
+                                                        <li>Case: {selectedCase?.title || "Unknown case"}</li>
+                                                        <li>File type: {selectedDocument.file_type}</li>
+                                                        <li>Uploaded: {formatDate(selectedDocument.upload_timestamp)}</li>
+                                                        <li>Document size: {formatBytes(selectedDocument.file_size)}</li>
+                                                    </ul>
+                                                </section>
+
+                                                <section className="viewer-panel">
+                                                    <h4>AI insights</h4>
+                                                    <p>{insights?.summary || "No summary available yet."}</p>
+                                                    <p>{insights?.riskText || "Risk insights unavailable."}</p>
+                                                    <ul>
+                                                        {(insights?.dates || []).map((row) => (
+                                                            <li key={row}>{row}</li>
+                                                        ))}
+                                                    </ul>
+                                                </section>
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <p className="muted">No document selected for this case.</p>
+                                    )}
+                                </article>
+                            </div>
                         </div>
                     ) : null}
 
@@ -1338,12 +1612,13 @@ export default function App() {
                                             <span>Record voice note</span>
                                             <button
                                                 className="btn secondary"
-                                                onClick={() => void (recording ? stopRecording() : startRecording())}
+                                                disabled={isAnyRecording && !isIntakeRecording}
+                                                onClick={() => void (isIntakeRecording ? stopRecording() : startRecording("intake"))}
                                                 type="button"
                                             >
-                                                {recording ? "Stop recording" : "Record now"}
+                                                {isIntakeRecording ? "Stop recording" : "Record now"}
                                             </button>
-                                            <small>{recording ? "Recording..." : voiceFile ? "Voice note ready" : "Optional"}</small>
+                                            <small>{isIntakeRecording ? "Recording..." : voiceFile ? "Voice note ready" : "Optional"}</small>
                                         </div>
 
                                         <label
@@ -1353,11 +1628,11 @@ export default function App() {
                                         >
                                             <span>Supporting document</span>
                                             <input
-                                                accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                                                accept=".pdf,application/pdf"
                                                 onChange={(event) => setSupportingDocument(event.target.files?.[0] ?? null)}
                                                 type="file"
                                             />
-                                            <small>{supportingDocument ? supportingDocument.name : "Drag and drop or select file"}</small>
+                                            <small>{supportingDocument ? supportingDocument.name : "PDF only"}</small>
                                         </label>
                                     </div>
 
@@ -1440,7 +1715,7 @@ export default function App() {
                                         onChange={(event) => setAssistantPrompt(event.target.value)}
                                     />
                                     <button className="btn primary" disabled={!assistantPrompt.trim() || assistantBusy} type="submit">
-                                        {assistantBusy ? "Analyzing..." : "Ask helper"}
+                                        {assistantBusy ? "Analyzing..." : "Ask assistant"}
                                     </button>
                                 </form>
                             </article>
@@ -1452,12 +1727,7 @@ export default function App() {
                                         <p>AI output rendered in readable panels, not raw chat logs.</p>
                                     </div>
                                 </div>
-                                <div className="assistant-response-grid">
-                                    <div className="response-card">
-                                        <span>Assistant response</span>
-                                        <p>{assistantAnswer}</p>
-                                    </div>
-                                </div>
+                                {renderAssistantResponse(assistantResult, assistantAnswer)}
                             </article>
                         </div>
                     ) : null}
@@ -1481,8 +1751,20 @@ export default function App() {
                                     <strong>{dashboard.account.email}</strong>
                                 </div>
                                 <div className="profile-card">
+                                    <span>Phone</span>
+                                    <strong>{dashboard.account.phone || "Not provided"}</strong>
+                                </div>
+                                <div className="profile-card">
+                                    <span>Address</span>
+                                    <strong>{dashboard.account.address || "Not provided"}</strong>
+                                </div>
+                                <div className="profile-card">
                                     <span>Firm</span>
                                     <strong>{dashboard.account.tenant_name || "Law firm workspace"}</strong>
+                                </div>
+                                <div className="profile-card">
+                                    <span>Workspace slug</span>
+                                    <strong>{dashboard.account.tenant_slug || "Not configured"}</strong>
                                 </div>
                                 <div className="profile-card">
                                     <span>Account created</span>
@@ -1538,6 +1820,28 @@ export default function App() {
                             <li>{dashboard.metrics.requests_under_review} request(s) under review</li>
                             <li>{highRiskCount} case(s) flagged as high risk</li>
                         </ul>
+                    </article>
+
+                    <article className="card">
+                        <div className="section-head">
+                            <div>
+                                <h3>Processing jobs</h3>
+                                <p>Background analysis, indexing, and transcription status.</p>
+                            </div>
+                        </div>
+                        <div className="result-panel">
+                            {dashboard.jobs.length ? (
+                                <ul className="check-list">
+                                    {dashboard.jobs.slice(0, 5).map((job) => (
+                                        <li key={job.id}>
+                                            {label(job.job_type)}: {label(job.status)}
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p>No background jobs are active right now.</p>
+                            )}
+                        </div>
                     </article>
                 </aside>
             </section>

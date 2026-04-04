@@ -6,11 +6,12 @@ from sqlalchemy.orm import Session
 
 from backend.core.deps import get_db, get_current_user
 from backend.core.permissions import apply_tenant_scope
+from backend.models.case import Case
 from backend.models.user import User
 from backend.models.document import Document
 from backend.models.document_entity import DocumentEntity
-from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
 from backend.services.ai.pii_redaction_service import redact_pii
+from backend.services.ai.runtime_services import shared_document_pipeline
 from backend.services.ai.summarization_service import summarization_service
 from backend.api.intelligence_schema import (
     ProcessDocumentResponse,
@@ -18,6 +19,7 @@ from backend.api.intelligence_schema import (
     DocumentSummaryOut,
     DocumentSummarizeResponse,
     FullDocumentAnalysisOut,
+    CaseReviewTableResponse,
 )
 
 
@@ -39,6 +41,23 @@ def get_tenant_document_or_404(
         )
 
     return document
+
+
+def get_tenant_case_or_404(
+    db: Session,
+    case_id: int,
+    current_user: User
+) -> Case:
+    case_query = db.query(Case).filter(Case.id == case_id)
+    case_item = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
+
+    if not case_item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Case not found"
+        )
+
+    return case_item
 
 
 def normalize_insights_payload(raw_insights: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -69,8 +88,7 @@ def process_document_intelligence(
 ):
     document = get_tenant_document_or_404(db, document_id, current_user)
 
-    pipeline = DocumentAIPipeline()
-    result = pipeline.process_document(document, db)
+    result = shared_document_pipeline.process_document(document, db)
 
     if not result["success"]:
         raise HTTPException(
@@ -311,3 +329,63 @@ def get_full_document_analysis(
         "last_intelligence_run_at": document.last_intelligence_run_at,
         "insights": insights,
     }
+
+
+@router.get(
+    "/cases/{case_id}/review-table",
+    response_model=CaseReviewTableResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_case_review_table(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    case_item = get_tenant_case_or_404(db, case_id, current_user)
+
+    documents = (
+        apply_tenant_scope(
+            db.query(Document).filter(Document.case_id == case_item.id),
+            Document.tenant_id,
+            current_user,
+        )
+        .order_by(Document.upload_timestamp.desc(), Document.id.desc())
+        .all()
+    )
+
+    rows: list[dict[str, Any]] = []
+    for document in documents:
+        parsed_insights: dict[str, Any] | None = None
+        if document.insights_json:
+            try:
+                loaded = json.loads(document.insights_json)
+                if isinstance(loaded, dict):
+                    parsed_insights = normalize_insights_payload(loaded)
+            except json.JSONDecodeError:
+                parsed_insights = None
+
+        important_dates = []
+        for item in (parsed_insights or {}).get("important_dates", [])[:5]:
+            if isinstance(item, dict):
+                label = str(item.get("label") or "Date").strip()
+                value = str(item.get("value") or "").strip()
+                if value:
+                    important_dates.append(f"{label}: {value}")
+
+        rows.append(
+            {
+                "document_id": document.id,
+                "filename": document.filename,
+                "processing_status": document.processing_status,
+                "summary_status": document.summary_status,
+                "document_type": document.document_type or (parsed_insights or {}).get("document_type"),
+                "document_type_confidence": (parsed_insights or {}).get("document_type_confidence"),
+                "parties": (parsed_insights or {}).get("parties_detected", [])[:5],
+                "important_dates": important_dates,
+                "legal_risks": (parsed_insights or {}).get("legal_risks", [])[:5],
+                "recommended_actions": (parsed_insights or {}).get("recommended_next_actions", [])[:5],
+                "source_kind": "ocr_generated" if document.source_image_batch_id else "uploaded",
+            }
+        )
+
+    return {"case_id": case_item.id, "row_count": len(rows), "rows": rows}

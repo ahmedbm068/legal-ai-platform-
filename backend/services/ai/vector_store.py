@@ -10,6 +10,9 @@ from typing import Any, Dict, List, Optional
 
 import faiss
 import numpy as np
+from sqlalchemy import text
+
+from backend.database.database import engine
 
 logger = logging.getLogger(__name__)
 
@@ -19,20 +22,41 @@ class VectorStore:
         self,
         dimension: int,
         index_path: str = "faiss_index.bin",
-        metadata_path: str = "faiss_metadata.json"
+        metadata_path: str = "faiss_metadata.json",
     ):
         self.dimension = dimension
         self.index_path = index_path
         self.metadata_path = metadata_path
         self._lock = threading.RLock()
+        self._database_backend_enabled = self._detect_database_backend()
 
-        self.index = self._load_or_create_index()
-        self.metadata = self._load_metadata()
+        if self._database_backend_enabled:
+            self.index = None
+            self.metadata: List[Dict[str, Any]] = []
+        else:
+            self.index = self._load_or_create_index()
+            self.metadata = self._load_metadata()
 
-        if self.index.ntotal != len(self.metadata):
-            with self._lock:
-                self._rebuild_index_from_metadata_embeddings()
-                self.save()
+            if self.index.ntotal != len(self.metadata):
+                with self._lock:
+                    self._rebuild_index_from_metadata_embeddings()
+                    self.save()
+
+    def _detect_database_backend(self) -> bool:
+        try:
+            if engine.dialect.name != "postgresql":
+                return False
+
+            with engine.begin() as connection:
+                extension = connection.execute(
+                    text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")
+                ).scalar()
+                table_exists = connection.execute(
+                    text("SELECT to_regclass('public.document_chunk_embeddings')")
+                ).scalar()
+            return bool(extension) and bool(table_exists)
+        except Exception:
+            return False
 
     def _load_or_create_index(self):
         if os.path.exists(self.index_path):
@@ -46,6 +70,9 @@ class VectorStore:
         return []
 
     def save(self) -> None:
+        if self._database_backend_enabled:
+            return
+
         with self._lock:
             index_dir = os.path.dirname(os.path.abspath(self.index_path)) or "."
             metadata_dir = os.path.dirname(os.path.abspath(self.metadata_path)) or "."
@@ -88,9 +115,10 @@ class VectorStore:
                 time.sleep(delay)
 
     def _rebuild_index_from_metadata_embeddings(self) -> None:
-        # Caller must hold self._lock when mutating index/metadata.
-        self.index = faiss.IndexFlatIP(self.dimension)
+        if self._database_backend_enabled:
+            return
 
+        self.index = faiss.IndexFlatIP(self.dimension)
         vectors = []
         for item in self.metadata:
             embedding = item.get("embedding")
@@ -102,6 +130,14 @@ class VectorStore:
             self.index.add(np_vectors)
 
     def remove_document_embeddings(self, document_id: int) -> None:
+        if self._database_backend_enabled:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("DELETE FROM document_chunk_embeddings WHERE document_id = :document_id"),
+                    {"document_id": int(document_id)},
+                )
+            return
+
         with self._lock:
             self.metadata = [
                 item for item in self.metadata
@@ -126,11 +162,14 @@ class VectorStore:
 
             item = dict(metadata)
             item["embedding"] = embedding
-
             enriched_metadatas.append(item)
             clean_embeddings.append(embedding)
 
         if not clean_embeddings:
+            return
+
+        if self._database_backend_enabled:
+            self._upsert_database_embeddings(clean_embeddings, enriched_metadatas)
             return
 
         with self._lock:
@@ -145,8 +184,17 @@ class VectorStore:
         top_k: int = 5,
         case_id: Optional[int] = None,
         document_id: Optional[int] = None,
-        tenant_id: Optional[int] = None
+        tenant_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
+        if self._database_backend_enabled:
+            return self._search_database(
+                query_embedding=query_embedding,
+                top_k=top_k,
+                case_id=case_id,
+                document_id=document_id,
+                tenant_id=tenant_id,
+            )
+
         with self._lock:
             if not query_embedding or self.index.ntotal == 0:
                 return []
@@ -185,3 +233,128 @@ class VectorStore:
                     break
 
             return results
+
+    def _upsert_database_embeddings(
+        self,
+        embeddings: list[list[float]],
+        metadatas: list[dict[str, Any]],
+    ) -> None:
+        statement = text(
+            """
+            INSERT INTO document_chunk_embeddings (
+                chunk_id,
+                document_id,
+                case_id,
+                tenant_id,
+                filename,
+                chunk_index,
+                chunk_text,
+                embedding
+            )
+            VALUES (
+                :chunk_id,
+                :document_id,
+                :case_id,
+                :tenant_id,
+                :filename,
+                :chunk_index,
+                :chunk_text,
+                CAST(:embedding AS vector)
+            )
+            ON CONFLICT (chunk_id) DO UPDATE SET
+                document_id = EXCLUDED.document_id,
+                case_id = EXCLUDED.case_id,
+                tenant_id = EXCLUDED.tenant_id,
+                filename = EXCLUDED.filename,
+                chunk_index = EXCLUDED.chunk_index,
+                chunk_text = EXCLUDED.chunk_text,
+                embedding = EXCLUDED.embedding,
+                updated_at = NOW()
+            """
+        )
+        rows = []
+        for embedding, metadata in zip(embeddings, metadatas):
+            rows.append(
+                {
+                    "chunk_id": metadata.get("chunk_id"),
+                    "document_id": metadata.get("document_id"),
+                    "case_id": metadata.get("case_id"),
+                    "tenant_id": metadata.get("tenant_id"),
+                    "filename": metadata.get("filename"),
+                    "chunk_index": metadata.get("chunk_index"),
+                    "chunk_text": metadata.get("chunk_text"),
+                    "embedding": self._vector_literal(embedding),
+                }
+            )
+
+        with engine.begin() as connection:
+            connection.execute(statement, rows)
+
+    def _search_database(
+        self,
+        *,
+        query_embedding: list[float],
+        top_k: int,
+        case_id: int | None,
+        document_id: int | None,
+        tenant_id: int | None,
+    ) -> list[dict[str, Any]]:
+        if not query_embedding:
+            return []
+
+        search_k = max(int(top_k) * 10, 30)
+        query = text(
+            """
+            SELECT
+                chunk_id,
+                document_id,
+                case_id,
+                tenant_id,
+                filename,
+                chunk_index,
+                chunk_text,
+                1 - (embedding <=> CAST(:query_embedding AS vector)) AS semantic_score
+            FROM document_chunk_embeddings
+            WHERE (:tenant_id IS NULL OR tenant_id = :tenant_id)
+              AND (:case_id IS NULL OR case_id = :case_id)
+              AND (:document_id IS NULL OR document_id = :document_id)
+            ORDER BY embedding <=> CAST(:query_embedding AS vector)
+            LIMIT :search_k
+            """
+        )
+        with engine.begin() as connection:
+            rows = connection.execute(
+                query,
+                {
+                    "query_embedding": self._vector_literal(query_embedding),
+                    "tenant_id": tenant_id,
+                    "case_id": case_id,
+                    "document_id": document_id,
+                    "search_k": search_k,
+                },
+            ).mappings().all()
+
+        results = []
+        for row in rows:
+            semantic_score = float(row.get("semantic_score") or 0.0)
+            results.append(
+                {
+                    "chunk_id": row.get("chunk_id"),
+                    "document_id": row.get("document_id"),
+                    "case_id": row.get("case_id"),
+                    "tenant_id": row.get("tenant_id"),
+                    "filename": row.get("filename") or "unknown",
+                    "chunk_index": row.get("chunk_index"),
+                    "chunk_text": row.get("chunk_text") or "",
+                    "score": semantic_score,
+                    "semantic_score": semantic_score,
+                    "bm25_score": 0.0,
+                    "retrieval_method": "semantic",
+                }
+            )
+        return results[:top_k]
+
+    @staticmethod
+    def _vector_literal(values: list[float]) -> str:
+        cleaned = [f"{float(value):.8f}" for value in values]
+        return "[" + ",".join(cleaned) + "]"

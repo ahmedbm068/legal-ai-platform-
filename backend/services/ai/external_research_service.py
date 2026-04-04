@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
@@ -27,7 +27,13 @@ class ExternalResearchService:
         provider = self._resolve_provider()
         return provider is not None
 
-    def search(self, *, query: str, max_results: int | None = None) -> dict[str, Any]:
+    def search(
+        self,
+        *,
+        query: str,
+        max_results: int | None = None,
+        allowed_domains: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
         normalized_query = (query or "").strip()
         if not normalized_query:
             return {
@@ -81,6 +87,8 @@ class ExternalResearchService:
                 "results": [],
                 "error": f"Unexpected external research error: {exc}",
             }
+
+        results = self._filter_results_by_domains(results=results, allowed_domains=allowed_domains)
 
         return {
             "used_external": bool(results),
@@ -220,7 +228,7 @@ class ExternalResearchService:
         snippet: str,
     ) -> dict[str, Any]:
         parsed = urlparse(url) if url else None
-        domain = (parsed.netloc or "").lower() if parsed else ""
+        domain = ExternalResearchService._normalize_domain((parsed.netloc or "").lower() if parsed else "")
         cleaned_title = title or domain or "Web Result"
         return {
             "provider": provider,
@@ -230,6 +238,47 @@ class ExternalResearchService:
             "domain": domain,
             "snippet": snippet[:1200],
         }
+
+    @classmethod
+    def _filter_results_by_domains(
+        cls,
+        *,
+        results: list[dict[str, Any]],
+        allowed_domains: Iterable[str] | None,
+    ) -> list[dict[str, Any]]:
+        if not allowed_domains:
+            return results
+
+        normalized_allowed = {
+            cls._normalize_domain(domain)
+            for domain in allowed_domains
+            if cls._normalize_domain(domain)
+        }
+        if not normalized_allowed:
+            return results
+
+        filtered: list[dict[str, Any]] = []
+        for item in results:
+            domain = cls._normalize_domain(str(item.get("domain") or ""))
+            if cls._domain_matches(domain=domain, allowed_domains=normalized_allowed):
+                filtered.append(item)
+        return filtered
+
+    @staticmethod
+    def _normalize_domain(value: str) -> str:
+        domain = str(value or "").strip().lower()
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain
+
+    @staticmethod
+    def _domain_matches(*, domain: str, allowed_domains: set[str]) -> bool:
+        if not domain:
+            return False
+        for allowed in allowed_domains:
+            if domain == allowed or domain.endswith(f".{allowed}"):
+                return True
+        return False
 
 
 external_research_service = ExternalResearchService()

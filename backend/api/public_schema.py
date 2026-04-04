@@ -1,16 +1,18 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PublicIntakeSubmitResponse(BaseModel):
     message: str
+    tenant_slug: str | None = None
     public_reference: str
     consultation_request_id: int
     case_id: int
     client_name: str
     status: str
+    jobs: list[dict] = Field(default_factory=list)
 
 
 class PublicIntakeStatusResponse(BaseModel):
