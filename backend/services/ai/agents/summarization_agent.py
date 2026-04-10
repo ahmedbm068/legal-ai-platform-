@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
+from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.llm_gateway import llm_gateway
 
 
@@ -63,6 +64,8 @@ Your task is to improve a legal document summary while staying grounded in the p
 Do not invent facts, laws, dates, obligations, or parties.
 If some detail is uncertain, keep the wording cautious and omit unsupported claims.
 
+    {AgentOutputFormatter.build_quality_guidance(task="summarize a legal document", structured_json=True)}
+
 Return valid JSON only with this exact schema:
 {{
   "summary": "string",
@@ -113,40 +116,21 @@ Document text:
 
     @staticmethod
     def _extract_json_payload(raw_text: str) -> Optional[dict[str, Any]]:
-        raw_text = raw_text.strip()
-
-        if raw_text.startswith("```"):
-            raw_text = raw_text.strip("`")
-            raw_text = raw_text.replace("json", "", 1).strip()
-
-        try:
-            payload = json.loads(raw_text)
-            return payload if isinstance(payload, dict) else None
-        except json.JSONDecodeError:
-            start = raw_text.find("{")
-            end = raw_text.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                return None
-
-            try:
-                payload = json.loads(raw_text[start : end + 1])
-                return payload if isinstance(payload, dict) else None
-            except json.JSONDecodeError:
-                return None
+        return AgentOutputFormatter.extract_json_payload(raw_text)
 
     @staticmethod
     def _normalize_payload(payload: dict[str, Any], fallback: dict[str, Any]) -> dict[str, Any]:
         return {
-            "summary": str(payload.get("summary") or "").strip(),
-            "summary_short": str(payload.get("summary_short") or "").strip(),
-            "document_type": str(payload.get("document_type") or fallback.get("document_type") or "unknown").strip(),
-            "key_points": payload.get("key_points") or fallback.get("key_points") or [],
-            "important_dates": payload.get("important_dates") or fallback.get("important_dates") or [],
-            "parties_detected": payload.get("parties_detected") or fallback.get("parties_detected") or [],
-            "legal_risks": payload.get("legal_risks") or fallback.get("legal_risks") or [],
-            "recommended_actions": payload.get("recommended_actions") or fallback.get("recommended_actions") or [],
-            "summary_source": str(payload.get("summary_source") or "llm_summary_agent").strip(),
-            "summary_version": str(payload.get("summary_version") or "v1").strip(),
+            "summary": AgentOutputFormatter.sanitize_text(payload.get("summary")),
+            "summary_short": AgentOutputFormatter.sanitize_text(payload.get("summary_short")),
+            "document_type": AgentOutputFormatter.sanitize_text(payload.get("document_type") or fallback.get("document_type") or "unknown"),
+            "key_points": AgentOutputFormatter.normalize_string_list(payload.get("key_points") or fallback.get("key_points") or [], limit=8),
+            "important_dates": AgentOutputFormatter.normalize_date_items(payload.get("important_dates") or fallback.get("important_dates") or []),
+            "parties_detected": AgentOutputFormatter.normalize_string_list(payload.get("parties_detected") or fallback.get("parties_detected") or [], limit=8),
+            "legal_risks": AgentOutputFormatter.normalize_string_list(payload.get("legal_risks") or fallback.get("legal_risks") or [], limit=8),
+            "recommended_actions": AgentOutputFormatter.normalize_string_list(payload.get("recommended_actions") or fallback.get("recommended_actions") or [], limit=8),
+            "summary_source": AgentOutputFormatter.sanitize_text(payload.get("summary_source") or "llm_summary_agent"),
+            "summary_version": AgentOutputFormatter.sanitize_text(payload.get("summary_version") or "v1"),
         }
 
 

@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from backend.models.consultation_request import ConsultationRequest
+from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
 from backend.services.ai.llm_gateway import llm_gateway
 
@@ -124,6 +125,8 @@ class BookingAgent(BaseAgent):
 You are the Booking Agent inside a legal AI platform.
 
 You receive structured consultation-booking context for a legal case.
+    {AgentOutputFormatter.build_quality_guidance(task="summarize the booking posture and recommended action", structured_json=True)}
+
 Return valid JSON only with this schema:
 {{
   "narrative_summary": "string",
@@ -148,9 +151,9 @@ Booking context:
                 return None
 
             return {
-                "narrative_summary": self._normalize_text(payload.get("narrative_summary"))
+                "narrative_summary": AgentOutputFormatter.sanitize_text(payload.get("narrative_summary"))
                 or heuristic_payload.get("narrative_summary", ""),
-                "recommended_action": self._normalize_text(payload.get("recommended_action"))
+                "recommended_action": AgentOutputFormatter.sanitize_text(payload.get("recommended_action"))
                 or heuristic_payload.get("recommended_action", ""),
             }
         except Exception:
@@ -158,28 +161,11 @@ Booking context:
 
     @staticmethod
     def _extract_json_payload(raw_text: str) -> dict[str, Any] | None:
-        candidate = raw_text.strip()
-        if candidate.startswith("```"):
-            candidate = candidate.strip("`")
-            candidate = candidate.replace("json", "", 1).strip()
-
-        try:
-            payload = json.loads(candidate)
-            return payload if isinstance(payload, dict) else None
-        except json.JSONDecodeError:
-            start = candidate.find("{")
-            end = candidate.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                return None
-            try:
-                payload = json.loads(candidate[start : end + 1])
-                return payload if isinstance(payload, dict) else None
-            except json.JSONDecodeError:
-                return None
+        return AgentOutputFormatter.extract_json_payload(raw_text)
 
     @staticmethod
     def _normalize_text(value: Any) -> str:
-        return str(value or "").strip()
+        return AgentOutputFormatter.normalize_text(value)
 
     def _first_non_empty(self, values) -> str | None:
         for value in values:

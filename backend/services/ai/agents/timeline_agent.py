@@ -7,6 +7,7 @@ from typing import Any
 
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
+from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
 from backend.services.ai.llm_gateway import llm_gateway
 
@@ -119,6 +120,9 @@ class TimelineAgent(BaseAgent):
 You are the Timeline Agent inside a legal AI platform.
 
 You receive extracted timeline events from a legal case.
+
+{AgentOutputFormatter.build_quality_guidance(task="turn extracted dates into a strict chronology", structured_json=True)}
+
 Return valid JSON only with this schema:
 {{
   "timeline_text": "string"

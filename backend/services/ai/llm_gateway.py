@@ -349,8 +349,20 @@ class LLMGateway:
         )
 
     def _build_text_provider(self) -> ProviderProfile:
-        api_key = (settings.GROQ_API_KEY or settings.OPENAI_API_KEY or "").strip() or None
+        groq_api_key = (settings.GROQ_API_KEY or "").strip() or None
+        openai_api_key = (settings.OPENAI_API_KEY or "").strip() or None
         configured_base_url = _normalized_base_url(settings.LLM_BASE_URL)
+        configured_base_url_lower = (configured_base_url or "").lower()
+
+        # When a base URL is explicitly configured, prefer the matching key family first.
+        # This prevents a populated GROQ_API_KEY from shadowing OPENAI_API_KEY for OpenRouter/OpenAI-compatible routes.
+        if "groq.com" in configured_base_url_lower:
+            api_key = groq_api_key or openai_api_key
+        elif configured_base_url:
+            api_key = openai_api_key or groq_api_key
+        else:
+            api_key = groq_api_key or openai_api_key
+
         if configured_base_url:
             base_url = configured_base_url
         elif api_key and api_key.startswith("gsk_"):

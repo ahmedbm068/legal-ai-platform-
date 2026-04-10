@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any, Iterable
 
+from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
 from backend.services.ai.llm_gateway import llm_gateway
 
@@ -104,6 +105,8 @@ Task:
 - Keep legal terms, case ids, document ids, and named entities unchanged.
 - Keep it concise.
 
+{AgentOutputFormatter.build_quality_guidance(task="correct a legal prompt without changing its intent", structured_json=True)}
+
 Return JSON only:
 {{
   "corrected_query": "string"
@@ -131,36 +134,11 @@ Heuristic correction:
 
     @staticmethod
     def _extract_json(raw_text: str) -> dict[str, Any] | None:
-        candidate = raw_text.strip()
-        if not candidate:
-            return None
-        try:
-            payload = json.loads(candidate)
-            return payload if isinstance(payload, dict) else None
-        except json.JSONDecodeError:
-            pass
-
-        fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", candidate, flags=re.IGNORECASE)
-        if fenced_match:
-            try:
-                payload = json.loads(fenced_match.group(1))
-                return payload if isinstance(payload, dict) else None
-            except json.JSONDecodeError:
-                pass
-
-        start = candidate.find("{")
-        end = candidate.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                payload = json.loads(candidate[start : end + 1])
-                return payload if isinstance(payload, dict) else None
-            except json.JSONDecodeError:
-                return None
-        return None
+        return AgentOutputFormatter.extract_json_payload(raw_text)
 
     @staticmethod
     def _normalize_text(value: Any) -> str:
-        return str(value or "").strip()
+        return AgentOutputFormatter.normalize_text(value)
 
 
 prompt_correction_agent = PromptCorrectionAgent()

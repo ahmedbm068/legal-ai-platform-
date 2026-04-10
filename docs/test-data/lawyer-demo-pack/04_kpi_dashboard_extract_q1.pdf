@@ -1,0 +1,81 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 1065 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(Q1 OPERATIONS KPI DASHBOARD EXTRACT) Tj
+0 -12 Td
+(Period: January to March 2026) Tj
+0 -12 Td
+(Prepared by: Atlas Operations Audit Unit) Tj
+0 -12 Td
+(Key Metrics by Month) Tj
+0 -12 Td
+(January:) Tj
+0 -12 Td
+(- Orders delivered: 31,240) Tj
+0 -12 Td
+(- On-time delivery: 96.8%) Tj
+0 -12 Td
+(- Lost package ratio: 0.6%) Tj
+0 -12 Td
+(February:) Tj
+0 -12 Td
+(- Orders delivered: 33,110) Tj
+0 -12 Td
+(- On-time delivery: 92.4%) Tj
+0 -12 Td
+(- Lost package ratio: 0.9%) Tj
+0 -12 Td
+(March:) Tj
+0 -12 Td
+(- Orders delivered: 35,880) Tj
+0 -12 Td
+(- On-time delivery: 93.1%) Tj
+0 -12 Td
+(- Lost package ratio: 1.2%) Tj
+0 -12 Td
+(Observed Risks) Tj
+0 -12 Td
+(- Repeated missed SLA targets in two consecutive months) Tj
+0 -12 Td
+(- Elevated complaint volume from key urban zones) Tj
+0 -12 Td
+(- Incomplete proof-of-delivery records in 7.4% of sampled files) Tj
+0 -12 Td
+(Recommended Immediate Actions) Tj
+0 -12 Td
+(- Corrective action plan with weekly KPI checkpoints) Tj
+0 -12 Td
+(- Root-cause analysis by route cluster and carrier team) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1427
+%%EOF

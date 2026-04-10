@@ -1,7 +1,5 @@
 
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -13,6 +11,7 @@ import {
 } from "react";
 import { workspaceApi as api } from "./workspaceApi";
 import ChatMessageBubble, { type MessageFeedbackState } from "./components/ChatMessageBubble";
+import IntelligencePanel from "./components/IntelligencePanel";
 import type {
   CaseItem,
   ChatMessage,
@@ -20,7 +19,6 @@ import type {
   ConsultationRequest,
   DocumentItem,
   EvidenceAnalysisReview,
-  FullDocumentAnalysis,
   ImageDocumentBatch,
   PromptLibraryEntry,
   ProviderStatusResponse,
@@ -29,9 +27,6 @@ import type {
   VoiceRecording,
 } from "./types";
 
-// Optimization: lazy load right-side intelligence dashboard to reduce initial bundle and first paint cost.
-const IntelligencePanel = lazy(() => import("./components/IntelligencePanel"));
-
 const TOKEN_STORAGE_KEY = "legal-ai-platform-token";
 const THEME_STORAGE_KEY = "legal-ai-platform-theme-v3";
 const LANGUAGE_STORAGE_KEY = "legal-ai-platform-language-v2";
@@ -39,12 +34,26 @@ const LEGACY_CHAT_STORAGE_KEY = "legal-ai-platform-chat-map-v2";
 const CHAT_STORAGE_KEY = "legal-ai-platform-chat-sessions-v3";
 const IMAGE_BATCH_POLL_INTERVAL_MS = 4500;
 const IMAGE_BATCH_POLL_MAX_CYCLES = 30;
+const IMAGE_BATCH_POLL_STALL_MAX_CYCLES = 6;
 
 type ThemeMode = "dark" | "light";
 type UiLanguage = "en" | "de" | "ar";
 type WorkspaceMode = "chat" | "agent" | "legal_search";
 type ReasoningLevel = "low" | "medium" | "high";
 type FeedbackValue = "up" | "down";
+type SidebarTab = "navigator" | "bibliotheque";
+type LibraryFilter = "all" | "pdf" | "voice" | "image";
+
+interface BibliothequeItem {
+  id: string;
+  kind: Exclude<LibraryFilter, "all">;
+  title: string;
+  subtitle: string;
+  status: string;
+  sizeLabel: string;
+  createdAt: string;
+  sortTime: number;
+}
 
 type BrowserSpeechRecognition = {
   lang: string;
@@ -473,6 +482,14 @@ function truncateText(value: string, max = 92): string {
   return `${cleaned.slice(0, max - 1)}...`;
 }
 
+function formatFileSize(bytes: number | null | undefined): string {
+  if (!bytes || bytes <= 0) return "0 KB";
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.max(1, Math.round(kb))} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(1)} MB`;
+}
+
 function normalizeError(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -620,11 +637,21 @@ export default function App() {
   const [evidenceReviews, setEvidenceReviews] = useState<EvidenceAnalysisReview[]>([]);
   const [promptLibraryEntries, setPromptLibraryEntries] = useState<PromptLibraryEntry[]>([]);
   const [caseReviewTable, setCaseReviewTable] = useState<CaseReviewTable | null>(null);
-  const [selectedAnalysis, setSelectedAnalysis] = useState<FullDocumentAnalysis | null>(null);
 
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
+
+  const [leftRailOpen, setLeftRailOpen] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("navigator");
+  const [bibliothequeFilter, setBibliothequeFilter] = useState<LibraryFilter>("all");
+  const [bibliothequeQuery, setBibliothequeQuery] = useState("");
+  const [bibliothequeGlobalItems, setBibliothequeGlobalItems] = useState<BibliothequeItem[]>([]);
+  const [bibliothequeLoading, setBibliothequeLoading] = useState(false);
+  const [selectionGateOpen, setSelectionGateOpen] = useState(false);
+  const [selectionGateDone, setSelectionGateDone] = useState(false);
+  const [gateClientId, setGateClientId] = useState<number | null>(null);
+  const [gateCaseId, setGateCaseId] = useState<number | null>(null);
 
   const [chatState, setChatState] = useState<StoredChatSessionsState>(() => parseStoredChatState());
   const [chatInput, setChatInput] = useState("");
@@ -643,7 +670,6 @@ export default function App() {
 
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [caseContextLoading, setCaseContextLoading] = useState(false);
-  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [copilotLoading, setCopilotLoading] = useState(false);
   const [uploadingPdf, setUploadingPdf] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
@@ -691,15 +717,9 @@ export default function App() {
     () => cases.find((item) => item.id === selectedCaseId) || null,
     [cases, selectedCaseId]
   );
-  const selectedClient = useMemo(() => {
-    if (selectedCase) {
-      return clients.find((item) => item.id === selectedCase.client_id) || null;
-    }
-    return clients.find((item) => item.id === selectedClientId) || null;
-  }, [clients, selectedCase, selectedClientId]);
-  const selectedDocument = useMemo(
-    () => documents.find((item) => item.id === selectedDocumentId) || documents[0] || null,
-    [documents, selectedDocumentId]
+  const selectedClient = useMemo(
+    () => clients.find((item) => item.id === selectedClientId) || null,
+    [clients, selectedClientId]
   );
   const activeSessions = useMemo(
     () => (selectedCaseId ? chatSessionsByCase[selectedCaseId] || [] : []),
@@ -719,6 +739,10 @@ export default function App() {
     [activeSessions, activeChatSessionId]
   );
   const activeMessages = activeSession?.messages || [];
+  const latestAssistantMessage = useMemo(
+    () => [...activeMessages].reverse().find((message) => message.role === "assistant") || null,
+    [activeMessages]
+  );
   const latestMessageContent = activeMessages[activeMessages.length - 1]?.content || "";
   const historyPreview = useMemo(() => {
     return [...activeSessions]
@@ -732,10 +756,6 @@ export default function App() {
         promptCount: session.messages.filter((message) => message.role === "user").length,
       }));
   }, [activeSessions]);
-  const latestAssistantMessage = useMemo(
-    () => [...activeMessages].reverse().find((message) => message.role === "assistant") || null,
-    [activeMessages]
-  );
   const visionUnavailableReason = useMemo(() => {
     if (providerStatus?.vision_available) return null;
     return (
@@ -753,6 +773,71 @@ export default function App() {
     if (!selectedClientId) return cases;
     return cases.filter((item) => item.client_id === selectedClientId);
   }, [cases, selectedClientId]);
+  const gateCases = useMemo(() => {
+    if (!gateClientId) return cases;
+    return cases.filter((item) => item.client_id === gateClientId);
+  }, [cases, gateClientId]);
+  const bibliothequeItems = useMemo<BibliothequeItem[]>(() => {
+    const docItems: BibliothequeItem[] = documents.map((document) => {
+      const sortTime = new Date(document.upload_timestamp).getTime();
+      return {
+        id: `pdf-${document.id}`,
+        kind: "pdf",
+        title: document.filename,
+        subtitle: `Document #${document.id}`,
+        status: document.processing_status,
+        sizeLabel: formatFileSize(document.file_size),
+        createdAt: compactDateTime(document.upload_timestamp, dateLocale, t("noDate", "No date")),
+        sortTime: Number.isNaN(sortTime) ? 0 : sortTime,
+      };
+    });
+
+    const voiceItems: BibliothequeItem[] = recordings.map((recording) => {
+      const sortTime = new Date(recording.created_at).getTime();
+      return {
+        id: `voice-${recording.id}`,
+        kind: "voice",
+        title: recording.filename,
+        subtitle: `Voice #${recording.id}`,
+        status: recording.transcription_status,
+        sizeLabel: formatFileSize(recording.file_size),
+        createdAt: compactDateTime(recording.created_at, dateLocale, t("noDate", "No date")),
+        sortTime: Number.isNaN(sortTime) ? 0 : sortTime,
+      };
+    });
+
+    const imageItems: BibliothequeItem[] = imageBatches.map((batch) => {
+      const sortTime = new Date(batch.created_at).getTime();
+      const imageWord = batch.asset_count === 1 ? "image" : "images";
+      const generated = batch.generated_document_id ? ` -> Doc #${batch.generated_document_id}` : "";
+      return {
+        id: `image-${batch.id}`,
+        kind: "image",
+        title: batch.title,
+        subtitle: `Batch #${batch.id}${generated}`,
+        status: batch.status,
+        sizeLabel: `${batch.asset_count} ${imageWord}`,
+        createdAt: compactDateTime(batch.created_at, dateLocale, t("noDate", "No date")),
+        sortTime: Number.isNaN(sortTime) ? 0 : sortTime,
+      };
+    });
+
+    return [...docItems, ...voiceItems, ...imageItems].sort((left, right) => right.sortTime - left.sortTime);
+  }, [documents, recordings, imageBatches, dateLocale, t]);
+  const bibliothequeSourceItems = bibliothequeGlobalItems.length ? bibliothequeGlobalItems : bibliothequeItems;
+  const bibliothequeVisibleItems = useMemo(() => {
+    const query = bibliothequeQuery.trim().toLowerCase();
+    return bibliothequeSourceItems.filter((item) => {
+      if (bibliothequeFilter !== "all" && item.kind !== bibliothequeFilter) {
+        return false;
+      }
+      if (!query) return true;
+      return [item.title, item.subtitle, item.status, item.sizeLabel]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [bibliothequeFilter, bibliothequeQuery, bibliothequeSourceItems]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -917,6 +1002,126 @@ export default function App() {
   }, [filteredCases]);
 
   useEffect(() => {
+    if (!token) {
+      setSelectionGateOpen(false);
+      setSelectionGateDone(false);
+      return;
+    }
+
+    if (
+      user?.role === "lawyer"
+      && !selectionGateDone
+      && clients.length > 0
+      && cases.length > 0
+    ) {
+      setSelectionGateOpen(true);
+      return;
+    }
+
+    setSelectionGateOpen(false);
+  }, [token, user?.role, selectionGateDone, clients.length, cases.length]);
+
+  useEffect(() => {
+    if (!selectionGateOpen) return;
+    setGateClientId((current) => {
+      if (current && clients.some((client) => client.id === current)) return current;
+      if (selectedClientId && clients.some((client) => client.id === selectedClientId)) return selectedClientId;
+      return clients[0]?.id ?? null;
+    });
+  }, [selectionGateOpen, clients, selectedClientId]);
+
+  useEffect(() => {
+    if (!selectionGateOpen) return;
+    setGateCaseId((current) => {
+      if (current && gateCases.some((item) => item.id === current)) return current;
+      if (selectedCaseId && gateCases.some((item) => item.id === selectedCaseId)) return selectedCaseId;
+      return gateCases[0]?.id ?? null;
+    });
+  }, [selectionGateOpen, gateCases, selectedCaseId]);
+
+  useEffect(() => {
+    if (!token || sidebarTab !== "bibliotheque" || !cases.length) {
+      setBibliothequeLoading(false);
+      return;
+    }
+
+    let active = true;
+    setBibliothequeLoading(true);
+
+    const loadBibliotheque = async () => {
+      const grouped = await Promise.all(
+        cases.map(async (caseItem) => {
+          const [caseDocuments, caseRecordings, caseBatches] = await Promise.all([
+            api.listCaseDocuments(token, caseItem.id).catch(() => [] as DocumentItem[]),
+            api.listVoiceRecordings(token, caseItem.id).catch(() => [] as VoiceRecording[]),
+            api.listCaseImageBatches(token, caseItem.id).catch(() => [] as ImageDocumentBatch[]),
+          ]);
+
+          const docItems: BibliothequeItem[] = caseDocuments.map((document) => {
+            const sortTime = new Date(document.upload_timestamp).getTime();
+            return {
+              id: `pdf-${caseItem.id}-${document.id}`,
+              kind: "pdf",
+              title: document.filename,
+              subtitle: `${caseItem.title} · Document #${document.id}`,
+              status: document.processing_status,
+              sizeLabel: formatFileSize(document.file_size),
+              createdAt: compactDateTime(document.upload_timestamp, dateLocale, t("noDate", "No date")),
+              sortTime: Number.isNaN(sortTime) ? 0 : sortTime,
+            };
+          });
+
+          const voiceItems: BibliothequeItem[] = caseRecordings.map((recording) => {
+            const sortTime = new Date(recording.created_at).getTime();
+            return {
+              id: `voice-${caseItem.id}-${recording.id}`,
+              kind: "voice",
+              title: recording.filename,
+              subtitle: `${caseItem.title} · Voice #${recording.id}`,
+              status: recording.transcription_status,
+              sizeLabel: formatFileSize(recording.file_size),
+              createdAt: compactDateTime(recording.created_at, dateLocale, t("noDate", "No date")),
+              sortTime: Number.isNaN(sortTime) ? 0 : sortTime,
+            };
+          });
+
+          const imageItems: BibliothequeItem[] = caseBatches.map((batch) => {
+            const sortTime = new Date(batch.created_at).getTime();
+            const imageWord = batch.asset_count === 1 ? "image" : "images";
+            return {
+              id: `image-${caseItem.id}-${batch.id}`,
+              kind: "image",
+              title: batch.title,
+              subtitle: `${caseItem.title} · Batch #${batch.id}`,
+              status: batch.status,
+              sizeLabel: `${batch.asset_count} ${imageWord}`,
+              createdAt: compactDateTime(batch.created_at, dateLocale, t("noDate", "No date")),
+              sortTime: Number.isNaN(sortTime) ? 0 : sortTime,
+            };
+          });
+
+          return [...docItems, ...voiceItems, ...imageItems];
+        })
+      );
+
+      if (!active) return;
+      setBibliothequeGlobalItems(grouped.flat().sort((left, right) => right.sortTime - left.sortTime));
+    };
+
+    void loadBibliotheque()
+      .catch(() => {
+        if (active) setBibliothequeGlobalItems([]);
+      })
+      .finally(() => {
+        if (active) setBibliothequeLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [token, sidebarTab, cases, dateLocale, t]);
+
+  useEffect(() => {
     if (!selectedCaseId) {
       setDocuments([]);
       setRecordings([]);
@@ -924,7 +1129,6 @@ export default function App() {
       setImageBatches([]);
       setEvidenceReviews([]);
       setCaseReviewTable(null);
-      setSelectedAnalysis(null);
       return;
     }
     void loadCaseContext(selectedCaseId);
@@ -938,6 +1142,16 @@ export default function App() {
     let isCancelled = false;
     let timeoutId: number | undefined;
     let pollCycles = 0;
+    let stalledCycles = 0;
+    let previousPendingSignature = "";
+
+    const buildPendingSignature = (batches: ImageDocumentBatch[]) => {
+      return batches
+        .filter((batch) => batch.status === "queued" || batch.status === "processing")
+        .map((batch) => `${batch.id}:${batch.status}:${batch.updated_at}`)
+        .sort()
+        .join("|");
+    };
 
     const pollCaseContext = async () => {
       if (isCancelled) {
@@ -954,8 +1168,42 @@ export default function App() {
         return;
       }
 
+      if (stalledCycles >= IMAGE_BATCH_POLL_STALL_MAX_CYCLES) {
+        setNotice(
+          t(
+            "imageBatchPollingStalled",
+            "Automatic refresh paused because image processing appears stalled."
+          )
+        );
+        return;
+      }
+
       pollCycles += 1;
-      await loadCaseContext(selectedCaseId);
+
+      try {
+        const latestBatches = await api.listCaseImageBatches(token, selectedCaseId);
+        if (isCancelled) {
+          return;
+        }
+
+        setImageBatches(latestBatches);
+
+        const currentPendingSignature = buildPendingSignature(latestBatches);
+        const hasPendingNow = currentPendingSignature.length > 0;
+        const pendingChanged = currentPendingSignature !== previousPendingSignature;
+        previousPendingSignature = currentPendingSignature;
+        stalledCycles = pendingChanged ? 0 : stalledCycles + 1;
+
+        if (!hasPendingNow || pendingChanged) {
+          await loadCaseContext(selectedCaseId);
+        }
+
+        if (!hasPendingNow) {
+          return;
+        }
+      } catch {
+        stalledCycles += 1;
+      }
 
       if (isCancelled) {
         return;
@@ -977,30 +1225,6 @@ export default function App() {
       }
     };
   }, [token, selectedCaseId, hasPendingImageBatch, loadCaseContext, t]);
-
-  useEffect(() => {
-    if (!token || !selectedDocumentId) {
-      setSelectedAnalysis(null);
-      return;
-    }
-    let active = true;
-    setAnalysisLoading(true);
-    void api
-      .getDocumentAnalysis(token, selectedDocumentId)
-      .then((analysis) => {
-        if (active) setSelectedAnalysis(analysis);
-      })
-      .catch(() => {
-        if (active) setSelectedAnalysis(null);
-      })
-      .finally(() => {
-        if (active) setAnalysisLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [selectedDocumentId, token]);
 
   const createChatSession = useCallback((caseId: number, seedPrompt?: string) => {
     const now = new Date().toISOString();
@@ -1165,7 +1389,7 @@ export default function App() {
       try {
         const response = await api.copilot(token, outboundPrompt, {
           topK: REASONING_TOP_K[reasoningLevel],
-          useExternalResearch: externalModeEnabled || workspaceMode === "legal_search" || workspaceMode === "agent",
+          useExternalResearch: externalModeEnabled || workspaceMode === "legal_search",
           mode: workspaceMode === "legal_search" ? "legal_search" : "default",
           legalSearchMultilingualOutput: workspaceMode === "legal_search",
           agentMode: workspaceMode === "agent",
@@ -1365,10 +1589,19 @@ export default function App() {
     setSelectedCaseId(null);
     setSelectedClientId(null);
     setSelectedDocumentId(null);
-    setSelectedAnalysis(null);
     setChatInput("");
     setExternalModeEnabled(false);
     setWorkspaceMode("chat");
+    setLeftRailOpen(true);
+    setSidebarTab("navigator");
+    setBibliothequeFilter("all");
+    setBibliothequeQuery("");
+    setBibliothequeGlobalItems([]);
+    setBibliothequeLoading(false);
+    setSelectionGateOpen(false);
+    setSelectionGateDone(false);
+    setGateClientId(null);
+    setGateCaseId(null);
   }
 
   function buildPromptTemplateTitle(prompt: string) {
@@ -1818,15 +2051,6 @@ export default function App() {
     ],
     [activeMessages, documents.length, imageBatches.length, caseReviewTable?.row_count, evidenceReviews.length, consultations.length, recordings.length, promptLibraryEntries.length]
   );
-  const workspaceSnapshot = useMemo(
-    () => [
-      { label: "Documents", value: String(documents.length), meta: selectedDocument ? `Focused: ${truncateText(selectedDocument.filename, 28)}` : "No focused document" },
-      { label: "Open reviews", value: String(evidenceReviews.filter((review) => review.status === "ready_for_review").length), meta: `${imageBatches.length} scanned batch${imageBatches.length === 1 ? "" : "es"}` },
-      { label: "Matter activity", value: String(consultations.length + recordings.length), meta: `${consultations.length} consultations | ${recordings.length} recordings` },
-      { label: "Prompt assets", value: String(promptLibraryEntries.length), meta: `${historyPreview.length} active chat${historyPreview.length === 1 ? "" : "s"}` },
-    ],
-    [documents.length, selectedDocument, evidenceReviews, imageBatches.length, consultations.length, recordings.length, promptLibraryEntries.length, historyPreview.length]
-  );
   const suggestedActions = useMemo(
     () => [
       selectedCase ? `Summarize case #${selectedCase.id}` : "Summarize this matter",
@@ -1836,6 +2060,106 @@ export default function App() {
     ],
     [selectedCase]
   );
+  const buildWorkflowSeedPrompt = useCallback(
+    (action: string) => {
+      const lowered = action.toLowerCase();
+      if (lowered.includes("summarize")) {
+        const caseLabel = selectedCase
+          ? `case #${selectedCase.id} (${selectedCase.title})`
+          : "the active case";
+        return [
+          `Summarize ${caseLabel} for a lawyer briefing note.`,
+          "",
+          "Format:",
+          "- One short executive summary paragraph.",
+          "- Main points (3-5 bullets).",
+          "- Important dates/deadlines (if available).",
+          "- Immediate next steps (2-4 bullets).",
+          "",
+          "Rules:",
+          "- Use only known case facts from available evidence.",
+          "- If data is missing, explicitly say what is still pending.",
+          "- Keep it concise and practical.",
+        ].join("\n");
+      }
+      if (lowered.includes("draft") && lowered.includes("email")) {
+        const caseLabel = selectedCase
+          ? `case #${selectedCase.id} (${selectedCase.title})`
+          : "the active case";
+        return [
+          `Draft a client update email for ${caseLabel}.`,
+          "",
+          "Requirements:",
+          "- Keep it client-friendly, professional, and reassuring.",
+          "- Include: current status, key points, and immediate next steps.",
+          "- Use only known case facts; if a fact is missing, state that clearly.",
+          "- End with one clear call to action for the client.",
+        ].join("\n");
+      }
+      return action;
+    },
+    [selectedCase]
+  );
+  const launchSpecialistWorkflow = useCallback(
+    (prompt: string) => {
+      if (!prompt.trim()) return;
+      setWorkspaceMode("agent");
+      setAttachmentMenuOpen(false);
+      setChatHistoryOpen(true);
+      setChatInput(prompt);
+      focusComposer();
+    },
+    [focusComposer]
+  );
+  const specialistLaunchers = useMemo(
+    () => [
+      {
+        title: "Case memory",
+        detail: "Build a memory snapshot with gaps and deadlines",
+        prompt: selectedCase
+          ? `Generate a case memory snapshot for case #${selectedCase.id} (${selectedCase.title}). Include document inventory, claim trace, contradictions, open proof gaps, and deadline signals.`
+          : "Generate a case memory snapshot for the active matter. Include document inventory, claim trace, contradictions, open proof gaps, and deadline signals.",
+      },
+      {
+        title: "Trace evidence",
+        detail: "Map claims to the strongest supporting documents",
+        prompt: selectedCase
+          ? `Trace claims to evidence for case #${selectedCase.id} (${selectedCase.title}). Show supporting documents, unsupported claims, and recommended follow-up.`
+          : "Trace claims to evidence for the active matter. Show supporting documents, unsupported claims, and recommended follow-up.",
+      },
+      {
+        title: "Deadline monitor",
+        detail: "Track live deadlines, obligations, and cure periods",
+        prompt: selectedCase
+          ? `Monitor deadlines and obligations for case #${selectedCase.id} (${selectedCase.title}). Identify notice windows, cure periods, renewal dates, and recommended next steps.`
+          : "Monitor deadlines and obligations for the active matter. Identify notice windows, cure periods, renewal dates, and recommended next steps.",
+      },
+      {
+        title: "Contract redline",
+        detail: "Draft clause-level edits and fallback positions",
+        prompt: selectedCase
+          ? `Draft a contract redline for case #${selectedCase.id} (${selectedCase.title}).${selectedDocument ? ` Focus on document #${selectedDocument.id} (${selectedDocument.filename}).` : " Focus on the most relevant contract document in the case file."} Include clause-level edits, fallback positions, risk notes, and source documents.`
+          : "Draft a contract redline for the active matter. Include clause-level edits, fallback positions, risk notes, and source documents.",
+      },
+    ],
+    [selectedCase, selectedDocument]
+  );
+  const showMinimalSearchOnly = !workspaceLoading
+    && !caseContextLoading
+    && !copilotLoading
+    && activeMessages.length === 0;
+
+  const confirmLawyerInitialSelection = useCallback(() => {
+    if (gateClientId && clients.some((client) => client.id === gateClientId)) {
+      setSelectedClientId(gateClientId);
+    }
+    if (gateCaseId && cases.some((item) => item.id === gateCaseId)) {
+      setSelectedCaseId(gateCaseId);
+    }
+    setSelectionGateDone(true);
+    setSelectionGateOpen(false);
+  }, [gateClientId, gateCaseId, clients, cases]);
+
   if (!token) {
     return (
       <div className="auth-shell">
@@ -1946,333 +2270,504 @@ export default function App() {
   }
 
   return (
-    <div className="workspace-shell">
-      <aside className="left-rail glass">
-        <header className="left-brand">
-          <div className="brand-mark">H</div>
-          <div>
-            <strong>Legal AI</strong>
-            <small>{t("premiumWorkspace", "Legal Copilot Workspace")}</small>
-          </div>
-        </header>
-
-        <section className="left-section">
-          <h3>{t("matterNavigator", "Matter Navigator")}</h3>
-          <label>
-            {t("client", "Client")}
-            <select
-              value={selectedClientId ?? ""}
-              onChange={(event) => setSelectedClientId(event.target.value ? Number(event.target.value) : null)}
+    <div className={`workspace-shell ${leftRailOpen ? "" : "sidebar-collapsed"}`}>
+      {leftRailOpen ? (
+        <aside className="left-rail glass">
+          <header className="left-brand">
+            <div className="brand-mark">H</div>
+            <div>
+              <strong>Legal AI</strong>
+              <small>{t("premiumWorkspace", "Legal Copilot Workspace")}</small>
+            </div>
+            <button
+              aria-label="Collapse sidebar"
+              className="rail-toggle"
+              onClick={() => setLeftRailOpen(false)}
+              type="button"
             >
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {client.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              &lt;
+            </button>
+          </header>
 
-          <div className="case-list">
-            {filteredCases.length ? (
-              filteredCases.map((item) => (
-                <button
-                  key={item.id}
-                  className={`case-item ${selectedCaseId === item.id ? "active" : ""}`}
-                  onClick={() => setSelectedCaseId(item.id)}
-                  type="button"
-                >
-                  <strong>{item.title}</strong>
-                  <small>
-                    {t("caseLabel", "Case")} #{item.id} | {item.jurisdiction_country}
-                  </small>
-                </button>
-              ))
-            ) : (
-              <p className="muted">{t("noCasesForClient", "No cases found for selected client.")}</p>
-            )}
+          <div className="sidebar-tab-row">
+            <button
+              className={`sidebar-tab ${sidebarTab === "navigator" ? "active" : ""}`}
+              onClick={() => setSidebarTab("navigator")}
+              type="button"
+            >
+              {t("matterNavigator", "Navigator")}
+            </button>
+            <button
+              className={`sidebar-tab ${sidebarTab === "bibliotheque" ? "active" : ""}`}
+              onClick={() => setSidebarTab("bibliotheque")}
+              type="button"
+            >
+              {t("bibliotheque", "Bibliotheque")}
+            </button>
           </div>
-        </section>
 
-        <section className="left-section">
-          <div className="section-heading">
-            <div>
-              <p className="section-kicker">Modules</p>
-              <h3>Workspace Map</h3>
-            </div>
-            <span className="section-count">{workspaceModules.length}</span>
-          </div>
-          <div className="module-nav">
-            {workspaceModules.map((module) => (
-              <article key={module.title} className={`module-nav-item ${module.accent}`}>
-                <strong>{module.title}</strong>
-                <small>{module.detail}</small>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="left-section">
-          <div className="section-heading">
-            <div>
-              <p className="section-kicker">Matter</p>
-              <h3>Case Navigation</h3>
-            </div>
-            <span className="section-count">{filteredCases.length}</span>
-          </div>
-          <div className="history-heading-row">
-            <h3>{t("chatHistory", "Chat History")}</h3>
-            <div className="history-actions">
-              <button
-                className="ghost-button history-action"
-                disabled={!selectedCaseId}
-                onClick={() => {
-                  if (!selectedCaseId) return;
-                  createChatSession(selectedCaseId);
-                }}
-                type="button"
-              >
-                {t("newChat", "New chat")}
-              </button>
-              <button
-                className="ghost-button history-action"
-                disabled={!activeChatSessionId}
-                onClick={clearActiveCaseHistory}
-                type="button"
-              >
-                {t("clearHistory", "Clear history")}
-              </button>
-            </div>
-          </div>
-          <div className="history-list">
-            {historyPreview.length ? (
-              historyPreview.map((item) => (
-                <button
-                  key={item.id}
-                  className={`history-item ${item.id === activeChatSessionId ? "active" : ""}`}
-                  onClick={() => {
-                    if (!selectedCaseId) return;
-                    selectChatSession(selectedCaseId, item.id);
-                  }}
-                  type="button"
-                >
-                  <strong>{item.title}</strong>
-                  <p>{item.content}</p>
-                  <small>
-                    {compactDateTime(item.timestamp, dateLocale, t("noDate", "No date"))}
-                    {" · "}
-                    {item.promptCount} {item.promptCount === 1 ? t("promptLabel", "prompt") : t("promptsLabel", "prompts")}
-                  </small>
-                </button>
-              ))
-            ) : (
-              <p className="muted">{t("noHistory", "No messages yet for this case.")}</p>
-            )}
-          </div>
-        </section>
-
-        <details className="left-extra-sections">
-          <summary>{t("moreWorkspaceTools", "More workspace tools")}</summary>
-          <div className="left-extra-body">
-
-            <section className="left-section">
-              <div className="history-heading-row">
-                <h3>Prompt Library</h3>
-                <div className="history-actions">
-                  <button
-                    className="ghost-button history-action"
-                    disabled={!chatInput.trim() || savingPromptTemplate}
-                    onClick={() => void saveCurrentPromptToLibrary()}
-                    type="button"
+          {sidebarTab === "navigator" ? (
+            <>
+              <section className="left-section">
+                <h3>{t("matterNavigator", "Matter Navigator")}</h3>
+                <label>
+                  {t("client", "Client")}
+                  <select
+                    value={selectedClientId ?? ""}
+                    onChange={(event) => setSelectedClientId(event.target.value ? Number(event.target.value) : null)}
                   >
-                    {savingPromptTemplate ? "Saving..." : "Save prompt"}
-                  </button>
-                </div>
-              </div>
-              <div className="history-list prompt-library-list">
-                {promptLibraryEntries.length ? (
-                  promptLibraryEntries.slice(0, 8).map((entry) => (
-                    <article key={entry.id} className="history-item prompt-library-item">
-                      <button className="prompt-library-main" onClick={() => applyPromptLibraryEntry(entry)} type="button">
-                        <strong>{entry.title}</strong>
-                        <p>{entry.description || truncateText(entry.prompt_text, 96)}</p>
-                        <small>
-                          {(entry.category || "general").toUpperCase()}
-                          {" · "}
-                          {compactDateTime(entry.updated_at, dateLocale, t("noDate", "No date"))}
-                        </small>
-                      </button>
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="case-list">
+                  {filteredCases.length ? (
+                    filteredCases.map((item) => (
                       <button
-                        aria-label={`Delete ${entry.title}`}
-                        className="ghost-button history-action prompt-library-delete"
-                        disabled={promptLibraryDeleteId === entry.id}
-                        onClick={() => void deletePromptLibraryEntry(entry.id)}
+                        key={item.id}
+                        className={`case-item ${selectedCaseId === item.id ? "active" : ""}`}
+                        onClick={() => setSelectedCaseId(item.id)}
                         type="button"
                       >
-                        {promptLibraryDeleteId === entry.id ? "..." : "Delete"}
+                        <strong>{item.title}</strong>
+                        <small>
+                          {t("caseLabel", "Case")} #{item.id} | {item.jurisdiction_country}
+                        </small>
                       </button>
-                    </article>
-                  ))
-                ) : (
-                  <p className="muted">Save your best prompts here for drafting, legal research, and case workflows.</p>
-                )}
-              </div>
-            </section>
+                    ))
+                  ) : (
+                    <p className="muted">{t("noCasesForClient", "No cases found for selected client.")}</p>
+                  )}
+                </div>
+              </section>
 
-            <section className="left-section">
-              <h3>{t("evidenceFeed", "Evidence Feed")}</h3>
-              <div className="simple-list">
-                {documents.slice(0, 6).map((document) => (
-                  <article key={document.id}>
-                    <strong>{document.filename}</strong>
-                    <small>
-                      {t("documentsLabel", "Documents")} #{document.id} | {document.processing_status}
-                    </small>
-                  </article>
-                ))}
-                {!documents.length ? <p className="muted">{t("noEvidenceYet", "No evidence uploaded yet.")}</p> : null}
-              </div>
-            </section>
-            <section className="left-section">
-              <h3>Scanned Photos</h3>
-              <div className="simple-list image-batch-list">
-                {imageBatches.slice(0, 5).map((batch) => (
-                  <article key={batch.id} className={`image-batch-card ${batch.status}`}>
-                    <strong>{batch.title}</strong>
-                    <small>
-                      Batch #{batch.id} · {batch.asset_count} page{batch.asset_count === 1 ? "" : "s"} · {batch.status}
-                    </small>
-                    <small>
-                      OCR doc: {batch.generated_document_id ? `#${batch.generated_document_id}` : "pending"}
-                    </small>
-                    {batch.run_authenticity_check ? <small>Authenticity review requested</small> : null}
-                  </article>
-                ))}
-                {!imageBatches.length ? <p className="muted">No scanned photo batches yet.</p> : null}
-              </div>
-            </section>
-            <section className="left-section">
-              <h3>{t("ingestion", "Ingestion")}</h3>
-              <div className="quick-actions">
-                <button
-                  className="secondary-button"
-                  disabled={!selectedCaseId || uploadingPdf}
-                  onClick={() => pdfInputRef.current?.click()}
-                  type="button"
-                >
-                  {uploadingPdf ? t("uploadingPdf", "Uploading PDF...") : t("uploadPdf", "Upload PDF")}
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={!selectedCaseId || uploadingAudio}
-                  onClick={() => audioInputRef.current?.click()}
-                  type="button"
-                >
-                  {uploadingAudio ? t("uploadingAudio", "Uploading audio...") : t("uploadAudioFile", "Upload audio file")}
-                </button>
-                <button
-                  className={`secondary-button ${recordingVoice ? "recording" : ""}`}
-                  disabled={!selectedCaseId || composerRecording || composerTranscribing}
-                  onClick={() => {
-                    if (recordingVoice) stopVoiceRecording();
-                    else void startVoiceRecording();
-                  }}
-                  type="button"
-                >
-                  {recordingVoice ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
-                </button>
-                <button
-                  className="secondary-button"
-                  disabled={!selectedCaseId || uploadingScannedPhotos || visionUiDisabled}
-                  onClick={() => scannedPhotoInputRef.current?.click()}
-                  type="button"
-                >
-                  {uploadingScannedPhotos
-                    ? "Uploading photos..."
-                    : visionUiDisabled
-                      ? "Scanned photos unavailable"
-                      : "Upload scanned photos"}
-                </button>
-              </div>
-              <label className="composer-save-toggle ingestion-toggle">
+              <section className="left-section">
+                <div className="section-heading">
+                  <div>
+                    <p className="section-kicker">Modules</p>
+                    <h3>Workspace Map</h3>
+                  </div>
+                  <span className="section-count">{workspaceModules.length}</span>
+                </div>
+                <div className="module-nav">
+                  {workspaceModules.map((module) => (
+                    <article key={module.title} className={`module-nav-item ${module.accent}`}>
+                      <strong>{module.title}</strong>
+                      <small>{module.detail}</small>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className="left-section">
+                <div className="history-heading-row">
+                  <h3>{t("chatHistory", "Chat History")}</h3>
+                  <div className="history-actions">
+                    <button
+                      className="ghost-button history-action"
+                      disabled={!selectedCaseId}
+                      onClick={() => {
+                        if (!selectedCaseId) return;
+                        createChatSession(selectedCaseId);
+                      }}
+                      type="button"
+                    >
+                      {t("newChat", "New chat")}
+                    </button>
+                    <button
+                      className="ghost-button history-action"
+                      disabled={!activeChatSessionId}
+                      onClick={clearActiveCaseHistory}
+                      type="button"
+                    >
+                      {t("clearHistory", "Clear history")}
+                    </button>
+                  </div>
+                </div>
+                <div className="history-list">
+                  {historyPreview.length ? (
+                    historyPreview.map((item) => (
+                      <button
+                        key={item.id}
+                        className={`history-item ${item.id === activeChatSessionId ? "active" : ""}`}
+                        onClick={() => {
+                          if (!selectedCaseId) return;
+                          selectChatSession(selectedCaseId, item.id);
+                        }}
+                        type="button"
+                      >
+                        <strong>{item.title}</strong>
+                        <p>{item.content}</p>
+                        <small>
+                          {compactDateTime(item.timestamp, dateLocale, t("noDate", "No date"))}
+                          {" · "}
+                          {item.promptCount} {item.promptCount === 1 ? t("promptLabel", "prompt") : t("promptsLabel", "prompts")}
+                        </small>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="muted">{t("noHistory", "No messages yet for this case.")}</p>
+                  )}
+                </div>
+              </section>
+
+              <details className="left-extra-sections">
+                <summary>{t("moreWorkspaceTools", "Workspace tools")}</summary>
+                <div className="left-extra-body">
+                  <section className="left-section">
+                    <div className="history-heading-row">
+                      <h3>Prompt Library</h3>
+                      <div className="history-actions">
+                        <button
+                          className="ghost-button history-action"
+                          disabled={!chatInput.trim() || savingPromptTemplate}
+                          onClick={() => void saveCurrentPromptToLibrary()}
+                          type="button"
+                        >
+                          {savingPromptTemplate ? "Saving..." : "Save prompt"}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="history-list prompt-library-list">
+                      {promptLibraryEntries.length ? (
+                        promptLibraryEntries.slice(0, 8).map((entry) => (
+                          <article key={entry.id} className="history-item prompt-library-item">
+                            <button className="prompt-library-main" onClick={() => applyPromptLibraryEntry(entry)} type="button">
+                              <strong>{entry.title}</strong>
+                              <p>{entry.description || truncateText(entry.prompt_text, 96)}</p>
+                              <small>
+                                {(entry.category || "general").toUpperCase()}
+                                {" · "}
+                                {compactDateTime(entry.updated_at, dateLocale, t("noDate", "No date"))}
+                              </small>
+                            </button>
+                            <button
+                              aria-label={`Delete ${entry.title}`}
+                              className="ghost-button history-action prompt-library-delete"
+                              disabled={promptLibraryDeleteId === entry.id}
+                              onClick={() => void deletePromptLibraryEntry(entry.id)}
+                              type="button"
+                            >
+                              {promptLibraryDeleteId === entry.id ? "..." : "Delete"}
+                            </button>
+                          </article>
+                        ))
+                      ) : (
+                        <p className="muted">Save your best prompts here for drafting, legal research, and case workflows.</p>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="left-section">
+                    <h3>{t("ingestion", "Ingestion")}</h3>
+                    <div className="quick-actions">
+                      <button
+                        className="secondary-button"
+                        disabled={!selectedCaseId || uploadingPdf}
+                        onClick={() => pdfInputRef.current?.click()}
+                        type="button"
+                      >
+                        {uploadingPdf ? t("uploadingPdf", "Uploading PDF...") : t("uploadPdf", "Upload PDF")}
+                      </button>
+                      <button
+                        className="secondary-button"
+                        disabled={!selectedCaseId || uploadingAudio}
+                        onClick={() => audioInputRef.current?.click()}
+                        type="button"
+                      >
+                        {uploadingAudio ? t("uploadingAudio", "Uploading audio...") : t("uploadAudioFile", "Upload audio file")}
+                      </button>
+                      <button
+                        className={`secondary-button ${recordingVoice ? "recording" : ""}`}
+                        disabled={!selectedCaseId || composerRecording || composerTranscribing}
+                        onClick={() => {
+                          if (recordingVoice) stopVoiceRecording();
+                          else void startVoiceRecording();
+                        }}
+                        type="button"
+                      >
+                        {recordingVoice ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
+                      </button>
+                      <button
+                        className="secondary-button"
+                        disabled={!selectedCaseId || uploadingScannedPhotos || visionUiDisabled}
+                        onClick={() => scannedPhotoInputRef.current?.click()}
+                        type="button"
+                      >
+                        {uploadingScannedPhotos
+                          ? "Uploading photos..."
+                          : visionUiDisabled
+                            ? "Scanned photos unavailable"
+                            : "Upload scanned photos"}
+                      </button>
+                    </div>
+                    <label className="composer-save-toggle ingestion-toggle">
+                      <input
+                        checked={runScannedAuthenticityCheck}
+                        onChange={(event) => setRunScannedAuthenticityCheck(event.target.checked)}
+                        type="checkbox"
+                      />
+                      <span>Run authenticity screening only when needed</span>
+                    </label>
+                    {visionUiDisabled ? (
+                      <p className="muted">{visionUnavailableReason || "Scanned-photo OCR is unavailable right now."}</p>
+                    ) : (
+                      <p className="muted">
+                        {runScannedAuthenticityCheck
+                          ? "The upload will run OCR and an authenticity review before the lawyer checks the papers."
+                          : "The upload will run OCR only and skip authenticity screening."}
+                      </p>
+                    )}
+                  </section>
+
+                  <section className="left-section">
+                    <h3>Review Queue</h3>
+                    <div className="simple-list review-list">
+                      {evidenceReviews.slice(0, 6).map((review) => {
+                        const canDecide = (user?.role === "lawyer" || user?.role === "admin") && review.status === "ready_for_review";
+                        return (
+                          <article key={review.id} className={`review-card review-${review.status}`}>
+                            <strong>Review #{review.id}</strong>
+                            <small>
+                              Risk {review.risk_score}/100 · {review.confidence} · {review.status}
+                            </small>
+                            <p>{truncateText(review.analysis_text, 120)}</p>
+                            {review.signals.length ? <small>Signals: {review.signals.slice(0, 2).join(" · ")}</small> : null}
+                            {canDecide ? (
+                              <div className="review-actions">
+                                <button
+                                  className="ghost-button history-action"
+                                  disabled={reviewDecisionBusyId === review.id}
+                                  onClick={() => void handleEvidenceReviewDecision(review.id, "approved")}
+                                  type="button"
+                                >
+                                  Approve
+                                </button>
+                                <button
+                                  className="ghost-button history-action"
+                                  disabled={reviewDecisionBusyId === review.id}
+                                  onClick={() => void handleEvidenceReviewDecision(review.id, "rejected")}
+                                  type="button"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                      {!evidenceReviews.length ? <p className="muted">No authenticity reviews yet.</p> : null}
+                    </div>
+                  </section>
+                </div>
+              </details>
+
+              <button className="ghost-button logout" onClick={logout} type="button">
+                {t("logout", "Logout")}
+              </button>
+            </>
+          ) : (
+            <>
+              <section className="left-section bibliotheque-section">
+                <div className="section-heading">
+                  <div>
+                    <p className="section-kicker">Library</p>
+                    <h3>{t("bibliotheque", "Bibliotheque")}</h3>
+                  </div>
+                  <span className="section-count">{bibliothequeVisibleItems.length}</span>
+                </div>
+
                 <input
-                  checked={runScannedAuthenticityCheck}
-                  onChange={(event) => setRunScannedAuthenticityCheck(event.target.checked)}
-                  type="checkbox"
+                  aria-label="Search library files"
+                  className="bibliotheque-search"
+                  onChange={(event) => setBibliothequeQuery(event.target.value)}
+                  placeholder={t("searchLibrary", "Search files")}
+                  value={bibliothequeQuery}
                 />
-                <span>Run authenticity screening only when needed</span>
-              </label>
-              {visionUiDisabled ? (
-                <p className="muted">{visionUnavailableReason || "Scanned-photo OCR is unavailable right now."}</p>
-              ) : (
-                <p className="muted">
-                  {runScannedAuthenticityCheck
-                    ? "The upload will run OCR and an authenticity review before the lawyer checks the papers."
-                    : "The upload will run OCR only and skip authenticity screening."}
-                </p>
-              )}
-            </section>
-            <section className="left-section">
-              <h3>Review Queue</h3>
-              <div className="simple-list review-list">
-                {evidenceReviews.slice(0, 6).map((review) => {
-                  const canDecide = (user?.role === "lawyer" || user?.role === "admin") && review.status === "ready_for_review";
-                  return (
-                    <article key={review.id} className={`review-card review-${review.status}`}>
-                      <strong>Review #{review.id}</strong>
-                      <small>
-                        Risk {review.risk_score}/100 · {review.confidence} · {review.status}
-                      </small>
-                      <p>{truncateText(review.analysis_text, 120)}</p>
-                      {review.signals.length ? <small>Signals: {review.signals.slice(0, 2).join(" · ")}</small> : null}
-                      {canDecide ? (
-                        <div className="review-actions">
-                          <button
-                            className="ghost-button history-action"
-                            disabled={reviewDecisionBusyId === review.id}
-                            onClick={() => void handleEvidenceReviewDecision(review.id, "approved")}
-                            type="button"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="ghost-button history-action"
-                            disabled={reviewDecisionBusyId === review.id}
-                            onClick={() => void handleEvidenceReviewDecision(review.id, "rejected")}
-                            type="button"
-                          >
-                            Reject
-                          </button>
+
+                <div className="bibliotheque-filter-row">
+                  <button
+                    className={`ghost-button history-action ${bibliothequeFilter === "all" ? "active-filter" : ""}`}
+                    onClick={() => setBibliothequeFilter("all")}
+                    type="button"
+                  >
+                    All
+                  </button>
+                  <button
+                    className={`ghost-button history-action ${bibliothequeFilter === "pdf" ? "active-filter" : ""}`}
+                    onClick={() => setBibliothequeFilter("pdf")}
+                    type="button"
+                  >
+                    PDF
+                  </button>
+                  <button
+                    className={`ghost-button history-action ${bibliothequeFilter === "voice" ? "active-filter" : ""}`}
+                    onClick={() => setBibliothequeFilter("voice")}
+                    type="button"
+                  >
+                    Voice
+                  </button>
+                  <button
+                    className={`ghost-button history-action ${bibliothequeFilter === "image" ? "active-filter" : ""}`}
+                    onClick={() => setBibliothequeFilter("image")}
+                    type="button"
+                  >
+                    Images
+                  </button>
+                </div>
+
+                {bibliothequeLoading ? <p className="muted">Loading uploaded files...</p> : null}
+
+                <div className="bibliotheque-list">
+                  {bibliothequeVisibleItems.length ? (
+                    bibliothequeVisibleItems.map((item) => (
+                      <article key={item.id} className="bibliotheque-item">
+                        <div className="bibliotheque-item-head">
+                          <strong>{item.title}</strong>
+                          <span className={`bibliotheque-kind ${item.kind}`}>{item.kind.toUpperCase()}</span>
                         </div>
-                      ) : null}
-                    </article>
-                  );
-                })}
-                {!evidenceReviews.length ? <p className="muted">No authenticity reviews yet.</p> : null}
-              </div>
-            </section>
+                        <small>{item.subtitle}</small>
+                        <small>{item.status}</small>
+                        <small>{item.sizeLabel} · {item.createdAt}</small>
+                      </article>
+                    ))
+                  ) : (
+                    <p className="muted">No uploaded files match this filter.</p>
+                  )}
+                </div>
+              </section>
 
-            <section className="left-section">
-              <h3>{t("workspaceFacts", "Workspace Facts")}</h3>
-              <ul className="facts-list">
-                <li>{t("lawyerId", "Lawyer ID")}: {selectedCase?.lawyer_id ?? t("notAvailable", "N/A")}</li>
-                <li>{t("client", "Client")}: {selectedClient?.name || t("notAvailable", "N/A")}</li>
-                <li>{t("documentsLabel", "Documents")}: {documents.length}</li>
-                <li>{t("consultations", "Consultations")}: {consultations.length}</li>
-                <li>{t("voiceNotes", "Voice notes")}: {recordings.length}</li>
-                <li>Scanned batches: {imageBatches.length}</li>
-                <li>Pending reviews: {evidenceReviews.filter((review) => review.status === "ready_for_review").length}</li>
-                <li>{t("lastDocRefresh", "Last document refresh")}: {documents[0] ? compactDateTime(documents[0].upload_timestamp, dateLocale, t("noDate", "No date")) : t("notAvailable", "N/A")}</li>
-              </ul>
-            </section>
-          </div>
-        </details>
+              <section className="left-section">
+                <h3>{t("plusModesTitle", "Modes")}</h3>
+                <div className="mode-row">
+                  <button className={`mode-button ${workspaceMode === "chat" ? "active" : ""}`} onClick={() => setWorkspaceMode("chat")} type="button">
+                    <strong>{t("modeChat", "Chat Mode")}</strong>
+                    <small>{t("modeChatDesc", "Fast legal discussion")}</small>
+                  </button>
+                  <button className={`mode-button ${workspaceMode === "agent" ? "active" : ""}`} onClick={() => setWorkspaceMode("agent")} type="button">
+                    <strong>{t("modeAgent", "Agent Mode")}</strong>
+                    <small>{t("modeAgentDesc", "Step-by-step execution")}</small>
+                  </button>
+                  <button className={`mode-button ${workspaceMode === "legal_search" ? "active" : ""}`} onClick={() => setWorkspaceMode("legal_search")} type="button">
+                    <strong>{t("modeLegalSearch", "Legal Search Mode")}</strong>
+                    <small>{t("modeLegalSearchDesc", "Source-grounded legal answers")}</small>
+                  </button>
+                  <button className={`mode-button ${externalModeEnabled ? "active" : ""}`} onClick={() => setExternalModeEnabled((current) => !current)} type="button">
+                    <strong>{t("modeExternal", "External Mode")}</strong>
+                    <small>{t("modeExternalDesc", "Web-enhanced legal research")}</small>
+                  </button>
+                </div>
+              </section>
 
-        <button className="ghost-button logout" onClick={logout} type="button">
-          {t("logout", "Logout")}
-        </button>
-      </aside>
+              <button className="ghost-button logout" onClick={logout} type="button">
+                {t("logout", "Logout")}
+              </button>
+            </>
+          )}
+        </aside>
+      ) : (
+        <aside className="left-rail-collapsed glass" aria-label="Collapsed sidebar">
+          <button
+            aria-label="Open sidebar"
+            className="rail-toggle open"
+            onClick={() => setLeftRailOpen(true)}
+            type="button"
+          >
+            &gt;
+          </button>
+          <button
+            aria-label="Open navigator"
+            className="collapsed-rail-button"
+            onClick={() => {
+              setLeftRailOpen(true);
+              setSidebarTab("navigator");
+            }}
+            title="Navigator"
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="6.8" />
+              <path d="M8 8.3l5.6-2-2 5.6-5.6 2 2-5.6z" />
+            </svg>
+          </button>
+          <button
+            aria-label="Open bibliotheque"
+            className="collapsed-rail-button"
+            onClick={() => {
+              setLeftRailOpen(true);
+              setSidebarTab("bibliotheque");
+            }}
+            title="Bibliotheque"
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <path d="M3.4 4.6a1 1 0 0 1 1-1h2.7a1 1 0 0 1 1 1v10.8a1 1 0 0 1-1 1H4.4a1 1 0 0 1-1-1V4.6z" />
+              <path d="M8.8 4.6a1 1 0 0 1 1-1h2.7a1 1 0 0 1 1 1v10.8a1 1 0 0 1-1 1H9.8a1 1 0 0 1-1-1V4.6z" />
+              <path d="M14.2 6.1a1 1 0 0 1 1.2-.8l1.7.4a1 1 0 0 1 .8 1.2l-2.3 9.7a1 1 0 0 1-1.2.8l-1.7-.4" />
+            </svg>
+          </button>
 
-      <main className="center-panel glass">
+          <div className="collapsed-rail-divider" />
+
+          <button
+            className={`collapsed-mode-button ${workspaceMode === "chat" ? "active" : ""}`}
+            aria-label={t("modeChat", "Chat Mode")}
+            onClick={() => setWorkspaceMode("chat")}
+            title={t("modeChat", "Chat Mode")}
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <path d="M4.1 4.4h11.8a1.9 1.9 0 0 1 1.9 1.9v6.6a1.9 1.9 0 0 1-1.9 1.9H9.4l-3.3 2.6v-2.6H4.1a1.9 1.9 0 0 1-1.9-1.9V6.3a1.9 1.9 0 0 1 1.9-1.9z" />
+            </svg>
+          </button>
+          <button
+            className={`collapsed-mode-button ${workspaceMode === "agent" ? "active" : ""}`}
+            aria-label={t("modeAgent", "Agent Mode")}
+            onClick={() => setWorkspaceMode("agent")}
+            title={t("modeAgent", "Agent Mode")}
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <path d="M10 2.8l1.9 4.1L16 8.8l-4.1 1.9L10 14.8l-1.9-4.1L4 8.8l4.1-1.9L10 2.8z" />
+              <path d="M15.8 12.9l.8 1.7 1.7.8-1.7.8-.8 1.7-.8-1.7-1.7-.8 1.7-.8.8-1.7z" />
+            </svg>
+          </button>
+          <button
+            className={`collapsed-mode-button ${workspaceMode === "legal_search" ? "active" : ""}`}
+            aria-label={t("modeLegalSearch", "Legal Search Mode")}
+            onClick={() => setWorkspaceMode("legal_search")}
+            title={t("modeLegalSearch", "Legal Search Mode")}
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <circle cx="8.8" cy="8.8" r="4.6" />
+              <path d="M12.2 12.2l4 4" />
+              <path d="M8.8 6.8v4" />
+              <path d="M6.8 8.8h4" />
+            </svg>
+          </button>
+          <button
+            className={`collapsed-mode-button ${externalModeEnabled ? "active" : ""}`}
+            aria-label={t("modeExternal", "External Mode")}
+            onClick={() => setExternalModeEnabled((current) => !current)}
+            title={t("modeExternal", "External Mode")}
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="6.8" />
+              <path d="M3.2 10h13.6" />
+              <path d="M10 3.2c2 2 2 11.6 0 13.6" />
+              <path d="M10 3.2c-2 2-2 11.6 0 13.6" />
+            </svg>
+          </button>
+        </aside>
+      )}
+
+      <main className="center-panel glass center-panel-full">
         <header className="workspace-topbar">
           <div>
             <p className="meta">{t("setClientMatter", "Set client matter")}</p>
@@ -2318,146 +2813,16 @@ export default function App() {
           </div>
         </header>
 
-        <details className="workspace-collapsible">
-          <summary>{t("matterDetails", "Matter details")}</summary>
-          <section className="matter-overview-strip">
-            <div className="matter-overview-card">
-              <p className="section-kicker">Current Matter</p>
-              <h2>{selectedCase ? selectedCase.title : t("noCaseSelected", "No case selected")}</h2>
-              <div className="matter-overview-meta">
-                <span>{selectedClient ? selectedClient.name : t("notAvailable", "N/A")}</span>
-                <span>{selectedCase ? `${selectedCase.jurisdiction_country} · ${selectedCase.status}` : "Waiting for case selection"}</span>
-                <span>{providerStatus?.provider_name || t("providerUnavailable", "Provider unavailable")}</span>
-              </div>
-            </div>
-            <div className="matter-stat-grid">
-              {workspaceSnapshot.map((item) => (
-                <article key={item.label} className="matter-stat-card">
-                  <small>{item.label}</small>
-                  <strong>{item.value}</strong>
-                  <span>{item.meta}</span>
-                </article>
-              ))}
-            </div>
-          </section>
-        </details>
+        <section className="copilot-shell chat-only-shell">
+          {notice ? <div className="notice-banner">{notice}</div> : null}
+          {error ? <div className="error-banner">{error}</div> : null}
 
-        <section className="copilot-shell">
-          <details className="workspace-collapsible center-secondary-collapsible">
-            <summary>{t("contextAnalysis", "Context and analysis")}</summary>
-            <div className="workspace-collapsible-body">
-              <header className="copilot-head">
-                <div>
-                  <h2>{t("copilotWorkspace", "Copilot Workspace")}</h2>
-                  <p>{t("copilotWorkspaceDesc", "AI-grounded legal drafting and reasoning for active matter.")}</p>
-                </div>
-                <div className="capability-pill-row">
-                  <span className="capability-pill">Grounded chat</span>
-                  <span className="capability-pill">Drafting copilot</span>
-                  <span className="capability-pill">Evidence OCR</span>
-                  <span className="capability-pill">Verifier agent</span>
-                </div>
-              </header>
-
-              {notice ? <div className="notice-banner">{notice}</div> : null}
-              {error ? <div className="error-banner">{error}</div> : null}
-
-              {selectedCase && caseReviewTable?.rows?.length ? (
-                <details className="workspace-collapsible">
-                  <summary>{t("reviewTable", "Review Table")} · {caseReviewTable.row_count} docs</summary>
-                  <section className="review-table-shell">
-                    <div className="review-table-head">
-                      <div>
-                        <h3>Review Table</h3>
-                        <p>Structured extraction across {caseReviewTable.row_count} document(s) in this matter.</p>
-                      </div>
-                    </div>
-                    <div className="review-table-wrap">
-                      <table className="review-table">
-                        <thead>
-                          <tr>
-                            <th>Document</th>
-                            <th>Type</th>
-                            <th>Parties</th>
-                            <th>Important Dates</th>
-                            <th>Risks</th>
-                            <th>Next Actions</th>
-                            <th>Source</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {caseReviewTable.rows.map((row) => (
-                            <tr key={row.document_id}>
-                              <td>
-                                <strong>{row.filename}</strong>
-                                <small>
-                                  Doc #{row.document_id} · {row.processing_status} · {row.summary_status}
-                                </small>
-                              </td>
-                              <td>
-                                <span>{row.document_type || "Unknown"}</span>
-                                {typeof row.document_type_confidence === "number" ? (
-                                  <small>{Math.round(row.document_type_confidence * 100)}% confidence</small>
-                                ) : null}
-                              </td>
-                              <td>
-                                <div className="table-chip-list">
-                                  {row.parties.length ? row.parties.map((party, index) => (
-                                    <span key={`${party}-${index}`} className="table-chip">{party}</span>
-                                  )) : <span className="table-empty">—</span>}
-                                </div>
-                              </td>
-                              <td>
-                                <div className="table-chip-list">
-                                  {row.important_dates.length ? row.important_dates.map((item, index) => (
-                                    <span key={`${item}-${index}`} className="table-chip date">{item}</span>
-                                  )) : <span className="table-empty">—</span>}
-                                </div>
-                              </td>
-                              <td>
-                                <div className="table-chip-list">
-                                  {row.legal_risks.length ? row.legal_risks.map((risk, index) => (
-                                    <span key={`${risk}-${index}`} className="table-chip risk">{risk}</span>
-                                  )) : <span className="table-empty">—</span>}
-                                </div>
-                              </td>
-                              <td>
-                                <div className="table-chip-list">
-                                  {row.recommended_actions.length ? row.recommended_actions.map((item, index) => (
-                                    <span key={`${item}-${index}`} className="table-chip action">{item}</span>
-                                  )) : <span className="table-empty">—</span>}
-                                </div>
-                              </td>
-                              <td>
-                                <span className={`table-chip ${row.source_kind === "ocr_generated" ? "warning" : "stable"}`}>
-                                  {row.source_kind === "ocr_generated" ? "Scanned OCR" : "Uploaded"}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                </details>
-              ) : null}
-
-              {workspaceLoading || caseContextLoading ? (
-                <div className="workspace-skeleton-grid" aria-hidden="true">
-                  <div className="skeleton-card tall" />
-                  <div className="skeleton-card" />
-                  <div className="skeleton-card" />
-                </div>
-              ) : null}
-            </div>
-          </details>
-
-          <div className="chat-surface">
+          <div className={`chat-surface ${showMinimalSearchOnly ? "chat-surface-minimal" : ""}`}>
             <section className="workflow-primary">
               <h3>{t("recommendedWorkflows", "Recommended workflows")}</h3>
               <div className="workflow-grid">
                 {suggestedActions.slice(0, 4).map((action) => (
-                  <button key={action} className="workflow-card" onClick={() => setChatInput(action)} type="button">
+                  <button key={action} className="workflow-card" onClick={() => setChatInput(buildWorkflowSeedPrompt(action))} type="button">
                     <strong>{action}</strong>
                     <small>{t("draftLabel", "Draft")} · 2 steps</small>
                   </button>
@@ -2465,8 +2830,21 @@ export default function App() {
               </div>
               <div className="empty-chat-actions">
                 {suggestedActions.slice(4).map((action) => (
-                  <button key={action} className="ghost-button suggestion-chip" onClick={() => setChatInput(action)} type="button">
+                  <button key={action} className="ghost-button suggestion-chip" onClick={() => setChatInput(buildWorkflowSeedPrompt(action))} type="button">
                     {action}
+                  </button>
+                ))}
+              </div>
+              <div className="workflow-grid">
+                {specialistLaunchers.map((launcher) => (
+                  <button
+                    key={launcher.title}
+                    className="workflow-card"
+                    onClick={() => launchSpecialistWorkflow(launcher.prompt)}
+                    type="button"
+                  >
+                    <strong>{launcher.title}</strong>
+                    <small>{launcher.detail}</small>
                   </button>
                 ))}
               </div>
@@ -2564,6 +2942,18 @@ export default function App() {
                 <div ref={messageEndRef} aria-hidden="true" />
               </div>
             </details>
+
+            <IntelligencePanel
+              analysis={null}
+              caseItem={selectedCase}
+              client={selectedClient}
+              consultations={consultations}
+              documents={documents}
+              language={language}
+              latestAssistantMessage={latestAssistantMessage}
+              onLaunchAction={launchSpecialistWorkflow}
+              recordings={recordings}
+            />
 
             <footer className="composer-shell">
               {attachmentMenuOpen ? (
@@ -2729,26 +3119,58 @@ export default function App() {
             </footer>
           </div>
         </section>
-      </main>
 
-      <Suspense
-        fallback={
-          <aside className="right-panel glass">
-            <div className="loading-inline">{t("loadingWorkspace", "Loading workspace context...")}</div>
-          </aside>
-        }
-      >
-        <IntelligencePanel
-          analysis={selectedAnalysis}
-          caseItem={selectedCase}
-          client={selectedClient}
-          consultations={consultations}
-          documents={documents}
-          language={language}
-          latestAssistantMessage={latestAssistantMessage}
-          recordings={recordings}
-        />
-      </Suspense>
+        {selectionGateOpen ? (
+          <div className="selection-gate-backdrop">
+            <section className="selection-gate-card">
+              <p className="section-kicker">Lawyer Setup</p>
+              <h3>{t("chooseClientCase", "Choose client and case")}</h3>
+              <p className="muted">
+                {t("chooseClientCaseHint", "Select the matter you want to open first. You can change it anytime from the sidebar.")}
+              </p>
+
+              <label>
+                {t("client", "Client")}
+                <select
+                  value={gateClientId ?? ""}
+                  onChange={(event) => setGateClientId(event.target.value ? Number(event.target.value) : null)}
+                >
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                {t("caseLabel", "Case")}
+                <select
+                  value={gateCaseId ?? ""}
+                  onChange={(event) => setGateCaseId(event.target.value ? Number(event.target.value) : null)}
+                >
+                  {gateCases.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      #{item.id} · {item.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="selection-gate-actions">
+                <button
+                  className="primary-button"
+                  disabled={!gateClientId || !gateCaseId}
+                  onClick={confirmLawyerInitialSelection}
+                  type="button"
+                >
+                  {t("startWorkspace", "Start workspace")}
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
+      </main>
 
       <input
         ref={pdfInputRef}

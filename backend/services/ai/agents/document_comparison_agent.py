@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from backend.models.document import Document
+from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
 from backend.services.ai.llm_gateway import llm_gateway
 
@@ -140,6 +141,8 @@ class DocumentComparisonAgent(BaseAgent):
 You are the Document Comparison Agent inside a legal AI platform.
 
 Compare the supplied documents and produce one practical comparison note.
+{AgentOutputFormatter.build_quality_guidance(task="compare documents and highlight contradictions or coverage gaps", structured_json=True)}
+
 Return valid JSON only with this schema:
 {{
   "comparison_text": "string"

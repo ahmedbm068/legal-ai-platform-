@@ -359,7 +359,7 @@ export const workspaceApi = {
       body: {
         message,
         top_k: options?.topK ?? 5,
-        use_external_research: options?.useExternalResearch ?? true,
+        use_external_research: options?.useExternalResearch ?? false,
         mode: options?.mode ?? "default",
         legal_search_multilingual_output: options?.legalSearchMultilingualOutput ?? false,
         agent_mode: options?.agentMode ?? false,

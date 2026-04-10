@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any
 
+from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
 from backend.services.ai.llm_gateway import llm_gateway
 
@@ -133,6 +134,8 @@ Rewrite the user query into a better prompt for retrieval and answer generation.
 Preserve user intent. Do not change language unless necessary.
 Do not add legal facts that are not requested.
 
+    {AgentOutputFormatter.build_quality_guidance(task="optimize a legal prompt for better retrieval and answer generation", structured_json=True)}
+
 Return valid JSON only:
 {{
   "optimized_query": "string",
@@ -174,28 +177,11 @@ User query:
 
     @staticmethod
     def _extract_json_payload(raw_text: str) -> dict[str, Any] | None:
-        candidate = raw_text.strip()
-        if candidate.startswith("```"):
-            candidate = candidate.strip("`")
-            candidate = candidate.replace("json", "", 1).strip()
-
-        try:
-            payload = json.loads(candidate)
-            return payload if isinstance(payload, dict) else None
-        except json.JSONDecodeError:
-            start = candidate.find("{")
-            end = candidate.rfind("}")
-            if start == -1 or end == -1 or end <= start:
-                return None
-            try:
-                payload = json.loads(candidate[start : end + 1])
-                return payload if isinstance(payload, dict) else None
-            except json.JSONDecodeError:
-                return None
+        return AgentOutputFormatter.extract_json_payload(raw_text)
 
     @staticmethod
     def _normalize_text(value: Any) -> str:
-        return str(value or "").strip()
+        return AgentOutputFormatter.normalize_text(value)
 
 
 prompt_optimizer_agent = PromptOptimizerAgent()

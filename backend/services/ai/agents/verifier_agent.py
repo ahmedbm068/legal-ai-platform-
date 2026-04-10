@@ -4,6 +4,7 @@ import json
 import re
 from typing import Any
 
+from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
 from backend.services.ai.llm_gateway import llm_gateway
 
@@ -128,6 +129,8 @@ You are the Verifier Agent inside a legal AI platform.
 
 Your only job is to judge whether the answer is adequately supported by the supplied evidence snippets.
 Do not invent missing evidence. Be strict.
+
+{AgentOutputFormatter.build_quality_guidance(task="verify that an answer is supported by the supplied evidence", structured_json=True)}
 
 Return valid JSON only with this exact schema:
 {{

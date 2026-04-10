@@ -21,6 +21,7 @@ interface IntelligencePanelProps {
   recordings: VoiceRecording[];
   analysis: FullDocumentAnalysis | null;
   latestAssistantMessage: ChatMessage | null;
+  onLaunchAction?: (prompt: string) => void;
 }
 
 interface TimelineRow {
@@ -189,7 +190,7 @@ function extractMissingLines(text: string): string[] {
 }
 
 function IntelligencePanelComponent(props: IntelligencePanelProps) {
-  const { language, caseItem, client, documents, consultations, recordings, analysis, latestAssistantMessage } = props;
+  const { language, caseItem, client, documents, consultations, recordings, analysis, latestAssistantMessage, onLaunchAction } = props;
   const copy = PANEL_TEXT[language] || PANEL_TEXT.en;
   const tp = (key: string, fallback: string) => copy[key] || PANEL_TEXT.en[key] || fallback;
   const locale = language === "de" ? "de-DE" : language === "ar" ? "ar-TN" : "en-US";
@@ -296,6 +297,48 @@ function IntelligencePanelComponent(props: IntelligencePanelProps) {
     return rows;
   }, [caseItem?.status, consultations, documents, language]);
 
+  const specialistLaunchers = useMemo(
+    () => [
+      {
+        title: "Case memory",
+        detail: caseItem
+          ? `Snapshot case #${caseItem.id} with claims, gaps, and deadlines`
+          : "Snapshot the current matter with claims, gaps, and deadlines",
+        prompt: caseItem
+          ? `Generate a case memory snapshot for case #${caseItem.id} (${caseItem.title}). Include document inventory, claim trace, contradictions, open proof gaps, and deadline signals.`
+          : "Generate a case memory snapshot for the active matter. Include document inventory, claim trace, contradictions, open proof gaps, and deadline signals.",
+      },
+      {
+        title: "Trace evidence",
+        detail: caseItem
+          ? `Map claims to evidence for case #${caseItem.id}`
+          : "Map claims to evidence for the active matter",
+        prompt: caseItem
+          ? `Trace claims to evidence for case #${caseItem.id} (${caseItem.title}). Show supporting documents, unsupported claims, and recommended follow-up.`
+          : "Trace claims to evidence for the active matter. Show supporting documents, unsupported claims, and recommended follow-up.",
+      },
+      {
+        title: "Deadline monitor",
+        detail: caseItem
+          ? `Track deadlines and obligations in case #${caseItem.id}`
+          : "Track deadlines and obligations in the current matter",
+        prompt: caseItem
+          ? `Monitor deadlines and obligations for case #${caseItem.id} (${caseItem.title}). Identify notice windows, cure periods, renewal dates, and recommended next steps.`
+          : "Monitor deadlines and obligations for the active matter. Identify notice windows, cure periods, renewal dates, and recommended next steps.",
+      },
+      {
+        title: "Contract redline",
+        detail: documents.length
+          ? `Draft clause-level edits for the current contract pack`
+          : "Draft clause-level edits for the current matter",
+        prompt: caseItem
+          ? `Draft a contract redline for case #${caseItem.id} (${caseItem.title}). Include clause-level edits, fallback positions, risk notes, and source documents.`
+          : "Draft a contract redline for the active matter. Include clause-level edits, fallback positions, risk notes, and source documents.",
+      },
+    ],
+    [caseItem, documents.length]
+  );
+
   function toggleCard(key: CardKey) {
     setExpanded((current) => ({ ...current, [key]: !current[key] }));
   }
@@ -399,6 +442,21 @@ function IntelligencePanelComponent(props: IntelligencePanelProps) {
           <span className="intel-badge">{tp("confidence", "Confidence")}: {analysis?.summary_status === "ready" ? tp("high", "High") : tp("medium", "Medium")}</span>
         </div>
       </header>
+
+      <div className="workflow-grid">
+        {specialistLaunchers.map((launcher) => (
+          <button
+            key={launcher.title}
+            className="workflow-card"
+            disabled={!caseItem || !onLaunchAction}
+            onClick={() => onLaunchAction?.(launcher.prompt)}
+            type="button"
+          >
+            <strong>{launcher.title}</strong>
+            <small>{launcher.detail}</small>
+          </button>
+        ))}
+      </div>
 
       <div className="intel-cards">
         {cards.map((card) => (

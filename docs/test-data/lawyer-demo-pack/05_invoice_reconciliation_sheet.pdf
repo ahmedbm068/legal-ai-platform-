@@ -1,0 +1,73 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 998 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(INVOICE RECONCILIATION SHEET) Tj
+0 -12 Td
+(Reference: REC-INV-NOVA-2026-03) Tj
+0 -12 Td
+(Case linkage: Atlas vs Nova logistics dispute) Tj
+0 -12 Td
+(Invoice Overview) Tj
+0 -12 Td
+(- Invoice ID: INV-NOVA-2026-03) Tj
+0 -12 Td
+(- Invoice date: March 4, 2026) Tj
+0 -12 Td
+(- Claimed total: 98,420 TND) Tj
+0 -12 Td
+(- Atlas accepted amount: 71,960 TND) Tj
+0 -12 Td
+(- Disputed amount: 26,460 TND) Tj
+0 -12 Td
+(Disputed Components) Tj
+0 -12 Td
+(1\) Fuel surcharge adjustments above contractual cap) Tj
+0 -12 Td
+(2\) Returned parcel handling fees without support logs) Tj
+0 -12 Td
+(3\) Weekend delivery uplift entries with duplicate route references) Tj
+0 -12 Td
+(Audit Notes) Tj
+0 -12 Td
+(- 18 line items require documentary support) Tj
+0 -12 Td
+(- 6 line items flagged as likely duplicate charges) Tj
+0 -12 Td
+(- 4 line items appear to exceed negotiated rate card) Tj
+0 -12 Td
+(Deadline) Tj
+0 -12 Td
+(- Revised invoice and support pack requested by April 6, 2026) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1359
+%%EOF

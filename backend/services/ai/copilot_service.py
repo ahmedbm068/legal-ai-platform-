@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import re
 from typing import Any, Dict, List, Optional
@@ -14,11 +15,21 @@ from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
 from backend.services.ai.agents.booking_agent import booking_agent
 from backend.services.ai.agents.case_reasoning_agent import case_reasoning_agent
+from backend.services.ai.agents.case_memory_agent import case_memory_agent
+from backend.services.ai.agents.contract_redline_agent import contract_redline_agent
+from backend.services.ai.agents.deadline_obligation_agent import deadline_obligation_agent
 from backend.services.ai.agents.drafting_agent import drafting_agent
 from backend.services.ai.agents.document_comparison_agent import document_comparison_agent
+from backend.services.ai.agents.evidence_trace_agent import evidence_trace_agent
+from backend.services.ai.agents.insight_agent import insight_agent
+from backend.services.ai.agents.negotiation_strategy_agent import negotiation_strategy_agent
 from backend.services.ai.agents.prompt_optimizer_agent import prompt_optimizer_agent
 from backend.services.ai.agents.prompt_correction_agent import prompt_correction_agent
 from backend.services.ai.agents.timeline_agent import timeline_agent
+from backend.services.ai.agents.copilot_intent_execution_agent import (
+    CopilotIntentExecutionContext,
+    copilot_intent_execution_agent,
+)
 from backend.services.ai.artifact_versioning_service import artifact_versioning_service
 from backend.services.ai.command_parsing_service import command_parsing_service
 from backend.services.ai.document_ai_pipeline import DocumentAIPipeline
@@ -26,11 +37,12 @@ from backend.services.ai.external_research_service import external_research_serv
 from backend.services.ai.jurisdiction_context_service import jurisdiction_context_service
 from backend.services.ai.legal_search_mode_service import legal_search_mode_service
 from backend.services.ai.llm_gateway import llm_gateway
+from backend.services.ai.copilot_risk_analysis_mixin import CopilotRiskAnalysisMixin
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
 
 
-class CopilotService:
+class CopilotService(CopilotRiskAnalysisMixin):
     READ_ONLY_ROLES = {"admin", "lawyer", "assistant", "client"}
     CASE_WRITE_ROLES = {"admin", "lawyer"}
     CLIENT_ALLOWED_INTENTS = {
@@ -42,9 +54,16 @@ class CopilotService:
         "summarize_and_analyze_risks_case",
         "analyze_risks_case",
         "list_deadlines_case",
+        "monitor_deadlines_case",
         "build_timeline_case",
+        "generate_case_insights",
+        "generate_case_memory",
+        "trace_case_evidence",
         "compare_case_documents",
         "review_booking_case",
+        "draft_negotiation_strategy",
+        "draft_contract_redline_case",
+        "draft_client_email_case",
         "ask_case",
         "ask_document",
         "ask_global",
@@ -76,8 +95,14 @@ class CopilotService:
         "analyze_risks_case": "analysis",
         "list_deadlines_case": "analysis",
         "build_timeline_case": "analysis",
+        "generate_case_insights": "analysis",
+        "generate_case_memory": "analysis",
+        "monitor_deadlines_case": "analysis",
         "compare_case_documents": "analysis",
         "review_booking_case": "analysis",
+        "trace_case_evidence": "analysis",
+        "draft_negotiation_strategy": "analysis",
+        "draft_contract_redline_case": "analysis",
         "draft_client_email_case": "analysis",
         "ask_case": "query",
         "ask_document": "query",
@@ -96,6 +121,7 @@ class CopilotService:
         "list_deadlines_case",
         "build_timeline_case",
         "compare_case_documents",
+        "monitor_deadlines_case",
     }
     NUMBER_WORDS = {
         "one": 1,
@@ -131,6 +157,132 @@ class CopilotService:
         "other time references:",
         "evidence basis:",
     )
+    CONTRACTUAL_SIGNAL_KEYWORDS = (
+        "contract",
+        "agreement",
+        "sla",
+        "service level",
+        "payment terms",
+        "net 30",
+        "late payment",
+        "invoice",
+        "cure period",
+        "formal notice",
+        "material breach",
+        "liability cap",
+        "governing law",
+        "dispute resolution",
+        "arbitration",
+        "mediation",
+        "obligation",
+    )
+    LEGAL_RISK_KEYWORDS = (
+        "breach",
+        "termination",
+        "liability",
+        "arbitration",
+        "mediation",
+        "governing law",
+        "notice",
+        "cure",
+        "damages",
+        "dispute",
+        "reservation of rights",
+        "default",
+        "non-compliance",
+        "non compliance",
+    )
+    OPERATIONAL_RISK_KEYWORDS = (
+        "sla",
+        "service level",
+        "kpi",
+        "delivery",
+        "lost package",
+        "operations",
+        "route",
+        "dashboard",
+        "invoice",
+        "reconciliation",
+        "duplicate charge",
+        "rate card",
+        "proof-of-delivery",
+        "proof of delivery",
+        "complaint",
+        "log",
+        "methodology",
+        "workflow",
+    )
+    HIGH_SEVERITY_RISK_KEYWORDS = (
+        "material breach",
+        "termination",
+        "liability cap",
+        "arbitration",
+        "reservation of rights",
+        "default",
+        "two consecutive",
+        "cure period",
+        "cure",
+    )
+    MEDIUM_SEVERITY_RISK_KEYWORDS = (
+        "dispute",
+        "notice",
+        "deadline",
+        "non-compliance",
+        "non compliance",
+        "invoice",
+        "payment",
+        "force-majeure",
+        "force majeure",
+    )
+    SUPPORTING_EVIDENCE_RISK_KEYWORDS = (
+        "evidence",
+        "documentation",
+        "proof",
+        "methodology",
+        "incomplete",
+        "duplicate",
+        "reconciliation",
+        "support logs",
+        "supporting logs",
+    )
+    RISK_TOKEN_STOPWORDS = {
+        "a",
+        "an",
+        "and",
+        "are",
+        "as",
+        "be",
+        "by",
+        "case",
+        "due",
+        "for",
+        "from",
+        "high",
+        "in",
+        "into",
+        "is",
+        "legal",
+        "low",
+        "medium",
+        "of",
+        "on",
+        "operational",
+        "or",
+        "over",
+        "possible",
+        "potential",
+        "ranked",
+        "remain",
+        "remains",
+        "risk",
+        "risks",
+        "that",
+        "the",
+        "this",
+        "to",
+        "under",
+        "with",
+    }
 
     def __init__(
         self,
@@ -144,6 +296,7 @@ class CopilotService:
         )
         self.client = llm_gateway.create_client()
         self.model = llm_gateway.default_model
+        self.intent_execution_agent = copilot_intent_execution_agent
 
     @staticmethod
     def _normalize_role(value: str | None) -> str:
@@ -206,6 +359,88 @@ class CopilotService:
         workspace_document_id: Optional[int],
     ) -> Dict[str, Any]:
         next_parsed = dict(parsed)
+        query_text = self._normalize_lookup_text(
+            str(next_parsed.get("clean_query") or next_parsed.get("raw_message") or "")
+        )
+
+        if intent == "summarize_global" and isinstance(workspace_case_id, int):
+            next_parsed["intent"] = "summarize_case"
+            next_parsed["case_id"] = workspace_case_id
+            next_parsed["target_type"] = "case"
+            next_parsed["target_id"] = workspace_case_id
+
+        if intent == "ask_global" and isinstance(workspace_case_id, int):
+            if any(
+                token in query_text
+                for token in ["timeline", "chronology", "chronological", "sequence of events", "case events"]
+            ):
+                next_parsed["intent"] = "build_timeline_case"
+                next_parsed["case_id"] = workspace_case_id
+                next_parsed["target_type"] = "case"
+                next_parsed["target_id"] = workspace_case_id
+            elif any(
+                token in query_text
+                for token in [
+                    "trace evidence",
+                    "evidence trace",
+                    "claim trace",
+                    "claim to evidence",
+                    "evidence map",
+                    "source map",
+                    "support this claim",
+                    "supporting evidence",
+                ]
+            ):
+                next_parsed["intent"] = "trace_case_evidence"
+                next_parsed["case_id"] = workspace_case_id
+                next_parsed["target_type"] = "case"
+                next_parsed["target_id"] = workspace_case_id
+            elif any(
+                token in query_text
+                for token in [
+                    "case memory",
+                    "memory snapshot",
+                    "what are we missing",
+                    "what am i missing",
+                    "open proof gaps",
+                    "missing documents",
+                    "missing docs",
+                    "what is missing",
+                    "what's missing",
+                    "case snapshot",
+                ]
+            ):
+                next_parsed["intent"] = "generate_case_memory"
+                next_parsed["case_id"] = workspace_case_id
+                next_parsed["target_type"] = "case"
+                next_parsed["target_id"] = workspace_case_id
+            elif any(
+                token in query_text
+                for token in [
+                    "risk",
+                    "risks",
+                    "legal risk",
+                    "operational risk",
+                    "exposure",
+                    "exposures",
+                    "liability",
+                    "liabilities",
+                ]
+            ):
+                next_parsed["intent"] = "analyze_risks_case"
+                next_parsed["case_id"] = workspace_case_id
+                next_parsed["target_type"] = "case"
+                next_parsed["target_id"] = workspace_case_id
+                if next_parsed.get("requested_count") is None:
+                    next_parsed["requested_count"] = self._extract_count_hint(query_text)
+            elif any(
+                token in query_text
+                for token in ["draft", "write", "prepare", "email", "mail", "client update", "posture", "status update"]
+            ):
+                next_parsed["intent"] = "draft_client_email_case"
+                next_parsed["case_id"] = workspace_case_id
+                next_parsed["target_type"] = "case"
+                next_parsed["target_id"] = workspace_case_id
 
         if intent in {"list_cases", "list_clients", "create_case", "create_client"}:
             return next_parsed
@@ -244,7 +479,13 @@ class CopilotService:
         lowered = (message or "").strip().lower()
         if not lowered:
             return None
-        match = self.FOLLOW_UP_COUNT_PATTERN.search(lowered)
+
+        # Remove scoped identifiers so inputs like "summarize case #23" do not become count=12.
+        scrubbed = re.sub(r"\b(case|document|client)\s*#?\s*\d{1,5}\b", " ", lowered)
+        scrubbed = re.sub(r"#\d{1,5}\b", " ", scrubbed)
+        scrubbed = re.sub(r"\s+", " ", scrubbed).strip()
+
+        match = self.FOLLOW_UP_COUNT_PATTERN.search(scrubbed)
         if not match:
             return None
         token = match.group(1).strip().lower()
@@ -332,9 +573,12 @@ class CopilotService:
                 "summarize_document",
                 "list_deadlines_case",
                 "build_timeline_case",
+                "generate_case_insights",
+                "generate_case_memory",
                 "analyze_risks_case",
                 "review_booking_case",
                 "draft_client_email_case",
+                "trace_case_evidence",
                 "compare_case_documents",
                 "ask_case",
                 "ask_document",
@@ -394,8 +638,11 @@ class CopilotService:
                     "analyze_risks_case",
                     "list_deadlines_case",
                     "build_timeline_case",
+                    "generate_case_insights",
+                    "generate_case_memory",
                     "review_booking_case",
                     "draft_client_email_case",
+                    "trace_case_evidence",
                     "compare_case_documents",
                     "list_case_documents",
                     "list_case_appointments",
@@ -449,178 +696,21 @@ class CopilotService:
         if scope_error is not None:
             return scope_error
 
-        handlers = {
-            "create_case": lambda: self._create_case_action(
-                db=db,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role=normalized_role,
-                requested_case_title=parsed.get("requested_case_title"),
-                requested_case_description=parsed.get("requested_case_description"),
-                requested_client_id=parsed.get("requested_client_id"),
-                requested_client_name=parsed.get("requested_client_name"),
-                requested_jurisdiction_country=parsed.get("requested_jurisdiction_country"),
-                workspace_case_id=workspace_case_id,
-                raw_message=parsed.get("raw_message") or message,
-            ),
-            "create_client": lambda: self._create_client_action(
-                db=db,
-                tenant_id=tenant_id,
-                user_role=normalized_role,
-                requested_client_name=parsed.get("requested_client_name"),
-                raw_message=parsed.get("raw_message") or message,
-            ),
-            "list_cases": lambda: self._list_cases(
-                db=db,
-                tenant_id=tenant_id,
-                allowed_case_ids=normalized_allowed_case_ids,
-            ),
-            "list_clients": lambda: self._list_clients(
-                db=db,
-                tenant_id=tenant_id,
-            ),
-            "list_case_documents": lambda: self._list_case_documents(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"],
-            ),
-            "list_case_appointments": lambda: self._list_case_appointments(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"],
-            ),
-            "request_document_upload": lambda: self._request_document_upload_action(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed.get("case_id"),
-            ),
-            "request_audio_upload": lambda: self._request_audio_upload_action(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed.get("case_id"),
-            ),
-            "create_case_appointment": lambda: self._create_case_appointment(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"],
-                user_role=normalized_role,
-                message=parsed.get("clean_query") or parsed.get("raw_message") or message,
-            ),
-            "update_case_status": lambda: self._update_case_status(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"],
-                user_role=normalized_role,
-                user_id=user_id,
-                requested_status=parsed.get("requested_case_status"),
-            ),
-            "optimize_prompt": lambda: self._optimize_prompt_intent(
-                raw_prompt=parsed["clean_query"] or parsed["raw_message"],
-                intent=parsed["intent"],
-                target_type=parsed["target_type"],
-                target_id=parsed["target_id"],
-            ),
-            "summarize_case": lambda: self._summarize_case(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"]
-            ),
-            "summarize_and_analyze_risks_case": lambda: self._summarize_and_analyze_case_risks(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"],
-                requested_count=parsed.get("requested_count"),
-            ),
-            "summarize_document": lambda: self._summarize_document(
-                db=db,
-                tenant_id=tenant_id,
-                document_id=parsed["document_id"]
-            ),
-            "list_deadlines_case": lambda: self._list_case_deadlines(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"],
-                requested_count=parsed.get("requested_count"),
-            ),
-            "build_timeline_case": lambda: self._build_case_timeline(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"]
-            ),
-            "analyze_risks_case": lambda: self._analyze_case_risks(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"],
-                requested_count=parsed.get("requested_count"),
-            ),
-            "review_booking_case": lambda: self._review_case_booking(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"]
-            ),
-            "draft_client_email_case": lambda: self._draft_client_email_for_case(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"]
-            ),
-            "compare_case_documents": lambda: self._compare_case_documents(
-                db=db,
-                tenant_id=tenant_id,
-                case_id=parsed["case_id"]
-            ),
-            "ask_document": lambda: self._answer_with_optional_external_research(
-                db=db,
-                tenant_id=tenant_id,
-                question=resolved_query,
-                top_k=top_k,
-                case_id=None,
-                document_id=parsed["document_id"],
-                use_external_research=use_external_research,
-                intent="ask_document",
-                target_type="document",
-                target_id=parsed["document_id"],
-                already_optimized=bool(preoptimized_query),
-            ),
-            "ask_case": lambda: self._answer_with_optional_external_research(
-                db=db,
-                tenant_id=tenant_id,
-                question=resolved_query,
-                top_k=top_k,
-                case_id=parsed["case_id"],
-                document_id=None,
-                use_external_research=use_external_research,
-                intent="ask_case",
-                target_type="case",
-                target_id=parsed["case_id"],
-                already_optimized=bool(preoptimized_query),
-            ),
-            "ask_global": lambda: self._answer_with_optional_external_research(
-                db=db,
-                tenant_id=tenant_id,
-                question=resolved_query,
-                top_k=top_k,
-                case_id=None,
-                document_id=None,
-                use_external_research=use_external_research,
-                intent="ask_global",
-                target_type="global",
-                target_id=None,
-                already_optimized=bool(preoptimized_query),
-            ),
-            "summarize_global": lambda: self._answer_with_optional_external_research(
-                db=db,
-                tenant_id=tenant_id,
-                question=resolved_query,
-                top_k=top_k,
-                case_id=None,
-                document_id=None,
-                use_external_research=use_external_research,
-                intent="summarize_global",
-                target_type="global",
-                target_id=None,
-                already_optimized=bool(preoptimized_query),
-            ),
-        }
+        execution_ctx = CopilotIntentExecutionContext(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            user_role=normalized_role,
+            message=message,
+            top_k=top_k,
+            use_external_research=use_external_research,
+            workspace_case_id=workspace_case_id,
+            resolved_query=resolved_query,
+            parsed=parsed,
+            preoptimized_query=preoptimized_query,
+            normalized_allowed_case_ids=normalized_allowed_case_ids,
+            normalized_allowed_document_ids=normalized_allowed_document_ids,
+        )
 
         is_legal_search_mode = normalized_mode == "legal_search" and intent in self.LEGAL_SEARCH_ELIGIBLE_INTENTS
 
@@ -643,7 +733,11 @@ class CopilotService:
         elif intent in self.CRUD_INTENTS and not agent_mode:
             result = self._agent_mode_required_response(action=intent)
         else:
-            result = handlers.get(intent, self._unsupported_intent_response)()
+            result = self.intent_execution_agent.execute(
+                intent=intent,
+                runtime=self,
+                ctx=execution_ctx,
+            )
         action_category = "legal_search" if is_legal_search_mode else self.ACTION_CATEGORY_BY_INTENT.get(intent, "analysis")
         action_status = str(result.pop("action_status", "")).strip() or ("fallback" if result.get("used_fallback") else "completed")
         permission_denied = bool(result.pop("permission_denied", False))
@@ -2176,6 +2270,853 @@ External research snippets (JSON):
                 normalized.append(cleaned)
         return normalized
 
+    @staticmethod
+    def _dedupe_ordered(items: List[str]) -> List[str]:
+        deduped: List[str] = []
+        seen: set[str] = set()
+        for raw in items:
+            value = str(raw or "").strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(value)
+        return deduped
+
+    @classmethod
+    def _extract_percentages(cls, text: str, *, max_items: int = 5) -> List[str]:
+        matches = re.findall(r"\b\d{1,3}(?:\.\d+)?%", str(text or ""), flags=re.IGNORECASE)
+        return cls._dedupe_ordered(matches)[:max_items]
+
+    @classmethod
+    def _extract_currency_amounts(cls, text: str, *, max_items: int = 5) -> List[str]:
+        matches = re.findall(
+            r"\b\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?\s*(?:tnd|usd|eur)\b",
+            str(text or ""),
+            flags=re.IGNORECASE,
+        )
+        return cls._dedupe_ordered(matches)[:max_items]
+
+    @classmethod
+    def _infer_document_kind(cls, *, filename: str, insights: Dict[str, Any]) -> str:
+        doc_type = cls._normalize_text(str(insights.get("document_type") or ""))
+        if doc_type:
+            normalized_doc_type = re.sub(r"[_\-]+", " ", doc_type).strip()
+            if normalized_doc_type:
+                styled_words: List[str] = []
+                for word in normalized_doc_type.split():
+                    lowered_word = word.lower()
+                    if lowered_word in {"sla", "kpi", "msa"}:
+                        styled_words.append(lowered_word.upper())
+                    else:
+                        styled_words.append(lowered_word.capitalize())
+                return " ".join(styled_words)[:80]
+
+        lowered = filename.lower()
+        if "master_service_agreement" in lowered or "msa" in lowered:
+            return "Master Service Agreement"
+        if "notice_of_breach" in lowered or "breach" in lowered:
+            return "Notice of Breach"
+        if "counterparty_response" in lowered or "response" in lowered:
+            return "Counterparty Response"
+        if "kpi" in lowered or "dashboard" in lowered:
+            return "KPI Performance Extract"
+        if "invoice" in lowered or "reconciliation" in lowered:
+            return "Invoice Reconciliation"
+        if "settlement" in lowered:
+            return "Without-Prejudice Settlement Offer"
+        if "memo" in lowered:
+            return "Internal Legal Memo"
+        if "transcript" in lowered or "call" in lowered:
+            return "Call Transcript Summary"
+        return "Case Document"
+
+    @classmethod
+    def _infer_document_impact_note(cls, *, filename: str, kind: str, text: str) -> str:
+        lowered = (filename + " " + kind + " " + text).lower()
+        if "agreement" in lowered or "msa" in lowered:
+            return "Defines the contractual baseline: obligations, SLA thresholds, payment mechanics, and remedy triggers"
+        if "notice" in lowered and "breach" in lowered:
+            return "Frames breach allegations and triggers cure or escalation timelines"
+        if "response" in lowered:
+            return "Sets the counterparty defense and identifies contested allegations"
+        if "kpi" in lowered or "performance" in lowered:
+            return "Provides performance evidence used to support or challenge material-breach claims"
+        if "invoice" in lowered or "reconciliation" in lowered:
+            return "Quantifies disputed sums and supports damages or payment-position analysis"
+        if "settlement" in lowered:
+            return "Shows active negotiation posture while preserving formal legal rights"
+        if "memo" in lowered:
+            return "Captures internal risk framing and strategic legal posture"
+        if "transcript" in lowered or "call" in lowered:
+            return "Records statements and commitments that may affect liability or settlement leverage"
+        return "Adds evidentiary context for disputed obligations, chronology, and party positions"
+
+    def _build_case_document_resume_entry(self, *, document: Document, insights: Dict[str, Any]) -> str:
+        filename = self._normalize_text(document.filename) or f"Document #{document.id}"
+        kind = self._infer_document_kind(filename=filename, insights=insights)
+
+        raw_summary = self._normalize_text(
+            str(insights.get("general_summary") or "")
+            or document.summary_short
+            or document.summary
+            or (document.redacted_text or document.extracted_text or "")[:700]
+        )
+        says = self._to_clean_summary_paragraph(
+            raw_summary,
+            fallback=f"{kind} captured in the case record.",
+            max_sentences=1,
+            max_chars=170,
+        )
+        says = re.sub(r"^\s*(this|the)\s+document\s+(?:is|contains|covers|presents)\s+", "", says, flags=re.IGNORECASE)
+
+        markers_source = " ".join(
+            [
+                raw_summary,
+                self._normalize_text(document.summary),
+                self._normalize_text(document.summary_short),
+            ]
+        )
+        marker_parts: List[str] = []
+        percentages = self._extract_percentages(markers_source, max_items=2)
+        amounts = self._extract_currency_amounts(markers_source, max_items=2)
+        if percentages:
+            marker_parts.append("metrics " + ", ".join(percentages))
+        if amounts:
+            marker_parts.append("figures " + ", ".join(amounts))
+
+        date_markers: List[str] = []
+        for item in (insights.get("important_dates") or [])[:2]:
+            label = self._normalize_text(str(item.get("label") or ""))
+            value = self._normalize_text(str(item.get("value") or ""))
+            if label and value:
+                date_markers.append(f"{label} ({value})")
+        if date_markers:
+            marker_parts.append("dates " + "; ".join(date_markers[:2]))
+
+        impact = self._infer_document_impact_note(
+            filename=filename,
+            kind=kind,
+            text=" ".join([raw_summary, says]),
+        )
+
+        line = f"- {filename}: {kind}. Says: {says}. Matters: {impact}."
+        if marker_parts:
+            line += " Key markers: " + "; ".join(marker_parts) + "."
+
+        line = re.sub(r"\s+", " ", line).strip()
+        if len(line) > 430:
+            line = line[:430].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
+        return line
+
+    @staticmethod
+    def _issue_signature_tokens(value: str) -> set[str]:
+        tokens = re.findall(r"[a-z0-9]+", str(value or "").lower())
+        stopwords = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "that",
+            "this",
+            "are",
+            "was",
+            "were",
+            "into",
+            "under",
+            "case",
+            "potential",
+            "legal",
+            "contractual",
+            "service",
+            "services",
+        }
+        return {token for token in tokens if len(token) > 2 and token not in stopwords}
+
+    @classmethod
+    def _is_redundant_issue_point(cls, candidate: str, existing_points: List[str]) -> bool:
+        candidate_norm = str(candidate or "").strip().lower()
+        if not candidate_norm:
+            return False
+
+        candidate_tokens = cls._issue_signature_tokens(candidate_norm)
+
+        for existing in existing_points:
+            existing_norm = str(existing or "").strip().lower()
+            if not existing_norm:
+                continue
+
+            # Collapse near-duplicate breach labels (e.g., "SLA breaches" vs "material breaches of service levels").
+            if (
+                "breach" in candidate_norm
+                and "breach" in existing_norm
+                and any(token in candidate_norm for token in ["sla", "service level"])
+                and any(token in existing_norm for token in ["sla", "service level"])
+            ):
+                return True
+
+            if (
+                candidate_norm == existing_norm
+                or candidate_norm in existing_norm
+                or existing_norm in candidate_norm
+            ):
+                return True
+
+            existing_tokens = cls._issue_signature_tokens(existing_norm)
+            if candidate_tokens and existing_tokens:
+                overlap = len(candidate_tokens & existing_tokens)
+                min_size = min(len(candidate_tokens), len(existing_tokens))
+                if min_size > 0 and (overlap / min_size) >= 0.75:
+                    return True
+
+        return False
+
+    @classmethod
+    def _looks_contractual_signal(cls, value: str) -> bool:
+        lowered = str(value or "").strip().lower()
+        if not lowered:
+            return False
+        return any(token in lowered for token in cls.CONTRACTUAL_SIGNAL_KEYWORDS)
+
+    @classmethod
+    def _to_summary_bullet_sentence(cls, value: str, *, max_chars: int = 360) -> str:
+        candidate = str(value or "").strip()
+        if not candidate:
+            return ""
+        candidate = re.sub(r"^[-*\d\s\.)]+", "", candidate)
+        candidate = re.sub(r"\s+", " ", candidate).strip(" .;:-")
+        if not candidate:
+            return ""
+        candidate = candidate[0].upper() + candidate[1:] if candidate else candidate
+        if len(candidate) > max_chars:
+            candidate = candidate[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
+        if candidate and candidate[-1] not in ".!?":
+            candidate += "."
+        return candidate
+
+    def _append_case_summary_bullet(self, bullets: List[str], value: str) -> None:
+        cleaned = self._to_summary_bullet_sentence(value)
+        if not cleaned:
+            return
+        if self._looks_like_prompt_template_noise(cleaned):
+            return
+        if cleaned not in bullets:
+            bullets.append(cleaned)
+
+    def _build_contractual_context_bullets(
+        self,
+        *,
+        summary_text: str,
+        main_points: List[str],
+        reasoning_sources: List[Dict[str, Any]],
+    ) -> List[str]:
+        snippets = [
+            str(source.get("snippet") or "").strip().lower()
+            for source in reasoning_sources
+            if isinstance(source, dict)
+        ]
+        combined_text = " ".join(
+            snippets
+            + [str(summary_text or "").lower()]
+            + [str(item or "").lower() for item in main_points]
+        )
+
+        bullets: List[str] = []
+        if "sla" in combined_text or "service level" in combined_text:
+            bullets.append("Contractual SLA obligations appear central to the dispute posture.")
+        if any(token in combined_text for token in ["payment terms", "net 30", "late payment", "invoice"]):
+            bullets.append("Payment obligations and invoice mechanics are explicitly contractual and actively disputed.")
+        if any(token in combined_text for token in ["notice", "cure period", "formal notice"]):
+            bullets.append("Notice and cure-period clauses likely govern whether escalation or termination rights are triggered.")
+        if any(token in combined_text for token in ["liability cap", "liability"]):
+            bullets.append("Liability exposure should be read through contractual cap language and any listed exceptions.")
+        if any(token in combined_text for token in ["governing law", "dispute resolution", "arbitration", "mediation"]):
+            bullets.append("Governing-law and dispute-resolution clauses shape the strongest forum and remedy options.")
+
+        return bullets
+
+    def _build_evidence_story_bullets(self, *, evidence_sources: List[str]) -> List[str]:
+        lowered_sources = [str(name or "").strip().lower() for name in evidence_sources]
+        bullets: List[str] = []
+
+        if any("master_service_agreement" in name or "service_agreement" in name or "msa" in name for name in lowered_sources):
+            bullets.append(
+                "The Master Service Agreement sets the contractual baseline for service scope, SLA targets, payment mechanics, and cure or termination pathways."
+            )
+        if any("notice_of_breach" in name or "breach" in name for name in lowered_sources):
+            bullets.append(
+                "The breach notice formalizes underperformance allegations and opens a time-bound cure and escalation track."
+            )
+        if any("counterparty_response" in name or "response" in name for name in lowered_sources):
+            bullets.append(
+                "The counterparty response disputes breach framing and liability exposure, creating a contested fact record on performance and billing."
+            )
+        if any("kpi" in name or "dashboard" in name for name in lowered_sources):
+            bullets.append(
+                "KPI extracts provide trend evidence that can support or weaken material-breach arguments depending on methodology integrity."
+            )
+        if any("invoice" in name or "reconciliation" in name for name in lowered_sources):
+            bullets.append(
+                "Invoice reconciliation evidence is central for quantifying disputed sums, duplicate charges, and rate-cap compliance."
+            )
+        if any("settlement" in name for name in lowered_sources):
+            bullets.append(
+                "Without-prejudice settlement artifacts indicate active negotiation leverage while preserving litigation rights."
+            )
+        if any("transcript" in name or "call" in name for name in lowered_sources):
+            bullets.append(
+                "Call and meeting records add admissions, commitments, and unresolved points that shape negotiation credibility."
+            )
+
+        return bullets
+
+    def _build_quantitative_anchor_bullet(
+        self,
+        *,
+        summary_text: str,
+        main_points: List[str],
+        reasoning_sources: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        snippets = [
+            str(source.get("snippet") or "").strip()
+            for source in reasoning_sources
+            if isinstance(source, dict)
+        ]
+        combined_text = " ".join(
+            [summary_text]
+            + main_points
+            + snippets
+        )
+        if not combined_text:
+            return None
+
+        percent_matches = re.findall(r"\b\d{1,3}(?:\.\d+)?%", combined_text, flags=re.IGNORECASE)
+
+        amount_pattern = re.compile(
+            r"\b\d{1,3}(?:[,\s]\d{3})*(?:\.\d+)?\s*(?:tnd|usd|eur)\b",
+            re.IGNORECASE,
+        )
+        amount_candidates: List[tuple[str, int, int]] = []
+
+        primary_finance_tokens = ["disputed", "claim", "claimed", "accepted", "invoice", "amount"]
+        secondary_finance_tokens = ["payment", "fee", "charge", "surcharge", "credit", "rebate"]
+
+        for match in amount_pattern.finditer(combined_text):
+            value = match.group(0).strip()
+            start, end = match.span()
+            window = combined_text[max(0, start - 48) : min(len(combined_text), end + 48)].lower()
+            score = 0
+            if any(token in window for token in primary_finance_tokens):
+                score += 2
+            if any(token in window for token in secondary_finance_tokens):
+                score += 1
+            amount_candidates.append((value, score, start))
+
+        default_currency = ""
+        lowered_combined = combined_text.lower()
+        for code in ["tnd", "usd", "eur"]:
+            if code in lowered_combined:
+                default_currency = code.upper()
+                break
+
+        bare_amount_pattern = re.compile(r"\b\d{1,3}(?:[,\s]\d{3})+(?:\.\d+)?\b")
+        for match in bare_amount_pattern.finditer(combined_text):
+            raw = match.group(0).strip()
+            numeric = raw.replace(",", "").replace(" ", "")
+            try:
+                number_value = float(numeric)
+            except ValueError:
+                continue
+
+            # Skip likely years and non-material low numbers.
+            if 1900 <= number_value <= 2100 or number_value < 1000:
+                continue
+
+            start, end = match.span()
+            left = combined_text[max(0, start - 1) : start]
+            right = combined_text[end : min(len(combined_text), end + 3)]
+            if "%" in left or "%" in right:
+                continue
+
+            window = combined_text[max(0, start - 48) : min(len(combined_text), end + 48)].lower()
+            if not any(token in window for token in primary_finance_tokens + secondary_finance_tokens):
+                continue
+
+            normalized_value = raw + (f" {default_currency}" if default_currency else "")
+            amount_candidates.append((normalized_value, 1, start))
+
+        def _uniq(values: List[str]) -> List[str]:
+            unique: List[str] = []
+            seen: set[str] = set()
+            for raw in values:
+                item = str(raw or "").strip()
+                if not item:
+                    continue
+                key = item.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(item)
+            return unique
+
+        def _ranked_unique_amounts(items: List[tuple[str, int, int]]) -> List[str]:
+            unique: List[str] = []
+            seen: set[str] = set()
+            for value, _score, _index in sorted(items, key=lambda row: (-row[1], row[2])):
+                cleaned = str(value or "").strip()
+                if not cleaned:
+                    continue
+                key = cleaned.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(cleaned)
+            return unique
+
+        percentages = _uniq(percent_matches)[:4]
+        amounts = _ranked_unique_amounts(amount_candidates)[:4]
+
+        if not percentages and not amounts:
+            return None
+
+        if percentages and amounts:
+            summary = (
+                "Quantitative anchors include performance metrics "
+                + ", ".join(percentages)
+                + " and financial figures "
+                + ", ".join(amounts)
+            )
+        elif percentages:
+            summary = "Quantitative anchors include performance metrics " + ", ".join(percentages)
+        else:
+            summary = "Quantitative anchors include financial figures " + ", ".join(amounts)
+
+        return summary + ", which should be tied to contractual thresholds and damages analysis."
+
+    def _build_timeline_summary_bullet(self, *, key_dates: List[Dict[str, str]]) -> Optional[str]:
+        anchors: List[str] = []
+        for item in key_dates[:5]:
+            label = self._normalize_text(item.get("label"))
+            value = self._normalize_text(item.get("value"))
+            if label and value:
+                anchors.append(f"{label} ({value})")
+
+        if len(anchors) < 2:
+            return None
+
+        return "Critical timeline markers are " + "; ".join(anchors) + "."
+
+    def _build_issue_cluster_bullet(self, *, main_points: List[str]) -> Optional[str]:
+        cleaned: List[str] = []
+        for item in main_points:
+            text = self._normalize_text(item).rstrip(".")
+            if not text:
+                continue
+            if text not in cleaned:
+                cleaned.append(text)
+            if len(cleaned) >= 3:
+                break
+
+        if len(cleaned) < 2:
+            return None
+
+        return (
+            "Core contested issues include "
+            + "; ".join(cleaned)
+            + ", and each should be mapped to specific clauses and source exhibits."
+        )
+
+    def _build_case_summary_bullets(
+        self,
+        *,
+        summary_text: str,
+        main_points: List[str],
+        key_dates: List[Dict[str, str]],
+        next_steps: List[str],
+        evidence_sources: List[str],
+        reasoning_sources: List[Dict[str, Any]],
+        target_count: int,
+        require_contractual_context: bool,
+    ) -> List[str]:
+        target = min(max(target_count or 8, 1), 12)
+        bullets: List[str] = []
+
+        self._append_case_summary_bullet(bullets, f"Case posture: {summary_text}")
+
+        quantitative_bullet = self._build_quantitative_anchor_bullet(
+            summary_text=summary_text,
+            main_points=main_points,
+            reasoning_sources=reasoning_sources,
+        )
+        if quantitative_bullet:
+            self._append_case_summary_bullet(bullets, quantitative_bullet)
+
+        timeline_summary = self._build_timeline_summary_bullet(key_dates=key_dates)
+        if timeline_summary:
+            self._append_case_summary_bullet(bullets, timeline_summary)
+
+        issue_cluster_bullet = self._build_issue_cluster_bullet(main_points=main_points)
+        if issue_cluster_bullet:
+            self._append_case_summary_bullet(bullets, issue_cluster_bullet)
+
+        if require_contractual_context:
+            for item in self._build_contractual_context_bullets(
+                summary_text=summary_text,
+                main_points=main_points,
+                reasoning_sources=reasoning_sources,
+            ):
+                self._append_case_summary_bullet(bullets, item)
+                if len(bullets) >= target:
+                    return bullets[:target]
+
+        evidence_story_bullets = self._build_evidence_story_bullets(evidence_sources=evidence_sources)
+        for item in evidence_story_bullets[:2]:
+            self._append_case_summary_bullet(bullets, item)
+            if len(bullets) >= target:
+                return bullets[:target]
+
+        for point in main_points:
+            if len(bullets) >= target:
+                break
+            prefix = "Contractual issue" if require_contractual_context and self._looks_contractual_signal(point) else "Key issue"
+            self._append_case_summary_bullet(
+                bullets,
+                f"{prefix}: {point}. This point should be backed by clause-level and exhibit-level references.",
+            )
+
+        for item in key_dates:
+            if len(bullets) >= target:
+                break
+            label = self._normalize_text(item.get("label"))
+            value = self._normalize_text(item.get("value"))
+            if label and value:
+                self._append_case_summary_bullet(
+                    bullets,
+                    f"Timeline anchor: {label} - {value}. This date should be linked to corresponding notice, cure, or invoice obligations.",
+                )
+
+        if len(bullets) < target and evidence_sources:
+            self._append_case_summary_bullet(
+                bullets,
+                "Primary record set synthesized so far includes " + ", ".join(evidence_sources[:6]),
+            )
+
+        for step in next_steps:
+            if len(bullets) >= target:
+                break
+            self._append_case_summary_bullet(
+                bullets,
+                f"Immediate legal step: {step}. Tie this action to specific deadlines and unresolved evidence points.",
+            )
+
+        if len(bullets) < target:
+            self._append_case_summary_bullet(
+                bullets,
+                "Current summary confidence depends on processed evidence quality and will improve after full source verification and reconciliation.",
+            )
+
+        filler_index = 1
+        while len(bullets) < target:
+            self._append_case_summary_bullet(
+                bullets,
+                (
+                    "Open validation track "
+                    f"{filler_index}: reconcile KPI methodology, invoice support, and counterparty defenses against contractual thresholds"
+                ),
+            )
+            filler_index += 1
+            if filler_index > 20:
+                break
+
+        return bullets[:target]
+
+    def _build_case_dispute_posture(
+        self,
+        *,
+        evidence_sources: List[str],
+        main_points: List[str],
+        summary_text: str,
+    ) -> List[str]:
+        lowered_sources = [str(name or "").strip().lower() for name in evidence_sources]
+        combined_points = " ".join([summary_text] + [str(item or "") for item in main_points]).lower()
+        posture: List[str] = []
+
+        if any("notice" in name for name in lowered_sources) and any("response" in name for name in lowered_sources):
+            posture.append(
+                "Both sides have exchanged formal position documents, indicating an active pre-escalation dispute record rather than an early-stage complaint."
+            )
+        if any("kpi" in name or "dashboard" in name for name in lowered_sources):
+            posture.append(
+                "Operational performance evidence appears central, so SLA methodology and source-log integrity will likely determine breach credibility."
+            )
+        if any("invoice" in name or "reconciliation" in name for name in lowered_sources):
+            posture.append(
+                "Financial exposure is tied to invoice line-item reconciliation, surcharge cap compliance, and proof for challenged charges."
+            )
+        if any("settlement" in name for name in lowered_sources):
+            posture.append(
+                "A settlement channel is already active, suggesting a dual-track strategy can preserve leverage while avoiding premature hard escalation."
+            )
+        if any("transcript" in name or "call" in name for name in lowered_sources):
+            posture.append(
+                "Call records may contain admissions or commitments that can materially affect negotiation narrative and evidentiary posture."
+            )
+
+        if not posture and any(token in combined_points for token in ["breach", "dispute", "invoice", "sla"]):
+            posture.append(
+                "The matter appears to combine operational-performance allegations with monetary disputes, requiring synchronized legal and quantitative analysis."
+            )
+
+        return posture[:4]
+
+    def _build_case_overall_overview(
+        self,
+        *,
+        summary_text: str,
+        parties: List[str],
+        evidence_sources: List[str],
+        main_points: List[str],
+    ) -> str:
+        sentences: List[str] = []
+
+        normalized_summary = self._normalize_text(summary_text).rstrip(".")
+        if normalized_summary:
+            sentences.append(normalized_summary)
+
+        if len(parties) >= 2:
+            sentences.append(f"The active counterparties are {parties[0]} and {parties[1]}")
+
+        core_points = [self._normalize_text(item).rstrip(".") for item in main_points[:2] if self._normalize_text(item)]
+        if core_points:
+            sentences.append("Core dispute focus: " + "; ".join(core_points))
+
+        lowered_sources = [str(name or "").strip().lower() for name in evidence_sources]
+        if any("notice" in name for name in lowered_sources) and any("response" in name for name in lowered_sources):
+            sentences.append("The file already contains competing legal positions from both parties")
+
+        paragraph = ". ".join(item.strip(" .") for item in sentences if item.strip())
+        paragraph = re.sub(r"\s+", " ", paragraph).strip()
+        if paragraph and paragraph[-1] not in ".!?":
+            paragraph += "."
+        if len(paragraph) > 620:
+            paragraph = paragraph[:620].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
+
+        return paragraph or "Case evidence is available, but a concise overview could not be synthesized yet."
+
+    def _build_case_key_takeaways(
+        self,
+        *,
+        documents: List[Document],
+        main_points: List[str],
+        legal_risks: List[str],
+        quantitative_anchor: Optional[str],
+    ) -> List[str]:
+        takeaways: List[str] = []
+
+        if main_points:
+            primary_points = [self._normalize_text(item).rstrip(".") for item in main_points[:2] if self._normalize_text(item)]
+            if primary_points:
+                takeaways.append("Dispute core: " + "; ".join(primary_points) + ".")
+
+        notice_file = ""
+        response_file = ""
+        notice_perc: List[str] = []
+        response_perc: List[str] = []
+        amount_markers: List[str] = []
+        amount_sources: List[str] = []
+
+        for document in documents:
+            filename = self._normalize_text(document.filename)
+            lowered_name = filename.lower()
+            text_blob = " ".join(
+                [
+                    self._normalize_text(document.summary),
+                    self._normalize_text(document.summary_short),
+                    self._normalize_text((document.redacted_text or "")[:2200]),
+                    self._normalize_text((document.extracted_text or "")[:2200]),
+                ]
+            )
+            percentages = self._extract_percentages(text_blob, max_items=6)
+            amounts = self._extract_currency_amounts(text_blob, max_items=6)
+
+            if "notice" in lowered_name and "breach" in lowered_name:
+                notice_file = filename or notice_file
+                notice_perc = self._dedupe_ordered(notice_perc + percentages)
+            if "response" in lowered_name:
+                response_file = filename or response_file
+                response_perc = self._dedupe_ordered(response_perc + percentages)
+
+            if any(token in lowered_name for token in ["invoice", "reconciliation", "notice", "response"]):
+                if amounts:
+                    amount_markers = self._dedupe_ordered(amount_markers + amounts)
+                    if filename and filename not in amount_sources:
+                        amount_sources.append(filename)
+
+        if notice_file and response_file and notice_perc and response_perc:
+            notice_sample = ", ".join(notice_perc[:2])
+            response_sample = ", ".join(response_perc[:2])
+            if notice_sample.lower() != response_sample.lower():
+                takeaways.append(
+                    f"KPI figures diverge between party submissions ({notice_file}: {notice_sample}; {response_file}: {response_sample})."
+                )
+
+        if amount_markers:
+            refs = ", ".join(amount_sources[:2]) if amount_sources else "invoice-related evidence"
+            takeaways.append(
+                "Invoice quantum is contested around "
+                + ", ".join(amount_markers[:3])
+                + f" ({refs})."
+            )
+
+        if notice_file and response_file:
+            takeaways.append(
+                f"Legal position mismatch: breach allegations are asserted in {notice_file} and challenged in {response_file}."
+            )
+
+        if legal_risks:
+            lead_risk = self._normalize_text(legal_risks[0]).rstrip(".")
+            if lead_risk:
+                takeaways.append(f"Top legal risk signal: {lead_risk}.")
+
+        if quantitative_anchor:
+            compact_quant = self._normalize_text(quantitative_anchor)
+            if compact_quant:
+                compact_quant = compact_quant.rstrip(".")
+                takeaways.append(compact_quant + ".")
+
+        if not takeaways:
+            takeaways.append("Key disputes and risk signals are present but require additional processed evidence for sharper extraction.")
+
+        return self._dedupe_ordered(takeaways)[:6]
+
+    def _build_case_executive_summary(
+        self,
+        *,
+        summary_text: str,
+        parties: List[str],
+        evidence_sources: List[str],
+        key_dates: List[Dict[str, str]],
+    ) -> str:
+        sentences: List[str] = []
+
+        base = self._normalize_text(summary_text).rstrip(".")
+        if base:
+            sentences.append(base)
+
+        normalized_parties = [self._normalize_text(item) for item in parties if self._normalize_text(item)]
+        if len(normalized_parties) >= 2:
+            sentences.append(
+                f"Primary counterparties are {normalized_parties[0]} and {normalized_parties[1]}, with obligations anchored in the service agreement framework"
+            )
+
+        lowered_sources = [str(name or "").strip().lower() for name in evidence_sources]
+        if any("master_service_agreement" in name or "service_agreement" in name or "msa" in name for name in lowered_sources):
+            if any("notice" in name for name in lowered_sources) and any("response" in name for name in lowered_sources):
+                sentences.append(
+                    "The record includes the contract baseline, formal breach notice, and counterparty response, creating a mature dispute file for strategy decisions"
+                )
+
+        actionable_date_bits: List[str] = []
+        fallback_date_bits: List[str] = []
+        for item in key_dates[:6]:
+            label = self._normalize_text(item.get("label"))
+            value = self._normalize_text(item.get("value"))
+            if not label or not value:
+                continue
+            entry = f"{label} ({value})"
+            lowered_label = label.lower()
+            if "effective date" in lowered_label:
+                fallback_date_bits.append(entry)
+                continue
+            if any(token in lowered_label for token in ["notice", "due", "deadline", "cure", "response", "hearing"]):
+                actionable_date_bits.append(entry)
+            else:
+                fallback_date_bits.append(entry)
+
+        date_bits = (actionable_date_bits + fallback_date_bits)[:4]
+        if date_bits:
+            sentences.append("Immediate timeline anchors include " + "; ".join(date_bits))
+
+        paragraph = ". ".join(item.strip(" .") for item in sentences if item.strip())
+        paragraph = re.sub(r"\s+", " ", paragraph).strip()
+        if paragraph and paragraph[-1] not in ".!?":
+            paragraph += "."
+        if len(paragraph) > 920:
+            paragraph = paragraph[:920].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
+        return paragraph or summary_text
+
+    def _build_contextual_case_next_steps(
+        self,
+        *,
+        current_steps: List[str],
+        key_dates: List[Dict[str, str]],
+        evidence_sources: List[str],
+        quantitative_anchor: Optional[str],
+    ) -> List[str]:
+        planned: List[str] = []
+
+        generic_fragments = (
+            "review the agreement carefully",
+            "verify the completeness and accuracy",
+            "cross-check this document",
+            "cross-check documents",
+            "review the clauses governing",
+        )
+
+        lowered_sources = [str(name or "").strip().lower() for name in evidence_sources]
+
+        def _append(step: str) -> None:
+            cleaned = self._normalize_text(step).rstrip(".")
+            if cleaned and cleaned not in planned:
+                planned.append(cleaned)
+
+        if any("kpi" in name or "dashboard" in name for name in lowered_sources):
+            _append("Validate SLA and KPI computation methodology against raw route logs, exclusions, and contract-defined measurement rules")
+
+        if any("invoice" in name or "reconciliation" in name for name in lowered_sources):
+            _append("Finalize a line-item reconciliation schedule that maps each disputed charge to support evidence, rate-card terms, and cap limits")
+
+        if any("notice" in name for name in lowered_sources):
+            date_anchors: List[str] = []
+            for item in key_dates[:6]:
+                label = self._normalize_text(item.get("label"))
+                value = self._normalize_text(item.get("value"))
+                if not label or not value:
+                    continue
+                lowered_label = label.lower()
+                if "effective date" in lowered_label:
+                    continue
+                if any(token in lowered_label for token in ["due", "deadline", "notice", "cure", "response", "hearing"]):
+                    date_anchors.append(f"{label} ({value})")
+            if date_anchors:
+                _append(
+                    "Build a deadline execution matrix for "
+                    + "; ".join(date_anchors)
+                    + " with owners and evidence deliverables"
+                )
+
+        if quantitative_anchor:
+            _append("Tie every quantitative anchor to the governing clause and damages narrative before partner review")
+
+        if any("settlement" in name for name in lowered_sources):
+            _append("Prepare dual-track negotiation material: without-prejudice terms for settlement and an escalation-ready fallback brief")
+
+        has_contextual_steps = bool(planned)
+
+        for step in current_steps:
+            cleaned = self._normalize_text(step).rstrip(".")
+            if not cleaned:
+                continue
+            lowered = cleaned.lower()
+            if has_contextual_steps and any(fragment in lowered for fragment in generic_fragments):
+                continue
+            _append(cleaned)
+
+        return planned[:6]
+
     @classmethod
     def _extract_concise_summary_text(
         cls,
@@ -2201,8 +3142,6 @@ External research snippets (JSON):
             for raw_line in candidate.splitlines():
                 line = raw_line.strip()
                 if not line:
-                    if lines:
-                        break
                     continue
                 lowered = line.lower()
                 if lowered in stop_headers:
@@ -2212,13 +3151,13 @@ External research snippets (JSON):
                 if cls._looks_like_prompt_template_noise(line):
                     continue
                 lines.append(line)
-                if len(lines) >= 2:
+                if len(lines) >= 4:
                     break
 
             concise = " ".join(lines).strip()
             concise = re.sub(r"\s+", " ", concise)
             if concise:
-                return concise[:420]
+                return concise[:720]
 
         cleaned_issues = [
             str(item or "").strip().rstrip(".")
@@ -2267,18 +3206,6 @@ External research snippets (JSON):
             paragraph = paragraph[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
 
         return paragraph or fallback
-
-    @classmethod
-    def _expand_risks_from_reasoning(cls, reasoning_payload: Dict[str, Any]) -> List[str]:
-        candidates: List[str] = []
-        for issue in reasoning_payload.get("main_issues") or []:
-            text = str(issue or "").strip()
-            lowered = text.lower()
-            if not text:
-                continue
-            if any(token in lowered for token in ["breach", "termination", "dispute", "deadline", "notice", "liability"]):
-                candidates.append(text)
-        return cls._normalize_risk_items(candidates)
 
     def _is_reasonable_party(self, value: str) -> bool:
         lowered = value.lower().strip()
@@ -2377,7 +3304,10 @@ External research snippets (JSON):
         self,
         db: Session,
         tenant_id: int,
-        case_id: Optional[int]
+        case_id: Optional[int],
+        requested_count: Optional[int] = None,
+        requested_contractual_context: bool = False,
+        summary_request_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
         jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
@@ -2395,55 +3325,181 @@ External research snippets (JSON):
             }
 
         documents = [self._ensure_document_summary(db=db, document=document) for document in documents]
-        document_types: List[str] = []
-        parties: List[str] = []
-        paragraphs: List[str] = []
-        sources: List[Dict[str, Any]] = []
-        unavailable_documents: List[str] = []
 
-        for document in documents:
-            insights = self._safe_load_insights(document)
-
-            document_type = self._normalize_text(insights.get("document_type") or document.document_type)
-            if document_type and document_type not in document_types:
-                document_types.append(document_type)
-
-            for party in insights.get("parties_detected", []):
-                party_text = self._normalize_text(party)
-                if party_text and party_text not in parties and self._is_reasonable_party(party_text):
-                    parties.append(party_text)
-
-            source_text = (
-                document.summary
-                or document.summary_short
-                or self._normalize_text(insights.get("general_summary"))
-                or (document.redacted_text or document.extracted_text or "")[:1200]
-            )
-            if source_text:
-                doc_paragraph = self._to_clean_summary_paragraph(
-                    source_text,
-                    fallback=f"A concise summary is not available yet for {document.filename}.",
-                )
-            else:
-                doc_paragraph = "Summary unavailable until document processing completes."
-                unavailable_documents.append(self._document_summary_unavailable_reason(document))
-            paragraphs.append(f"Document {len(paragraphs) + 1} ({document.filename}): {doc_paragraph}")
-            sources.append(self._build_source(document=document, snippet=doc_paragraph))
-
-        overview_parts: List[str] = [f"Case {case.id} ({case.title}) currently includes {len(documents)} document(s)."]
-        if document_types:
-            overview_parts.append(f"The file set mainly includes {', '.join(document_types[:4])}.")
-        if parties:
-            overview_parts.append(f"The main parties across these documents are {', '.join(parties[:5])}.")
-
-        case_overview_paragraph = self._to_clean_summary_paragraph(
-            " ".join(overview_parts),
-            fallback=f"Case {case.id} ({case.title}) currently includes {len(documents)} document(s).",
-            max_sentences=4,
-            max_chars=640,
+        reasoning_payload = self._run_case_reasoning(
+            db=db,
+            tenant_id=tenant_id,
+            case=case,
+            documents=documents,
         )
 
-        answer = "\n\n".join([case_overview_paragraph, *paragraphs]).strip()
+        summary_text = self._extract_concise_summary_text(
+            narrative_summary=str(reasoning_payload.get("narrative_summary") or ""),
+            overview=str(reasoning_payload.get("overview") or ""),
+            main_issues=reasoning_payload.get("main_issues") or [],
+        )
+
+        main_points: List[str] = []
+        for issue in reasoning_payload.get("main_issues") or []:
+            cleaned = str(issue or "").strip().rstrip(".")
+            if not cleaned:
+                continue
+            if self._looks_like_prompt_template_noise(cleaned):
+                continue
+            normalized = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
+            if not self._is_redundant_issue_point(normalized, main_points):
+                main_points.append(normalized)
+
+        legal_risks = self._normalize_risk_items(reasoning_payload.get("legal_risks") or [])
+
+        key_dates: List[Dict[str, str]] = []
+        for item in reasoning_payload.get("key_dates") or []:
+            label = self._normalize_text(item.get("label"))
+            value = self._normalize_text(item.get("value"))
+            if not label or not value:
+                continue
+            normalized_item = {"label": label, "value": value}
+            if normalized_item not in key_dates:
+                key_dates.append(normalized_item)
+
+        next_steps = self._normalize_next_steps(reasoning_payload.get("recommended_next_steps") or [])
+
+        evidence_sources: List[str] = []
+        for source in reasoning_payload.get("sources") or []:
+            filename = str(source.get("filename") or "").strip()
+            if not filename or filename in evidence_sources:
+                continue
+            evidence_sources.append(filename)
+
+        for document in documents:
+            filename = self._normalize_text(document.filename)
+            if filename and filename not in evidence_sources:
+                evidence_sources.append(filename)
+
+        unavailable_documents: List[str] = []
+        fallback_sources: List[Dict[str, Any]] = []
+
+        for document in documents:
+            source_text = document.summary or document.summary_short
+            if source_text:
+                fallback_sources.append(self._build_source(document=document, snippet=source_text))
+            else:
+                unavailable_documents.append(self._document_summary_unavailable_reason(document))
+
+        reasoning_sources_for_quant = list(reasoning_payload.get("sources") or [])
+        for source in fallback_sources:
+            if source not in reasoning_sources_for_quant:
+                reasoning_sources_for_quant.append(source)
+
+        for document in documents:
+            numeric_source_text = self._normalize_text(document.redacted_text or document.extracted_text)
+            if not numeric_source_text:
+                continue
+            candidate_source = {
+                "filename": document.filename,
+                "snippet": numeric_source_text[:1800],
+            }
+            if candidate_source not in reasoning_sources_for_quant:
+                reasoning_sources_for_quant.append(candidate_source)
+
+        requested_count_value = int(requested_count or 0) if requested_count else 0
+        requested_count_value = min(max(requested_count_value, 0), 12)
+        lowered_request = (summary_request_text or "").strip().lower()
+        wants_bullets = requested_count_value > 0 or "bullet" in lowered_request
+        bullet_target = requested_count_value or (8 if wants_bullets else 0)
+        wants_contractual_context = bool(requested_contractual_context) or "contractual context" in lowered_request
+        quantitative_anchor = self._build_quantitative_anchor_bullet(
+            summary_text=summary_text,
+            main_points=main_points,
+            reasoning_sources=reasoning_sources_for_quant,
+        )
+
+        parties: List[str] = []
+        for item in reasoning_payload.get("parties") or []:
+            cleaned = self._normalize_text(str(item or ""))
+            if cleaned and cleaned not in parties:
+                parties.append(cleaned)
+
+        overall_overview = self._build_case_overall_overview(
+            summary_text=summary_text,
+            parties=parties,
+            evidence_sources=evidence_sources,
+            main_points=main_points,
+        )
+
+        document_resume_lines: List[str] = []
+        for document in documents:
+            insights = self._safe_load_insights(document)
+            document_resume_lines.append(
+                self._build_case_document_resume_entry(document=document, insights=insights)
+            )
+
+        key_takeaways = self._build_case_key_takeaways(
+            documents=documents,
+            main_points=main_points,
+            legal_risks=legal_risks,
+            quantitative_anchor=quantitative_anchor,
+        )
+
+        recommended_steps = self._build_contextual_case_next_steps(
+            current_steps=next_steps,
+            key_dates=key_dates,
+            evidence_sources=evidence_sources,
+            quantitative_anchor=quantitative_anchor,
+        )
+
+        if wants_bullets:
+            bullets = self._build_case_summary_bullets(
+                summary_text=summary_text,
+                main_points=main_points,
+                key_dates=key_dates,
+                next_steps=next_steps,
+                evidence_sources=evidence_sources,
+                reasoning_sources=reasoning_sources_for_quant,
+                target_count=bullet_target,
+                require_contractual_context=wants_contractual_context,
+            )
+            lines: List[str] = [f"Case #{case.id} summary:", ""]
+            lines.extend(f"- {item}" for item in bullets)
+        else:
+            lines = [f"Case #{case.id} resume:"]
+
+            lines.append("")
+            lines.append("Overall Case Overview:")
+            lines.append(overall_overview)
+
+            lines.append("")
+            lines.append("Documents Summary:")
+            if document_resume_lines:
+                lines.extend(document_resume_lines)
+            else:
+                lines.append("- No document-level summary could be generated yet.")
+
+            lines.append("")
+            lines.append("Key Takeaways:")
+            if key_takeaways:
+                for point in key_takeaways[:5]:
+                    lines.append(f"- {point}")
+            else:
+                lines.append("- No critical conflict signals were confidently extracted yet.")
+
+            lines.append("")
+            lines.append("Important Dates:")
+            if key_dates:
+                for item in key_dates[:6]:
+                    lines.append(f"- {item['label']}: {item['value']}")
+            else:
+                lines.append("- No critical dates were confidently extracted yet.")
+
+            lines.append("")
+            lines.append("Recommended Next Steps:")
+            if recommended_steps:
+                for step in recommended_steps[:4]:
+                    lines.append(f"- {step}")
+            else:
+                lines.append("- Validate chronology, disputed amounts, and contractual triggers against source documents.")
+
+        answer = "\n".join(lines).strip()
         if unavailable_documents:
             answer = (
                 f"{answer}\n\n"
@@ -2452,20 +3508,32 @@ External research snippets (JSON):
             ).strip()
 
         complete_document_count = sum(1 for doc in documents if (doc.summary or "").strip())
-        if complete_document_count == len(documents):
+        used_llm = bool(reasoning_payload.get("used_llm"))
+        if used_llm and complete_document_count > 0:
             confidence = "high"
         elif complete_document_count == 0:
             confidence = "low"
         else:
             confidence = "medium"
 
+        if not used_llm and unavailable_documents:
+            fallback_reason = "documents_missing_processed_text_and_reasoning_llm_unavailable"
+        elif not used_llm:
+            fallback_reason = "Used case reasoning heuristic synthesis"
+        elif unavailable_documents:
+            fallback_reason = "documents_missing_processed_text"
+        else:
+            fallback_reason = None
+
+        sources = (reasoning_payload.get("sources") or fallback_sources)[:10]
+
         return {
             "answer": answer,
-            "used_fallback": bool(unavailable_documents),
-            "fallback_reason": "documents_missing_processed_text" if unavailable_documents else None,
+            "used_fallback": bool(unavailable_documents) or not used_llm,
+            "fallback_reason": fallback_reason,
             "confidence": confidence,
             "scope": "case",
-            "sources": sources[:10],
+            "sources": sources,
             "jurisdiction": jurisdiction_context,
         }
 
@@ -2681,6 +3749,227 @@ External research snippets (JSON):
         rag_result["jurisdiction"] = jurisdiction_context
         return rag_result
 
+    @staticmethod
+    def _parse_timeline_date_value(value: str, *, default_year: Optional[int] = None) -> datetime | None:
+        normalized = str(value or "").strip()
+        if not normalized:
+            return None
+
+        patterns = [
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+            "%Y-%m-%d %H:%M:%S",
+            "%B %d, %Y",
+            "%b %d, %Y",
+            "%B %d %Y",
+            "%b %d %Y",
+            "%B %d, %Y %I:%M %p",
+            "%b %d, %Y %I:%M %p",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+        ]
+        for fmt in patterns:
+            try:
+                return datetime.strptime(normalized, fmt)
+            except ValueError:
+                continue
+
+        if default_year is not None:
+            inferred_patterns = [
+                "%B %d",
+                "%b %d",
+                "%B %d, %I:%M %p",
+                "%b %d, %I:%M %p",
+                "%B %d %I:%M %p",
+                "%b %d %I:%M %p",
+            ]
+            for fmt in inferred_patterns:
+                try:
+                    parsed = datetime.strptime(normalized, fmt)
+                    return parsed.replace(year=int(default_year))
+                except ValueError:
+                    continue
+
+        inline_iso = re.search(r"\d{4}-\d{2}-\d{2}", normalized)
+        if inline_iso:
+            try:
+                return datetime.strptime(inline_iso.group(0), "%Y-%m-%d")
+            except ValueError:
+                return None
+
+        return None
+
+    @classmethod
+    def _normalize_timeline_label(cls, value: str) -> str:
+        cleaned = re.sub(r"[_\-]+", " ", str(value or "")).strip()
+        cleaned = re.sub(r"\s+", " ", cleaned)
+        if not cleaned:
+            return "Event"
+
+        acronyms = {"sla", "kpi", "msa", "api", "pdf"}
+        lower_words = {"of", "and", "for", "the", "to", "in", "on", "at", "by", "or", "a", "an", "from", "with"}
+        words: List[str] = []
+        for index, token in enumerate(cleaned.split()):
+            lowered = token.lower()
+            if lowered in acronyms:
+                words.append(lowered.upper())
+            elif index > 0 and lowered in lower_words:
+                words.append(lowered)
+            else:
+                words.append(lowered.capitalize())
+
+        return " ".join(words)
+
+    @classmethod
+    def _canonicalize_timeline_label(cls, value: str) -> str:
+        cleaned = cls._normalize_timeline_label(value)
+        lowered = cleaned.lower()
+
+        if "revised invoice" in lowered and ("due" in lowered or "deadline" in lowered):
+            return "Revised Invoice Due"
+        if "notice" in lowered and "breach" in lowered:
+            return "Notice of Breach"
+        if "root cause report" in lowered and "due" in lowered:
+            return "Root Cause Report Due"
+        if "corrective operations plan" in lowered and "due" in lowered:
+            return "Corrective Operations Plan Due"
+        if "counterparty" in lowered and "response" in lowered:
+            return "Counterparty Response"
+        if lowered in {"response date", "response"}:
+            return "Counterparty Response"
+        if lowered in {"invoice date"}:
+            return "Invoice Date"
+
+        return cleaned
+
+    @classmethod
+    def _build_strict_case_timeline_text(
+        cls,
+        *,
+        case_id: int,
+        case_title: str,
+        events: List[Dict[str, Any]],
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        raw_rows: List[Dict[str, Any]] = []
+        known_years: List[int] = []
+
+        for item in events:
+            raw_date = cls._normalize_text(str(item.get("date") or ""))
+            raw_label = cls._normalize_text(str(item.get("label") or item.get("event") or ""))
+            source = cls._normalize_text(str(item.get("source") or item.get("filename") or "Unknown source"))
+            if not raw_date or not raw_label:
+                continue
+
+            parsed = cls._parse_timeline_date_value(raw_date)
+            if parsed is not None:
+                known_years.append(parsed.year)
+
+            raw_rows.append(
+                {
+                    "raw_date": raw_date,
+                    "label": cls._canonicalize_timeline_label(raw_label),
+                    "source": source,
+                    "parsed_date": parsed,
+                }
+            )
+
+        inferred_year: Optional[int] = None
+        if known_years:
+            year_counts: Dict[int, int] = {}
+            for year in known_years:
+                year_counts[year] = year_counts.get(year, 0) + 1
+            inferred_year = sorted(year_counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+        absolute_events_map: Dict[tuple[str, str], Dict[str, Any]] = {}
+        relative_events: List[Dict[str, Any]] = []
+
+        for row in raw_rows:
+            parsed = row.get("parsed_date") or cls._parse_timeline_date_value(
+                row.get("raw_date") or "",
+                default_year=inferred_year,
+            )
+
+            if parsed is None:
+                relative_events.append(
+                    {
+                        "raw_date": row.get("raw_date"),
+                        "label": row.get("label"),
+                        "source": row.get("source"),
+                    }
+                )
+                continue
+
+            date_display = parsed.strftime("%Y-%m-%d")
+            key = (date_display.lower(), str(row.get("label") or "").lower())
+            existing = absolute_events_map.get(key)
+            source = cls._normalize_text(str(row.get("source") or "Unknown source"))
+
+            if existing is None:
+                absolute_events_map[key] = {
+                    "date_display": date_display,
+                    "raw_date": row.get("raw_date"),
+                    "label": row.get("label"),
+                    "source": source,
+                    "sources": [source] if source else ["Unknown source"],
+                    "parsed_date": parsed,
+                }
+            else:
+                if source and source not in existing["sources"]:
+                    existing["sources"].append(source)
+
+        normalized_events = sorted(
+            absolute_events_map.values(),
+            key=lambda event: (
+                event.get("parsed_date") or datetime.max,
+                str(event.get("label") or "").lower(),
+            ),
+        )
+
+        relative_events = sorted(
+            relative_events,
+            key=lambda event: (
+                str(event.get("raw_date") or "").lower(),
+                str(event.get("label") or "").lower(),
+            ),
+        )
+
+        lines: List[str] = [f"Case #{case_id} strict chronology ({case_title}):"]
+        lines.append("")
+        lines.append("Dated Events:")
+
+        if not normalized_events:
+            lines.append("None")
+        else:
+            for event in normalized_events[:35]:
+                source_values = [cls._normalize_text(str(item or "")) for item in (event.get("sources") or [])]
+                source_values = [item for item in source_values if item]
+                source_values = cls._dedupe_ordered(source_values)
+                if not source_values:
+                    source_values = [cls._normalize_text(str(event.get("source") or "Unknown source")) or "Unknown source"]
+
+                if len(source_values) > 3:
+                    source_display = ", ".join(source_values[:3]) + f" +{len(source_values) - 3} more"
+                else:
+                    source_display = ", ".join(source_values)
+
+                lines.append(
+                    f"{event['date_display']} | {event['label']} | Source: {source_display}"
+                )
+
+            if len(normalized_events) > 35:
+                lines.append("")
+                lines.append(f"Showing first 35 events out of {len(normalized_events)} extracted dated events.")
+
+        if relative_events:
+            lines.append("")
+            lines.append("Undated/Relative Time References:")
+            for event in relative_events[:8]:
+                lines.append(
+                    f"{event.get('raw_date')} | {event.get('label')} | Source: {event.get('source')}"
+                )
+
+        return "\n".join(lines), normalized_events
+
     def _build_case_timeline(
         self,
         db: Session,
@@ -2700,20 +3989,57 @@ External research snippets (JSON):
         )
 
         if timeline_result.success:
+            timeline_text, normalized_events = self._build_strict_case_timeline_text(
+                case_id=case.id,
+                case_title=case.title,
+                events=timeline_result.payload.get("events") or [],
+            )
+
+            document_by_filename = {
+                self._normalize_text(document.filename): document
+                for document in documents
+                if self._normalize_text(document.filename)
+            }
+
             sources: List[Dict[str, Any]] = []
-            for document in documents:
-                insights = self._safe_load_insights(document)
-                for item in insights.get("important_dates", []):
-                    label = self._normalize_text(item.get("label"))
-                    value = self._normalize_text(item.get("value"))
-                    if label and value:
-                        sources.append(self._build_source(document=document, snippet=f"{label}: {value}"))
+            seen_sources: set[tuple[str, str]] = set()
+            for event in normalized_events:
+                snippet = f"{event.get('date_display')}: {event.get('label')}"
+                source_names = [
+                    self._normalize_text(str(item or ""))
+                    for item in (event.get("sources") or [event.get("source")])
+                ]
+                source_names = [item for item in source_names if item]
+                if not source_names:
+                    source_names = ["Unknown source"]
+
+                for source_name in self._dedupe_ordered(source_names)[:4]:
+                    source_signature = (source_name.lower(), snippet.lower())
+                    if source_signature in seen_sources:
+                        continue
+                    seen_sources.add(source_signature)
+
+                    document = document_by_filename.get(source_name)
+                    if document is not None:
+                        sources.append(self._build_source(document=document, snippet=snippet))
+                    else:
+                        sources.append(
+                            {
+                                "chunk_id": None,
+                                "document_id": None,
+                                "case_id": case.id,
+                                "filename": source_name,
+                                "chunk_index": None,
+                                "score": 1.0,
+                                "snippet": snippet[:300],
+                            }
+                        )
 
             return {
-                "answer": timeline_result.payload.get("timeline_text") or "No timeline could be generated.",
+                "answer": timeline_text,
                 "used_fallback": not bool(timeline_result.payload.get("used_llm")),
                 "fallback_reason": None if timeline_result.payload.get("used_llm") else "Used timeline agent heuristic synthesis",
-                "confidence": "high" if timeline_result.payload.get("events") else "medium",
+                "confidence": "high" if normalized_events else "medium",
                 "scope": "case",
                 "sources": sources[:10],
                 "jurisdiction": jurisdiction_context,
@@ -2729,12 +4055,742 @@ External research snippets (JSON):
             "jurisdiction": jurisdiction_context,
         }
 
+    def _generate_case_insights(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+    ) -> Dict[str, Any]:
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+        documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+        consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
+        recordings = self._get_case_voice_recordings(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        if not documents and not consultations and not recordings:
+            return {
+                "answer": f"Case {case.id} has no evidence yet, so insights cannot be generated.",
+                "used_fallback": True,
+                "fallback_reason": "No case evidence found",
+                "confidence": "low",
+                "scope": "case",
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        for document in documents:
+            self._ensure_document_summary(db=db, document=document)
+
+        reasoning_payload = self._run_case_reasoning(
+            db=db,
+            tenant_id=tenant_id,
+            case=case,
+            documents=documents,
+        )
+
+        insight_result = insight_agent.generate_case_insights(
+            case_id=case.id,
+            case_title=case.title,
+            jurisdiction_country=case.jurisdiction_country,
+            reasoning_payload=reasoning_payload,
+            documents=documents,
+            consultation_count=len(consultations),
+            voice_recording_count=len(recordings),
+        )
+
+        if not insight_result.success:
+            return {
+                "answer": "I could not generate insights for this case yet.",
+                "used_fallback": True,
+                "fallback_reason": insight_result.error or "Insight agent failed",
+                "confidence": "low",
+                "scope": "case",
+                "sources": (reasoning_payload.get("sources") or [])[:10],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        payload = insight_result.payload
+        summary_text = self._to_clean_summary_paragraph(
+            str(payload.get("insight_summary") or ""),
+            fallback=f"Case #{case.id} insight snapshot is available but no concise summary was produced.",
+            max_sentences=2,
+            max_chars=420,
+        )
+        key_insights = self._normalize_next_steps(payload.get("key_insights") or [])
+        priority_actions = self._normalize_next_steps(payload.get("priority_actions") or [])
+        evidence_gaps = self._normalize_next_steps(payload.get("evidence_gaps") or [])
+
+        evidence_sources: List[str] = []
+        for item in payload.get("evidence_sources") or []:
+            filename = str(item or "").strip()
+            if filename and filename not in evidence_sources:
+                evidence_sources.append(filename)
+            if len(evidence_sources) >= 10:
+                break
+
+        lines: List[str] = [f"Case #{case.id} insight brief:"]
+        lines.append("")
+        lines.append("Summary:")
+        lines.append(summary_text)
+
+        lines.append("")
+        lines.append("Strategic insights:")
+        if key_insights:
+            for item in key_insights[:6]:
+                lines.append(f"- {item}")
+        else:
+            lines.append("- No high-confidence insight was extracted from current evidence.")
+
+        if priority_actions:
+            lines.append("")
+            lines.append("Partner review action plan:")
+            for item in priority_actions[:5]:
+                lines.append(f"- {item}")
+
+        if evidence_gaps:
+            lines.append("")
+            lines.append("Open proof gaps to close:")
+            for item in evidence_gaps[:5]:
+                lines.append(f"- {item}")
+
+        if evidence_sources:
+            lines.append("")
+            lines.append("Evidence reviewed:")
+            for item in evidence_sources:
+                lines.append(f"- {item}")
+
+        fallback_sources: List[Dict[str, Any]] = []
+        for document in documents:
+            source_text = document.summary_short or document.summary
+            if source_text:
+                fallback_sources.append(self._build_source(document=document, snippet=source_text))
+
+        used_llm = bool(payload.get("used_llm"))
+        return {
+            "answer": "\n".join(lines).strip(),
+            "used_fallback": not used_llm or not key_insights,
+            "fallback_reason": None if used_llm else "Used insight agent heuristic synthesis",
+            "confidence": "high" if used_llm and key_insights else "medium" if key_insights else "low",
+            "scope": "case",
+            "sources": (reasoning_payload.get("sources") or fallback_sources)[:10],
+            "jurisdiction": jurisdiction_context,
+        }
+
+    def _generate_case_memory(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        objective: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if case_id is None:
+            return {
+                "answer": "Please open a case first so I can build a case memory snapshot.",
+                "used_fallback": True,
+                "fallback_reason": "No case context provided",
+                "confidence": "low",
+                "scope": "global",
+                "sources": [],
+            }
+
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+        documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+        consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
+        recordings = self._get_case_voice_recordings(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        if not documents and not consultations and not recordings:
+            return {
+                "answer": f"Case {case.id} has no evidence yet, so a memory snapshot cannot be generated.",
+                "used_fallback": True,
+                "fallback_reason": "No case evidence found",
+                "confidence": "low",
+                "scope": "case",
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        for document in documents:
+            self._ensure_document_summary(db=db, document=document)
+
+        reasoning_payload = self._run_case_reasoning(
+            db=db,
+            tenant_id=tenant_id,
+            case=case,
+            documents=documents,
+        )
+
+        memory_result = case_memory_agent.build_case_memory(
+            case_id=case.id,
+            case_title=case.title,
+            jurisdiction_country=case.jurisdiction_country,
+            documents=documents,
+            consultations=consultations,
+            voice_recordings=recordings,
+            reasoning_payload=reasoning_payload,
+            objective=objective or "Build a case memory snapshot that highlights missing proof and evidence trace.",
+        )
+
+        if not memory_result.success:
+            return {
+                "answer": "I could not build a case memory snapshot yet.",
+                "used_fallback": True,
+                "fallback_reason": memory_result.error or "Case memory agent failed",
+                "confidence": "low",
+                "scope": "case",
+                "sources": (reasoning_payload.get("sources") or [])[:10],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        payload = memory_result.payload
+        summary_text = self._to_clean_summary_paragraph(
+            str(payload.get("memory_summary") or ""),
+            fallback=f"Case #{case.id} memory snapshot is available but no concise summary was produced.",
+            max_sentences=2,
+            max_chars=420,
+        )
+        document_inventory = payload.get("document_inventory") or []
+        claim_trace = payload.get("claim_trace") or []
+        contradictions = self._normalize_next_steps(payload.get("contradictions") or [])
+        open_gaps = self._normalize_next_steps(payload.get("open_proof_gaps") or [])
+        deadline_signals = payload.get("deadline_signals") or []
+        next_steps = self._normalize_next_steps(payload.get("recommended_next_steps") or [])
+
+        evidence_sources: List[str] = []
+        for item in payload.get("evidence_sources") or []:
+            filename = str(item or "").strip()
+            if filename and filename not in evidence_sources:
+                evidence_sources.append(filename)
+            if len(evidence_sources) >= 10:
+                break
+
+        lines: List[str] = [f"Case #{case.id} memory snapshot:"]
+        lines.append("")
+        lines.append("Summary:")
+        lines.append(summary_text)
+
+        lines.append("")
+        lines.append("Document inventory:")
+        if document_inventory:
+            for item in document_inventory[:8]:
+                filename = self._normalize_text(item.get("filename"))
+                role = self._normalize_text(item.get("role")) or "case evidence"
+                summary = self._normalize_text(item.get("summary"))
+                descriptor = f"{filename} — {role}"
+                if summary:
+                    descriptor += f": {summary}"
+                lines.append(f"- {descriptor}")
+        else:
+            lines.append("- No document inventory was extracted yet.")
+
+        lines.append("")
+        lines.append("Claim trace:")
+        if claim_trace:
+            for item in claim_trace[:6]:
+                claim = self._normalize_text(item.get("claim"))
+                support = item.get("supporting_documents") or []
+                status = self._normalize_text(item.get("status")) or "unknown"
+                note = self._normalize_text(item.get("note"))
+                support_text = ", ".join(str(doc).strip() for doc in support if str(doc).strip()) or "no direct support yet"
+                line = f"- {claim} [{status}]: {support_text}"
+                if note:
+                    line += f" ({note})"
+                lines.append(line)
+        else:
+            lines.append("- No claim trace was extracted yet.")
+
+        if contradictions:
+            lines.append("")
+            lines.append("Contradictions to resolve:")
+            lines.extend(f"- {item}" for item in contradictions[:5])
+
+        if deadline_signals:
+            lines.append("")
+            lines.append("Live deadlines and date signals:")
+            for item in deadline_signals[:6]:
+                label = self._normalize_text(item.get("label"))
+                value = self._normalize_text(item.get("value"))
+                source = self._normalize_text(item.get("source"))
+                if label and value:
+                    line = f"- {label}: {value}"
+                    if source:
+                        line += f" (source: {source})"
+                    lines.append(line)
+
+        if open_gaps:
+            lines.append("")
+            lines.append("Open proof gaps:")
+            lines.extend(f"- {item}" for item in open_gaps[:6])
+
+        if next_steps:
+            lines.append("")
+            lines.append("Recommended next steps:")
+            lines.extend(f"- {item}" for item in next_steps[:6])
+
+        if evidence_sources:
+            lines.append("")
+            lines.append("Evidence reviewed:")
+            lines.extend(f"- {item}" for item in evidence_sources[:8])
+
+        fallback_sources: List[Dict[str, Any]] = []
+        for document in documents:
+            source_text = document.summary_short or document.summary
+            if source_text:
+                fallback_sources.append(self._build_source(document=document, snippet=source_text))
+
+        used_llm = bool(payload.get("used_llm"))
+        return {
+            "answer": "\n".join(lines).strip(),
+            "used_fallback": not used_llm,
+            "fallback_reason": None if used_llm else "Used case memory heuristic synthesis",
+            "confidence": str(payload.get("confidence") or ("high" if claim_trace else "medium")),
+            "scope": "case",
+            "sources": (reasoning_payload.get("sources") or fallback_sources)[:10],
+            "jurisdiction": jurisdiction_context,
+            "structured_result": payload,
+        }
+
+    def _trace_case_evidence(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        objective: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if case_id is None:
+            return {
+                "answer": "Please open a case first so I can trace evidence to the record.",
+                "used_fallback": True,
+                "fallback_reason": "No case context provided",
+                "confidence": "low",
+                "scope": "global",
+                "sources": [],
+            }
+
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+        documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+        consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
+        recordings = self._get_case_voice_recordings(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        if not documents:
+            return {
+                "answer": f"Case {case.id} has no documents yet, so evidence tracing cannot run.",
+                "used_fallback": True,
+                "fallback_reason": "No case documents found",
+                "confidence": "low",
+                "scope": "case",
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        for document in documents:
+            self._ensure_document_summary(db=db, document=document)
+
+        reasoning_payload = self._run_case_reasoning(
+            db=db,
+            tenant_id=tenant_id,
+            case=case,
+            documents=documents,
+        )
+
+        trace_result = evidence_trace_agent.build_claim_trace(
+            case_id=case.id,
+            case_title=case.title,
+            documents=documents,
+            reasoning_payload=reasoning_payload,
+            objective=objective or "Trace claims to supporting case evidence.",
+        )
+
+        if not trace_result.success:
+            return {
+                "answer": "I could not build an evidence trace yet.",
+                "used_fallback": True,
+                "fallback_reason": trace_result.error or "Evidence trace agent failed",
+                "confidence": "low",
+                "scope": "case",
+                "sources": (reasoning_payload.get("sources") or [])[:10],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        payload = trace_result.payload
+        summary_text = self._to_clean_summary_paragraph(
+            str(payload.get("trace_summary") or ""),
+            fallback=f"Case #{case.id} evidence trace is available but no concise summary was produced.",
+            max_sentences=2,
+            max_chars=420,
+        )
+        claim_trace = payload.get("claim_trace") or []
+        unsupported_claims = self._normalize_next_steps(payload.get("unsupported_claims") or [])
+        next_steps = self._normalize_next_steps(payload.get("recommended_follow_up") or [])
+
+        evidence_sources: List[str] = []
+        for item in payload.get("evidence_sources") or []:
+            filename = str(item or "").strip()
+            if filename and filename not in evidence_sources:
+                evidence_sources.append(filename)
+            if len(evidence_sources) >= 10:
+                break
+
+        lines: List[str] = [f"Case #{case.id} evidence trace:"]
+        lines.append("")
+        lines.append("Summary:")
+        lines.append(summary_text)
+
+        lines.append("")
+        lines.append("Claim trace:")
+        if claim_trace:
+            for item in claim_trace[:8]:
+                claim = self._normalize_text(item.get("claim"))
+                support = item.get("supporting_documents") or []
+                status = self._normalize_text(item.get("status")) or "unknown"
+                note = self._normalize_text(item.get("note"))
+                support_text = ", ".join(str(doc).strip() for doc in support if str(doc).strip()) or "no direct support yet"
+                line = f"- {claim} [{status}]: {support_text}"
+                if note:
+                    line += f" ({note})"
+                lines.append(line)
+        else:
+            lines.append("- No claim trace was extracted yet.")
+
+        if unsupported_claims:
+            lines.append("")
+            lines.append("Unsupported claims:")
+            lines.extend(f"- {item}" for item in unsupported_claims[:5])
+
+        if next_steps:
+            lines.append("")
+            lines.append("Recommended follow-up:")
+            lines.extend(f"- {item}" for item in next_steps[:6])
+
+        if evidence_sources:
+            lines.append("")
+            lines.append("Evidence reviewed:")
+            lines.extend(f"- {item}" for item in evidence_sources[:8])
+
+        fallback_sources: List[Dict[str, Any]] = []
+        for document in documents:
+            source_text = document.summary_short or document.summary
+            if source_text:
+                fallback_sources.append(self._build_source(document=document, snippet=source_text))
+
+        used_llm = bool(payload.get("used_llm"))
+        return {
+            "answer": "\n".join(lines).strip(),
+            "used_fallback": not used_llm,
+            "fallback_reason": None if used_llm else "Used evidence trace heuristic synthesis",
+            "confidence": str(payload.get("confidence") or ("high" if claim_trace else "medium")),
+            "scope": "case",
+            "sources": (reasoning_payload.get("sources") or fallback_sources)[:10],
+            "jurisdiction": jurisdiction_context,
+            "structured_result": payload,
+        }
+
+    def _monitor_deadlines_case(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        document_id: Optional[int] = None,
+        objective: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        focus_document_name = None
+        if case_id is None and document_id is not None:
+            focus_document = self._get_document_or_404(db=db, tenant_id=tenant_id, document_id=document_id)
+            case_id = focus_document.case_id
+            focus_document_name = focus_document.filename
+
+        if case_id is None:
+            return {
+                "answer": "Please open a case first so I can monitor deadlines and obligations.",
+                "used_fallback": True,
+                "fallback_reason": "No case context provided",
+                "confidence": "low",
+                "scope": "global",
+                "sources": [],
+            }
+
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+        documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+        consultations = self._get_case_consultation_requests(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        if document_id is not None and focus_document_name is None:
+            focus_document = self._get_document_or_404(db=db, tenant_id=tenant_id, document_id=document_id)
+            if focus_document.case_id != case.id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Document not found in the selected case.",
+                )
+            focus_document_name = focus_document.filename
+
+        if not documents and not consultations:
+            return {
+                "answer": f"Case {case.id} has no documents or consultations yet, so deadline monitoring cannot run.",
+                "used_fallback": True,
+                "fallback_reason": "No case evidence found",
+                "confidence": "low",
+                "scope": "case",
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        for document in documents:
+            self._ensure_document_summary(db=db, document=document)
+
+        reasoning_payload = self._run_case_reasoning(
+            db=db,
+            tenant_id=tenant_id,
+            case=case,
+            documents=documents,
+        )
+
+        monitor_result = deadline_obligation_agent.monitor_deadlines(
+            case_id=case.id,
+            case_title=case.title,
+            documents=documents,
+            consultations=consultations,
+            reasoning_payload=reasoning_payload,
+            objective=(objective or "Monitor deadlines, notice windows, cure periods, and live obligations.")
+            + (f" Focus on document: {focus_document_name}." if focus_document_name else ""),
+        )
+
+        if not monitor_result.success:
+            return {
+                "answer": "I could not build a deadline monitor yet.",
+                "used_fallback": True,
+                "fallback_reason": monitor_result.error or "Deadline monitor agent failed",
+                "confidence": "low",
+                "scope": "case",
+                "sources": (reasoning_payload.get("sources") or [])[:10],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        payload = monitor_result.payload
+        summary_text = self._to_clean_summary_paragraph(
+            str(payload.get("deadline_summary") or ""),
+            fallback=f"Case #{case.id} deadline monitoring is available but no concise summary was produced.",
+            max_sentences=2,
+            max_chars=420,
+        )
+        deadline_items = payload.get("deadline_items") or []
+        obligation_items = payload.get("obligation_items") or []
+        next_actions = self._normalize_next_steps(payload.get("next_actions") or [])
+
+        lines: List[str] = [f"Case #{case.id} deadline monitor:"]
+        lines.append("")
+        lines.append("Summary:")
+        lines.append(summary_text)
+
+        if deadline_items:
+            lines.append("")
+            lines.append("Deadline signals:")
+            for item in deadline_items[:8]:
+                label = self._normalize_text(item.get("label"))
+                value = self._normalize_text(item.get("value"))
+                source = self._normalize_text(item.get("source"))
+                urgency = self._normalize_text(item.get("urgency")) or "medium"
+                if label and value:
+                    line = f"- {label}: {value} [{urgency}]"
+                    if source:
+                        line += f" (source: {source})"
+                    lines.append(line)
+
+        if obligation_items:
+            lines.append("")
+            lines.append("Live obligations:")
+            for item in obligation_items[:8]:
+                obligation = self._normalize_text(item.get("obligation"))
+                due_date = self._normalize_text(item.get("due_date"))
+                source = self._normalize_text(item.get("source"))
+                priority = self._normalize_text(item.get("priority")) or "medium"
+                note = self._normalize_text(item.get("note"))
+                if obligation:
+                    line = f"- {obligation} [{priority}]"
+                    if due_date:
+                        line += f" due: {due_date}"
+                    if note:
+                        line += f" ({note})"
+                    if source:
+                        line += f" (source: {source})"
+                    lines.append(line)
+
+        if next_actions:
+            lines.append("")
+            lines.append("Recommended next steps:")
+            lines.extend(f"- {item}" for item in next_actions[:6])
+
+        fallback_sources: List[Dict[str, Any]] = []
+        for document in documents:
+            source_text = document.summary_short or document.summary
+            if source_text:
+                fallback_sources.append(self._build_source(document=document, snippet=source_text))
+
+        used_llm = bool(payload.get("used_llm"))
+        return {
+            "answer": "\n".join(lines).strip(),
+            "used_fallback": not used_llm,
+            "fallback_reason": None if used_llm else "Used deadline monitor heuristic synthesis",
+            "confidence": str(payload.get("confidence") or ("high" if deadline_items or obligation_items else "medium")),
+            "scope": "case",
+            "sources": (reasoning_payload.get("sources") or fallback_sources)[:10],
+            "jurisdiction": jurisdiction_context,
+            "structured_result": payload,
+        }
+
+    def _draft_contract_redline_for_case(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        document_id: Optional[int] = None,
+        objective: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if case_id is None and document_id is not None:
+            focused_document = self._get_document_or_404(db=db, tenant_id=tenant_id, document_id=document_id)
+            case_id = focused_document.case_id
+
+        if case_id is None:
+            return {
+                "answer": "Please open a case first so I can draft a contract redline.",
+                "used_fallback": True,
+                "fallback_reason": "No case context provided",
+                "confidence": "low",
+                "scope": "global",
+                "sources": [],
+            }
+
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+        case_documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        if document_id is not None:
+            focused_document = self._get_document_or_404(db=db, tenant_id=tenant_id, document_id=document_id)
+            if focused_document.case_id != case.id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Document not found in the selected case.",
+                )
+            documents = [focused_document] + [document for document in case_documents if document.id != focused_document.id]
+            focus_document_name = focused_document.filename
+        else:
+            documents = case_documents
+            focus_document_name = None
+
+        if not documents:
+            return {
+                "answer": f"Case {case.id} has no documents yet, so contract redlining cannot run.",
+                "used_fallback": True,
+                "fallback_reason": "No case documents found",
+                "confidence": "low",
+                "scope": "case",
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        for document in documents:
+            self._ensure_document_summary(db=db, document=document)
+
+        redline_result = contract_redline_agent.draft_redline(
+            case_id=case.id,
+            case_title=case.title,
+            documents=documents,
+            objective=objective or "Draft a practical contract redline with clause-level suggestions, fallback positions, and source documents.",
+            focus_document_name=focus_document_name,
+        )
+
+        if not redline_result.success:
+            return {
+                "answer": "I could not draft a contract redline yet.",
+                "used_fallback": True,
+                "fallback_reason": redline_result.error or "Contract redline agent failed",
+                "confidence": "low",
+                "scope": "case",
+                "sources": [],
+                "jurisdiction": jurisdiction_context,
+            }
+
+        payload = redline_result.payload
+        summary_text = self._to_clean_summary_paragraph(
+            str(payload.get("redline_summary") or ""),
+            fallback=f"Case #{case.id} contract redline guidance is available but no concise summary was produced.",
+            max_sentences=2,
+            max_chars=420,
+        )
+        clause_rows = payload.get("clause_rows") or []
+        priority_changes = self._normalize_next_steps(payload.get("priority_changes") or [])
+        fallback_positions = self._normalize_next_steps(payload.get("fallback_positions") or [])
+        risk_notes = self._normalize_next_steps(payload.get("risk_notes") or [])
+        target_document = self._normalize_text(payload.get("target_document"))
+
+        lines: List[str] = [f"Case #{case.id} contract redline:"]
+        lines.append("")
+        lines.append("Summary:")
+        lines.append(summary_text)
+
+        if target_document:
+            lines.extend(["", "Target document:", f"- {target_document}"])
+
+        if clause_rows:
+            lines.append("")
+            lines.append("Clause-level edits:")
+            for item in clause_rows[:8]:
+                clause = self._normalize_text(item.get("clause"))
+                issue = self._normalize_text(item.get("issue"))
+                suggestion = self._normalize_text(item.get("suggestion"))
+                fallback_position_text = self._normalize_text(item.get("fallback_position"))
+                source_documents = item.get("source_documents") or []
+                source_text = ", ".join(self._normalize_text(doc) for doc in source_documents if self._normalize_text(doc))
+                if clause:
+                    line = f"- {clause}: {issue or 'Review required.'}"
+                    if suggestion:
+                        line += f" Suggested change: {suggestion}."
+                    if fallback_position_text:
+                        line += f" Fallback: {fallback_position_text}."
+                    if source_text:
+                        line += f" Sources: {source_text}."
+                    lines.append(line)
+
+        if priority_changes:
+            lines.append("")
+            lines.append("Priority changes:")
+            lines.extend(f"- {item}" for item in priority_changes[:6])
+
+        if risk_notes:
+            lines.append("")
+            lines.append("Risk notes:")
+            lines.extend(f"- {item}" for item in risk_notes[:6])
+
+        if fallback_positions:
+            lines.append("")
+            lines.append("Fallback positions:")
+            lines.extend(f"- {item}" for item in fallback_positions[:5])
+
+        fallback_sources: List[Dict[str, Any]] = []
+        for document in documents:
+            source_text = document.summary_short or document.summary
+            if source_text:
+                fallback_sources.append(self._build_source(document=document, snippet=source_text))
+
+        used_llm = bool(payload.get("used_llm"))
+        return {
+            "answer": "\n".join(lines).strip(),
+            "used_fallback": not used_llm,
+            "fallback_reason": None if used_llm else "Used contract redline heuristic synthesis",
+            "confidence": str(payload.get("confidence") or ("high" if clause_rows else "medium")),
+            "scope": "case",
+            "sources": fallback_sources[:10],
+            "jurisdiction": jurisdiction_context,
+            "structured_result": payload,
+        }
+
     def _analyze_case_risks(
         self,
         db: Session,
         tenant_id: int,
         case_id: Optional[int],
         requested_count: Optional[int] = None,
+        risk_request_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
         jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
@@ -2749,22 +4805,31 @@ External research snippets (JSON):
             case=case,
             documents=documents
         )
-        collected_risks = self._normalize_risk_items(reasoning_payload.get("legal_risks") or [])
-        if requested_count:
-            expanded = self._expand_risks_from_reasoning(reasoning_payload)
-            for item in expanded:
-                if item not in collected_risks:
-                    collected_risks.append(item)
-                if len(collected_risks) >= requested_count:
-                    break
+        lowered_request = self._normalize_text(risk_request_text).lower()
+        wants_operational = (
+            "operational" in lowered_request
+            or "business risk" in lowered_request
+            or "operations risk" in lowered_request
+        )
+        wants_legal = "legal" in lowered_request or not wants_operational
 
-        target_count = min(max(requested_count or 6, 1), 12)
+        target_default = 6 if wants_legal and wants_operational else 5
+        target_count = min(max(requested_count or target_default, 1), 12)
 
-        if collected_risks:
+        ranked_entries = self._build_ranked_case_risks(
+            reasoning_payload=reasoning_payload,
+            wants_legal=wants_legal,
+            wants_operational=wants_operational,
+        )
+
+        if ranked_entries:
             return {
-                "answer": (
-                    f"Detected legal risks for case {case.id}:\n\n"
-                    + "\n".join(f"- {risk}" for risk in collected_risks[:target_count])
+                "answer": self._format_ranked_case_risks_answer(
+                    case_id=case.id,
+                    ranked_entries=ranked_entries,
+                    target_count=target_count,
+                    wants_legal=wants_legal,
+                    wants_operational=wants_operational,
                 ),
                 "used_fallback": not bool(reasoning_payload.get("used_llm")),
                 "fallback_reason": None if reasoning_payload.get("used_llm") else "Used case reasoning agent heuristic synthesis",
@@ -2838,6 +4903,70 @@ External research snippets (JSON):
             "sources": case_summary["sources"],
             "artifact": artifact_context,
             "jurisdiction": jurisdiction_context,
+        }
+
+    def _draft_negotiation_strategy(self, *, objective: str, horizon_days: int, use_external_research: bool) -> Dict[str, Any]:
+        strategy_result = negotiation_strategy_agent.draft_strategy(
+            objective=objective,
+            horizon_days=horizon_days,
+            case_context=None,
+            use_external_research=use_external_research,
+        )
+
+        payload = strategy_result.payload
+        lines = ["Negotiation strategy:"]
+
+        summary = self._normalize_text(payload.get("strategy_summary"))
+        if summary:
+            lines.append(summary)
+
+        opening_position = self._normalize_text(payload.get("opening_position"))
+        if opening_position:
+            lines.extend(["", "Opening position:", f"- {opening_position}"])
+
+        target_outcome = self._normalize_text(payload.get("target_outcome"))
+        if target_outcome:
+            lines.extend(["", "Target outcome:", f"- {target_outcome}"])
+
+        red_lines = payload.get("red_lines") or []
+        if red_lines:
+            lines.extend(["", "Red lines:"])
+            lines.extend(f"- {item}" for item in red_lines[:5])
+
+        concessions = payload.get("concessions") or []
+        if concessions:
+            lines.extend(["", "Concession ladder:"])
+            lines.extend(f"- {item}" for item in concessions[:5])
+
+        day_by_day_plan = payload.get("day_by_day_plan") or []
+        if day_by_day_plan:
+            lines.extend(["", f"{min(max(int(horizon_days or 15), 1), 30)}-day plan:"])
+            lines.extend(f"- {item}" for item in day_by_day_plan[:10])
+
+        fallback_options = payload.get("fallback_options") or []
+        if fallback_options:
+            lines.extend(["", "Fallback options:"])
+            lines.extend(f"- {item}" for item in fallback_options[:5])
+
+        web_references = payload.get("web_references") or []
+        if web_references:
+            lines.extend(["", "Web references:"])
+            lines.extend(f"- {item}" for item in web_references[:3])
+
+        closing_position = self._normalize_text(payload.get("closing_position"))
+        if closing_position:
+            lines.extend(["", "Close:", f"- {closing_position}"])
+
+        answer_text = "\n".join(lines).strip()
+
+        return {
+            "answer": answer_text,
+            "used_fallback": not bool(payload.get("used_llm")),
+            "fallback_reason": None if payload.get("used_llm") else "Used negotiation strategy agent template fallback",
+            "confidence": "high" if payload.get("used_llm") else "medium",
+            "scope": "global",
+            "sources": [],
+            "structured_result": payload,
         }
 
     def _review_case_booking(

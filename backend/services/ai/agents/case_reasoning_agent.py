@@ -8,6 +8,7 @@ from backend.models.case import Case
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
+from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.agents.base_agent import BaseAgent, AgentResult
 from backend.services.ai.jurisdiction_context_service import jurisdiction_context_service
 from backend.services.ai.llm_gateway import llm_gateway
@@ -337,6 +338,8 @@ class CaseReasoningAgent(BaseAgent):
                 continue
             if has_payment_terms_signal and (
                 "no clear payment obligation" in lowered
+                or "unclear payment obligation" in lowered
+                or "unclear payment obligations" in lowered
                 or "payment obligation was confidently extracted" in lowered
             ):
                 continue
@@ -365,6 +368,14 @@ class CaseReasoningAgent(BaseAgent):
             if lowered.startswith("risk:"):
                 continue
             if "no clear payment obligation" in lowered and has_payment_terms_signal:
+                continue
+            if (
+                has_payment_terms_signal
+                and (
+                    "unclear payment obligation" in lowered
+                    or "unclear payment obligations" in lowered
+                )
+            ):
                 continue
             if "no governing law clause" in lowered and has_governing_law_signal:
                 continue
@@ -432,6 +443,8 @@ You are the Case Reasoning Agent inside a legal AI platform.
 
 You receive grounded case intelligence that came from documents, intake records, and voice transcripts.
 Your job is to synthesize that information into a clean case brief without inventing facts.
+
+{AgentOutputFormatter.build_quality_guidance(task="reason over case evidence and produce a structured legal brief", structured_json=True)}
 
 Return valid JSON only with this exact schema:
 {{

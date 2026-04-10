@@ -17,6 +17,10 @@ class CommandParsingService:
         r"\b(?:top\s+|only\s+|just\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+deadlines?\b",
         re.IGNORECASE,
     )
+    SUMMARY_BULLET_COUNT_PATTERN = re.compile(
+        r"\b(?:in|with|as)?\s*(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:bullet\s*points?|bullets?)\b",
+        re.IGNORECASE,
+    )
     NUMBER_WORDS = {
         "one": 1,
         "two": 2,
@@ -59,6 +63,94 @@ class CommandParsingService:
         "unresolved",
         "liability",
         "liabilities",
+    ]
+    INSIGHT_KEYWORDS = [
+        "insight",
+        "insights",
+        "key insight",
+        "case insight",
+        "strategic insight",
+        "critical insight",
+        "what stands out",
+    ]
+    CASE_MEMORY_KEYWORDS = [
+        "case memory",
+        "memory snapshot",
+        "what are we missing",
+        "what am i missing",
+        "open proof gaps",
+        "missing documents",
+        "missing docs",
+        "what is missing",
+        "what's missing",
+        "case snapshot",
+    ]
+    EVIDENCE_TRACE_KEYWORDS = [
+        "trace evidence",
+        "evidence trace",
+        "claim trace",
+        "claim to evidence",
+        "claim-to-evidence",
+        "evidence map",
+        "source map",
+        "support this claim",
+        "supporting evidence",
+        "back this up",
+    ]
+    DEADLINE_MONITOR_KEYWORDS = [
+        "monitor deadlines",
+        "deadline monitor",
+        "deadline tracker",
+        "track deadlines",
+        "track obligations",
+        "obligation monitor",
+        "monitor obligations",
+        "cure period",
+        "notice window",
+        "renewal deadline",
+        "deadline register",
+    ]
+    CONTRACT_REDLINE_KEYWORDS = [
+        "redline",
+        "contract redline",
+        "markup",
+        "mark up",
+        "revise the contract",
+        "revise the agreement",
+        "contract markup",
+        "line by line",
+        "clause changes",
+        "annotate contract",
+        "edit the contract",
+    ]
+    NEGOTIATION_KEYWORDS = [
+        "negotiation",
+        "negotiating",
+        "settlement",
+        "without prejudice",
+        "counteroffer",
+        "concession",
+        "walk away",
+        "walkaway",
+        "deal",
+        "offer",
+        "compromise",
+    ]
+    NEGOTIATION_STRATEGY_KEYWORDS = [
+        "strategy",
+        "plan",
+        "playbook",
+        "approach",
+        "tactics",
+        "structure",
+        "fallback",
+        "fallback options",
+        "proposal",
+        "propose",
+        "terms",
+        "term sheet",
+        "package",
+        "settlement structure",
     ]
     CASE_STATUS_PATTERN = re.compile(
         r"\b(open|in\s+progress|in_progress|closed|archived)\b",
@@ -194,6 +286,11 @@ class CommandParsingService:
             lowered=lowered,
             intent=intent,
         )
+        requested_horizon_days = self._extract_negotiation_horizon_days(lowered=lowered, intent=intent)
+        requested_contractual_context = self._extract_summary_contractual_context(
+            lowered=lowered,
+            intent=intent,
+        )
 
         return {
             "raw_message": original_message,
@@ -210,6 +307,8 @@ class CommandParsingService:
             "requested_client_name": requested_client_name,
             "requested_jurisdiction_country": requested_jurisdiction_country,
             "requested_count": requested_count,
+            "requested_horizon_days": requested_horizon_days,
+            "requested_contractual_context": requested_contractual_context,
             "confidence": confidence
         }
 
@@ -247,6 +346,31 @@ class CommandParsingService:
         if self._contains_any(lowered, ["optimize prompt", "improve prompt", "rewrite prompt", "better prompt", "prompt optimizer"]):
             return "optimize_prompt", "high"
 
+        if self._contains_any(lowered, self.EVIDENCE_TRACE_KEYWORDS):
+            if target_type == "case" or self._contains_any(lowered, ["case", "matter", "workspace"]):
+                return "trace_case_evidence", "high"
+            return "trace_case_evidence", "medium"
+
+        if self._contains_any(lowered, self.CASE_MEMORY_KEYWORDS):
+            if target_type == "case" or self._contains_any(lowered, ["case", "matter", "workspace"]):
+                return "generate_case_memory", "high"
+            return "generate_case_memory", "medium"
+
+        if self._contains_any(lowered, self.DEADLINE_MONITOR_KEYWORDS) or (
+            "monitor" in lowered and self._contains_any(lowered, ["deadline", "obligation", "cure", "renewal", "notice"])
+        ):
+            if target_type == "case" or self._contains_any(lowered, ["case", "matter", "workspace"]):
+                return "monitor_deadlines_case", "high"
+            return "monitor_deadlines_case", "medium"
+
+        if self._contains_any(lowered, self.CONTRACT_REDLINE_KEYWORDS):
+            if target_type in {"case", "document"} or self._contains_any(lowered, ["case", "document", "file", "workspace", "agreement", "contract"]):
+                return "draft_contract_redline_case", "high"
+            return "draft_contract_redline_case", "medium"
+
+        if self._contains_any(lowered, self.NEGOTIATION_KEYWORDS) and self._contains_any(lowered, self.NEGOTIATION_STRATEGY_KEYWORDS):
+            return "draft_negotiation_strategy", "high"
+
         # Handle compound requests first: "summarize ... and analyze risks ..."
         if target_type == "case":
             wants_summary = self._looks_like_summary_request(lowered=lowered, target_type=target_type)
@@ -277,6 +401,13 @@ class CommandParsingService:
             if target_type == "case":
                 return "build_timeline_case", "high"
             return "ask_global", "medium"
+
+        if self._contains_any(lowered, self.INSIGHT_KEYWORDS):
+            if target_type == "case" or self._contains_any(lowered, ["case", "matter", "workspace"]):
+                return "generate_case_insights", "high" if target_type == "case" else "medium"
+            if target_type == "document":
+                return "ask_document", "medium"
+            return "generate_case_insights", "medium"
 
         if self._contains_any(lowered, ["booking", "book", "consultation", "appointment", "session request", "schedule session"]):
             if target_type == "case":
@@ -375,18 +506,26 @@ class CommandParsingService:
         lowered: str,
         intent: str,
     ) -> Optional[int]:
-        if intent not in {"analyze_risks_case", "list_deadlines_case"}:
+        if intent not in {"analyze_risks_case", "list_deadlines_case", "summarize_case", "summarize_global", "draft_negotiation_strategy"}:
             return None
 
         if intent == "analyze_risks_case" and "risk" not in lowered:
             return None
         if intent == "list_deadlines_case" and not self._contains_any(lowered, ["deadline", "due date", "notice"]):
             return None
+        if intent in {"summarize_case", "summarize_global"} and not self._contains_any(lowered, ["bullet", "bullet point", "bullets"]):
+            return None
+        if intent == "draft_negotiation_strategy" and not self._contains_any(lowered, ["day", "days", "week", "weeks", "timeline", "plan", "strategy"]):
+            return None
 
         if intent == "analyze_risks_case":
             match = self.RISK_COUNT_PATTERN.search(lowered)
         elif intent == "list_deadlines_case":
             match = self.DEADLINE_COUNT_PATTERN.search(lowered)
+        elif intent in {"summarize_case", "summarize_global"}:
+            match = self.SUMMARY_BULLET_COUNT_PATTERN.search(lowered)
+        elif intent == "draft_negotiation_strategy":
+            match = re.search(r"\b(?:next\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:day|days|week|weeks)\b", lowered, re.IGNORECASE)
         else:
             match = None
 
@@ -401,7 +540,53 @@ class CommandParsingService:
         if count <= 0:
             return None
 
+        if intent == "draft_negotiation_strategy" and "week" in (match.group(0).lower() if match else ""):
+            count *= 7
+
         return min(count, 12)
+
+    def _extract_negotiation_horizon_days(self, *, lowered: str, intent: str) -> Optional[int]:
+        if intent != "draft_negotiation_strategy":
+            return None
+
+        match = re.search(
+            r"\b(?:next\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:day|days|week|weeks)\b",
+            lowered,
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+
+        raw_count = match.group(1).lower()
+        if raw_count.isdigit():
+            count = int(raw_count)
+        else:
+            count = self.NUMBER_WORDS.get(raw_count, 0)
+        if count <= 0:
+            return None
+
+        if "week" in match.group(0).lower():
+            count *= 7
+        return min(count, 30)
+
+    def _extract_summary_contractual_context(self, *, lowered: str, intent: str) -> bool:
+        if intent not in {"summarize_case", "summarize_global"}:
+            return False
+
+        return self._contains_any(
+            lowered,
+            [
+                "contractual context",
+                "contract context",
+                "contractual",
+                "contract terms",
+                "agreement terms",
+                "clause",
+                "obligation",
+                "obligations",
+                "sla",
+            ],
+        )
 
     def _extract_case_status(self, *, lowered: str, intent: str) -> Optional[str]:
         if intent != "update_case_status":
@@ -514,7 +699,7 @@ class CommandParsingService:
         return None
 
     def _extract_jurisdiction_country(self, *, lowered: str, intent: str) -> Optional[str]:
-        if intent not in {"create_case", "update_case_status", "ask_case", "analyze_risks_case", "summarize_case"}:
+        if intent not in {"create_case", "update_case_status", "ask_case", "analyze_risks_case", "summarize_case", "generate_case_insights"}:
             return None
 
         if any(keyword in lowered for keyword in ["germany", "deutschland", "german", "deutsch"]):

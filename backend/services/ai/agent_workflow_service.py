@@ -12,8 +12,12 @@ from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
 from backend.services.ai.agents.booking_agent import booking_agent
 from backend.services.ai.agents.case_reasoning_agent import case_reasoning_agent
+from backend.services.ai.agents.case_memory_agent import case_memory_agent
+from backend.services.ai.agents.deadline_obligation_agent import deadline_obligation_agent
 from backend.services.ai.agents.drafting_agent import drafting_agent
+from backend.services.ai.agents.evidence_strength_agent import evidence_strength_agent
 from backend.services.ai.agents.intake_agent import intake_agent
+from backend.services.ai.agents.insight_agent import insight_agent
 from backend.services.ai.agents.timeline_agent import timeline_agent
 from backend.services.ai.agents.verifier_agent import verifier_agent
 from backend.services.ai.artifact_versioning_service import artifact_versioning_service
@@ -101,6 +105,52 @@ class AgentWorkflowService:
         stages["case_reasoning"] = self._serialize_stage(case_reasoning_stage)
         stage_outputs["case_reasoning"] = case_reasoning_stage.payload
 
+        evidence_strength_stage = evidence_strength_agent.evaluate_evidence_strength(
+            case_id=case.id,
+            case_title=case.title,
+            objective=workflow_objective,
+            documents=documents,
+            reasoning_payload=case_reasoning_stage.payload,
+        )
+        stages["evidence_strength"] = self._serialize_stage(evidence_strength_stage)
+        stage_outputs["evidence_strength"] = evidence_strength_stage.payload
+
+        case_memory_stage = case_memory_agent.build_case_memory(
+            case_id=case.id,
+            case_title=case.title,
+            jurisdiction_country=case.jurisdiction_country,
+            documents=documents,
+            consultations=consultation_requests,
+            voice_recordings=voice_recordings,
+            reasoning_payload=case_reasoning_stage.payload,
+            objective=workflow_objective,
+        )
+        stages["case_memory"] = self._serialize_stage(case_memory_stage)
+        stage_outputs["case_memory"] = case_memory_stage.payload
+
+        deadline_monitor_stage = deadline_obligation_agent.monitor_deadlines(
+            case_id=case.id,
+            case_title=case.title,
+            documents=documents,
+            consultations=consultation_requests,
+            reasoning_payload=case_reasoning_stage.payload,
+            objective=workflow_objective,
+        )
+        stages["deadline_monitor"] = self._serialize_stage(deadline_monitor_stage)
+        stage_outputs["deadline_monitor"] = deadline_monitor_stage.payload
+
+        insight_stage = insight_agent.generate_case_insights(
+            case_id=case.id,
+            case_title=case.title,
+            jurisdiction_country=case.jurisdiction_country,
+            reasoning_payload=case_reasoning_stage.payload,
+            documents=documents,
+            consultation_count=len(consultation_requests),
+            voice_recording_count=len(voice_recordings),
+        )
+        stages["insight"] = self._serialize_stage(insight_stage)
+        stage_outputs["insight"] = insight_stage.payload
+
         timeline_stage = timeline_agent.build_case_timeline(
             case_id=case.id,
             case_title=case.title,
@@ -119,7 +169,10 @@ class AgentWorkflowService:
         stage_outputs["booking"] = booking_stage.payload
 
         summary_text = self._sanitize_workflow_text(
-            self._format_reasoning_summary(case_reasoning_stage.payload)
+            self._format_reasoning_summary(
+                case_reasoning_stage.payload,
+                evidence_strength_stage.payload,
+            )
         ) or "Case evidence was retrieved, but no stable summary could be generated."
         formatted_sources = self._format_sources(retrieval_stage.payload.get("results") or [])
         verifier_stage = verifier_agent.verify_answer(
@@ -252,7 +305,10 @@ class AgentWorkflowService:
         )
 
     @staticmethod
-    def _format_reasoning_summary(reasoning_payload: dict[str, Any]) -> str:
+    def _format_reasoning_summary(
+        reasoning_payload: dict[str, Any],
+        evidence_strength_payload: dict[str, Any] | None = None,
+    ) -> str:
         sections: list[str] = []
 
         overview = (reasoning_payload.get("overview") or "").strip()
@@ -295,6 +351,34 @@ class AgentWorkflowService:
             sections.extend(f"- {item}" for item in next_steps[:8])
         else:
             sections.append("- Review the case evidence manually.")
+
+        if evidence_strength_payload:
+            strongest = evidence_strength_payload.get("strongest_evidence") or []
+            weakest = evidence_strength_payload.get("weakest_evidence") or []
+
+            sections.append("")
+            sections.append("Evidence Strength:")
+            if evidence_strength_payload.get("evidence_summary"):
+                sections.append(str(evidence_strength_payload.get("evidence_summary")))
+
+            if strongest:
+                sections.append("Strongest Evidence:")
+                for item in strongest[:4]:
+                    filename = str(item.get("filename") or "").strip()
+                    reason = str(item.get("why_it_is_strong") or "").strip()
+                    link = str(item.get("material_breach_link") or "").strip()
+                    bullet_parts = [part for part in [filename, reason, link] if part]
+                    if bullet_parts:
+                        sections.append("- " + " ".join(bullet_parts))
+
+            if weakest:
+                sections.append("Weakest Evidence:")
+                for item in weakest[:4]:
+                    filename = str(item.get("filename") or "").strip()
+                    reason = str(item.get("why_it_is_weak") or "").strip()
+                    bullet_parts = [part for part in [filename, reason] if part]
+                    if bullet_parts:
+                        sections.append("- " + " ".join(bullet_parts))
 
         return "\n".join(sections).strip()
 
