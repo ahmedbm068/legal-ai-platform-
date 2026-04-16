@@ -21,6 +21,7 @@ from backend.services.ai.agents.deadline_obligation_agent import deadline_obliga
 from backend.services.ai.agents.drafting_agent import drafting_agent
 from backend.services.ai.agents.document_comparison_agent import document_comparison_agent
 from backend.services.ai.agents.evidence_trace_agent import evidence_trace_agent
+from backend.services.ai.agents.evidence_strength_agent import evidence_strength_agent
 from backend.services.ai.agents.insight_agent import insight_agent
 from backend.services.ai.agents.negotiation_strategy_agent import negotiation_strategy_agent
 from backend.services.ai.agents.prompt_optimizer_agent import prompt_optimizer_agent
@@ -62,8 +63,10 @@ class CopilotService(CopilotRiskAnalysisMixin):
         "compare_case_documents",
         "review_booking_case",
         "draft_negotiation_strategy",
+        "draft_partner_strategy_note_case",
         "draft_contract_redline_case",
         "draft_client_email_case",
+        "draft_internal_email_case",
         "ask_case",
         "ask_document",
         "ask_global",
@@ -102,13 +105,26 @@ class CopilotService(CopilotRiskAnalysisMixin):
         "review_booking_case": "analysis",
         "trace_case_evidence": "analysis",
         "draft_negotiation_strategy": "analysis",
+        "draft_partner_strategy_note_case": "analysis",
         "draft_contract_redline_case": "analysis",
         "draft_client_email_case": "analysis",
+        "draft_internal_email_case": "analysis",
         "ask_case": "query",
         "ask_document": "query",
         "ask_global": "query",
         "summarize_global": "analysis",
     }
+    MATERIAL_BREACH_QUERY_KEYWORDS = (
+        "material breach",
+        "breach position",
+        "strongest clause",
+        "strongest clauses",
+        "supporting clauses",
+        "support a material breach",
+        "supporting a material breach",
+        "clause supports breach",
+        "clauses support breach",
+    )
     LEGAL_SEARCH_ELIGIBLE_INTENTS = {
         "ask_document",
         "ask_case",
@@ -163,7 +179,7 @@ class CopilotService(CopilotRiskAnalysisMixin):
         "sla",
         "service level",
         "payment terms",
-        "net 30",
+        "draft_partner_strategy_note_case",
         "late payment",
         "invoice",
         "cure period",
@@ -198,7 +214,8 @@ class CopilotService(CopilotRiskAnalysisMixin):
         "kpi",
         "delivery",
         "lost package",
-        "operations",
+                    "draft_client_email_case",
+                    "draft_internal_email_case",
         "route",
         "dashboard",
         "invoice",
@@ -300,7 +317,7 @@ class CopilotService(CopilotRiskAnalysisMixin):
 
     @staticmethod
     def _normalize_role(value: str | None) -> str:
-        normalized = str(value or "").strip().lower()
+        normalized = str(value or "assistant").strip().lower()
         return normalized if normalized in {"admin", "lawyer", "assistant", "client"} else "assistant"
 
     @staticmethod
@@ -442,6 +459,15 @@ class CopilotService(CopilotRiskAnalysisMixin):
                 next_parsed["target_type"] = "case"
                 next_parsed["target_id"] = workspace_case_id
 
+            if any(
+                token in query_text
+                for token in ["internal update", "supervising lawyer", "lawyer update", "internal memo", "team update", "partner update"]
+            ):
+                next_parsed["intent"] = "draft_internal_email_case"
+                next_parsed["case_id"] = workspace_case_id
+                next_parsed["target_type"] = "case"
+                next_parsed["target_id"] = workspace_case_id
+
         if intent in {"list_cases", "list_clients", "create_case", "create_client"}:
             return next_parsed
 
@@ -578,6 +604,7 @@ class CopilotService(CopilotRiskAnalysisMixin):
                 "analyze_risks_case",
                 "review_booking_case",
                 "draft_client_email_case",
+                "draft_partner_strategy_note_case",
                 "trace_case_evidence",
                 "compare_case_documents",
                 "ask_case",
@@ -614,6 +641,8 @@ class CopilotService(CopilotRiskAnalysisMixin):
         preoptimized_query: Optional[str] = None,
         allowed_case_ids: Optional[List[int]] = None,
         allowed_document_ids: Optional[List[int]] = None,
+        case_context: Dict[str, Any] | None = None,
+        case_snapshot: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         if isinstance(preparsed_command, dict):
             parsed = dict(preparsed_command)
@@ -642,6 +671,7 @@ class CopilotService(CopilotRiskAnalysisMixin):
                     "generate_case_memory",
                     "review_booking_case",
                     "draft_client_email_case",
+                    "draft_partner_strategy_note_case",
                     "trace_case_evidence",
                     "compare_case_documents",
                     "list_case_documents",
@@ -710,6 +740,8 @@ class CopilotService(CopilotRiskAnalysisMixin):
             preoptimized_query=preoptimized_query,
             normalized_allowed_case_ids=normalized_allowed_case_ids,
             normalized_allowed_document_ids=normalized_allowed_document_ids,
+            case_context=case_context,
+            case_snapshot=case_snapshot,
         )
 
         is_legal_search_mode = normalized_mode == "legal_search" and intent in self.LEGAL_SEARCH_ELIGIBLE_INTENTS
@@ -1671,6 +1703,15 @@ class CopilotService(CopilotRiskAnalysisMixin):
                 "jurisdiction": jurisdiction_context,
             }
 
+        if case_id is not None and self._looks_like_material_breach_clause_question(normalized_question):
+            return self._answer_material_breach_clause_question(
+                db=db,
+                tenant_id=tenant_id,
+                case_id=case_id,
+                question=normalized_question,
+                jurisdiction_context=jurisdiction_context,
+            )
+
         optimized_question = (
             normalized_question
             if already_optimized
@@ -1742,6 +1783,233 @@ class CopilotService(CopilotRiskAnalysisMixin):
             "jurisdiction": jurisdiction_context,
         }
 
+    def _answer_material_breach_clause_question(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: int,
+        question: str,
+        jurisdiction_context: dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        documents = self._get_case_documents(db=db, tenant_id=tenant_id, case_id=case.id)
+
+        if not documents:
+            return {
+                "answer": f"Case {case.id} has no documents yet, so I cannot rank breach-supporting clauses.",
+                "used_fallback": True,
+                "fallback_reason": "No case documents found",
+                "confidence": "low",
+                "scope": "case",
+                "sources": [],
+                "cache": {"hit": False, "backend": "none"},
+                "jurisdiction": jurisdiction_context,
+            }
+
+        for document in documents:
+            self._ensure_document_summary(db=db, document=document)
+
+        reasoning_payload = self._run_case_reasoning(
+            db=db,
+            tenant_id=tenant_id,
+            case=case,
+            documents=documents,
+        )
+        evidence_result = evidence_strength_agent.evaluate_evidence_strength(
+            case_id=case.id,
+            case_title=case.title,
+            objective=question,
+            documents=documents,
+            reasoning_payload=reasoning_payload,
+        )
+        evidence_payload = evidence_result.payload if evidence_result.success else {}
+
+        clause_rows = self._build_material_breach_clause_rows(documents=documents)
+
+        lines: List[str] = [f"Case #{case.id} strongest clauses supporting a material breach position:"]
+
+        if clause_rows:
+            top_clause_names = [self._normalize_text(row.get("clause")) for row in clause_rows[:3]]
+            top_clause_names = [name for name in top_clause_names if name]
+            if top_clause_names:
+                lines.append("The clearest clause themes are " + ", ".join(top_clause_names) + ".")
+
+        evidence_summary = self._normalize_text(evidence_payload.get("evidence_summary"))
+        if evidence_summary:
+            lines.extend(["", evidence_summary])
+
+        if clause_rows:
+            lines.extend(["", "Clause ranking:"])
+            for row in clause_rows[:4]:
+                clause = self._normalize_text(row.get("clause"))
+                explanation = self._normalize_text(row.get("explanation"))
+                supporting_documents = row.get("supporting_documents") or []
+                source_text = ", ".join(
+                    str(item).strip() for item in supporting_documents[:3] if str(item).strip()
+                )
+
+                if not clause:
+                    continue
+
+                line = f"- {clause}: {explanation or 'Relevant because it directly bears on breach, notice, or damages.'}"
+                if source_text:
+                    line += f" Sources: {source_text}."
+                lines.append(line)
+        else:
+            lines.extend([
+                "",
+                "I found breach-related evidence, but not enough clause-level signals to rank specific clauses with confidence.",
+            ])
+
+        recommended_follow_up = evidence_payload.get("recommended_follow_up") or []
+        follow_up = self._normalize_text(recommended_follow_up[0]) if recommended_follow_up else ""
+        if not follow_up:
+            follow_up = "If you want, I can trace the exact clause text next and map each clause to the supporting exhibit."
+
+        lines.extend(["", "Next step:", f"- {follow_up}"])
+
+        source_names: List[str] = []
+        for row in clause_rows:
+            for filename in row.get("supporting_documents") or []:
+                name = str(filename or "").strip()
+                if name and name not in source_names:
+                    source_names.append(name)
+
+        if not source_names:
+            for item in evidence_payload.get("strongest_evidence") or []:
+                name = str(item.get("filename") or "").strip()
+                if name and name not in source_names:
+                    source_names.append(name)
+
+        sources: List[Dict[str, Any]] = []
+        for document in documents:
+            if document.filename not in source_names:
+                continue
+            snippet = self._normalize_text(document.summary_short or document.summary or "")
+            if snippet:
+                sources.append(self._build_source(document=document, snippet=snippet, score=1.0))
+            if len(sources) >= 10:
+                break
+
+        used_llm = bool(evidence_result.payload.get("used_llm"))
+        confidence = "high" if len(clause_rows) >= 3 else "medium" if clause_rows else str(evidence_payload.get("confidence") or "low")
+
+        return {
+            "answer": "\n".join(lines).strip(),
+            "used_fallback": not used_llm,
+            "fallback_reason": None if used_llm else "Used clause-ranking heuristic synthesis",
+            "confidence": confidence,
+            "scope": "case",
+            "sources": sources,
+            "cache": {"hit": False, "backend": "none"},
+            "jurisdiction": jurisdiction_context,
+            "structured_result": {
+                "evidence_strength": evidence_payload,
+                "clause_rows": clause_rows,
+            },
+        }
+
+    def _build_material_breach_clause_rows(
+        self,
+        *,
+        documents: List[Document],
+    ) -> List[Dict[str, Any]]:
+        clause_map: dict[str, dict[str, Any]] = {}
+
+        def add_clause(clause: str, *, score: int, explanation: str, filename: str) -> None:
+            row = clause_map.setdefault(
+                clause,
+                {
+                    "clause": clause,
+                    "score": 0,
+                    "supporting_documents": [],
+                    "reasons": [],
+                },
+            )
+            row["score"] += score
+            if filename and filename not in row["supporting_documents"]:
+                row["supporting_documents"].append(filename)
+            cleaned_reason = self._normalize_text(explanation)
+            if cleaned_reason and cleaned_reason not in row["reasons"]:
+                row["reasons"].append(cleaned_reason)
+
+        for document in documents[:15]:
+            filename = self._normalize_text(document.filename) or f"Document #{document.id}"
+            insights = self._safe_load_insights(document)
+            document_type = self._normalize_text(insights.get("document_type") or document.document_type).lower()
+            general_summary = self._normalize_text(insights.get("general_summary") or document.summary_short or document.summary)
+            key_points = " ".join(self._normalize_text(item) for item in insights.get("key_points") or [])
+            payment_terms = " ".join(self._normalize_text(item) for item in insights.get("payment_terms") or [])
+            termination_terms = " ".join(self._normalize_text(item) for item in insights.get("termination_terms") or [])
+            legal_risks = " ".join(self._normalize_text(item) for item in insights.get("legal_risks") or [])
+            combined_text = " ".join(
+                [
+                    filename,
+                    document_type,
+                    general_summary,
+                    key_points,
+                    payment_terms,
+                    termination_terms,
+                    legal_risks,
+                ]
+            ).lower()
+
+            if any(token in combined_text for token in ["material breach", "cure period", "notice of breach", "breach notice", "terminate"]):
+                add_clause(
+                    "Notice, cure, and termination clause",
+                    score=4 if document_type in {"master_service_agreement", "contract", "legal_letter"} else 3,
+                    explanation="The record ties the dispute to notice, cure, and termination mechanics that usually control when breach becomes actionable.",
+                    filename=filename,
+                )
+
+            if any(token in combined_text for token in ["sla", "service level", "kpi", "performance", "dashboard"]):
+                add_clause(
+                    "SLA / service-level obligations clause",
+                    score=4 if document_type in {"master_service_agreement", "contract"} else 3,
+                    explanation="The service-level and KPI materials show the contractual performance standard that the alleged breach is measured against.",
+                    filename=filename,
+                )
+
+            if any(token in combined_text for token in ["invoice", "payment", "amount due", "reconciliation", "late payment", "net 30"]):
+                add_clause(
+                    "Payment obligation / invoice clause",
+                    score=4 if document_type in {"invoice", "master_service_agreement", "contract"} else 3,
+                    explanation="The payment and reconciliation materials show a concrete monetary obligation that can support breach and damages analysis.",
+                    filename=filename,
+                )
+
+            if any(token in combined_text for token in ["response", "reservation of rights", "formal notice", "breach allegation"]):
+                add_clause(
+                    "Formal breach notice / response clause",
+                    score=3,
+                    explanation="The notice and response trail shows that the breach allegation was formally raised and contested.",
+                    filename=filename,
+                )
+
+        ranked_rows = sorted(
+            clause_map.values(),
+            key=lambda row: (row["score"], len(row["supporting_documents"]), row["clause"].lower()),
+            reverse=True,
+        )
+
+        formatted_rows: List[Dict[str, Any]] = []
+        for row in ranked_rows[:4]:
+            reasons = row.get("reasons") or []
+            explanation = reasons[0] if reasons else "This clause is directly tied to the alleged breach theory."
+            if len(reasons) > 1:
+                explanation = f"{reasons[0]} {reasons[1]}"
+            formatted_rows.append(
+                {
+                    "clause": row["clause"],
+                    "explanation": explanation,
+                    "supporting_documents": row.get("supporting_documents") or [],
+                    "score": row.get("score", 0),
+                }
+            )
+
+        return formatted_rows
+
     @staticmethod
     def _looks_like_prompt_template_noise(text: str) -> bool:
         candidate = str(text or "").strip().lower()
@@ -1762,6 +2030,20 @@ class CopilotService(CopilotRiskAnalysisMixin):
             return True
         if "email for case #" in candidate and "optimize prompt" in candidate:
             return True
+        return False
+
+    @staticmethod
+    def _looks_like_material_breach_clause_question(question: str) -> bool:
+        lowered = str(question or "").lower()
+        if not lowered:
+            return False
+
+        if any(keyword in lowered for keyword in CopilotService.MATERIAL_BREACH_QUERY_KEYWORDS):
+            return True
+
+        if "clause" in lowered and any(token in lowered for token in ["breach", "termination", "notice", "cure", "invoice", "sla"]):
+            return True
+
         return False
 
     def _synthesize_answer_with_external_research(
@@ -2247,14 +2529,25 @@ External research snippets (JSON):
     def _normalize_risk_items(items: List[str]) -> List[str]:
         normalized: List[str] = []
         for item in items:
-            cleaned = str(item or "").strip().rstrip(".")
-            if not cleaned:
+            raw = str(item or "").strip()
+            if not raw:
                 continue
-            if CopilotService._looks_like_prompt_template_noise(cleaned):
+            if CopilotService._looks_like_prompt_template_noise(raw):
                 continue
-            cleaned = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
-            if cleaned not in normalized:
-                normalized.append(cleaned)
+
+            split_candidate = re.sub(r"\s+(?=\d+[).]\s+)", "\n", raw)
+            for fragment in split_candidate.splitlines():
+                cleaned = fragment.strip().rstrip(".")
+                if not cleaned:
+                    continue
+                cleaned = re.sub(r"^\d+[).]\s*", "", cleaned)
+                if not cleaned:
+                    continue
+                if CopilotService._looks_like_prompt_template_noise(cleaned):
+                    continue
+                cleaned = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
+                if cleaned not in normalized:
+                    normalized.append(cleaned)
         return normalized
 
     @classmethod
@@ -2269,6 +2562,27 @@ External research snippets (JSON):
             if cleaned not in normalized:
                 normalized.append(cleaned)
         return normalized
+
+    @staticmethod
+    def _normalize_contract_redline_objective(value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return "Draft a practical contract redline with clause-level suggestions, fallback positions, and source documents."
+
+        text = re.sub(r"^(draft|prepare|write|create)\s+(?:a\s+)?(?:contract\s+)?redline\s+(?:for|on|about)\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^(draft|prepare|write|create)\s+(?:a\s+)?(?:contract\s+)?redline\s*[:\-]?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^case\s*#?\s*\d+\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^for\s+case\s*#?\s*\d+\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^for\s+focused\s+on\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^focused\s+on\s+", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s+for\s+focused\s+on\s+", ", focused on ", text, count=1, flags=re.IGNORECASE)
+        text = re.sub(r"\s+focused\s+on\s+", ", focused on ", text, count=1, flags=re.IGNORECASE)
+        text = re.sub(r"\s+\s+", " ", text).strip(" ,.;:")
+
+        if not text:
+            return "Draft a practical contract redline with clause-level suggestions, fallback positions, and source documents."
+
+        return text[0].upper() + text[1:] if text[0].islower() else text
 
     @staticmethod
     def _dedupe_ordered(items: List[str]) -> List[str]:
@@ -2301,19 +2615,6 @@ External research snippets (JSON):
 
     @classmethod
     def _infer_document_kind(cls, *, filename: str, insights: Dict[str, Any]) -> str:
-        doc_type = cls._normalize_text(str(insights.get("document_type") or ""))
-        if doc_type:
-            normalized_doc_type = re.sub(r"[_\-]+", " ", doc_type).strip()
-            if normalized_doc_type:
-                styled_words: List[str] = []
-                for word in normalized_doc_type.split():
-                    lowered_word = word.lower()
-                    if lowered_word in {"sla", "kpi", "msa"}:
-                        styled_words.append(lowered_word.upper())
-                    else:
-                        styled_words.append(lowered_word.capitalize())
-                return " ".join(styled_words)[:80]
-
         lowered = filename.lower()
         if "master_service_agreement" in lowered or "msa" in lowered:
             return "Master Service Agreement"
@@ -2331,6 +2632,20 @@ External research snippets (JSON):
             return "Internal Legal Memo"
         if "transcript" in lowered or "call" in lowered:
             return "Call Transcript Summary"
+
+        doc_type = cls._normalize_text(str(insights.get("document_type") or ""))
+        if doc_type:
+            normalized_doc_type = re.sub(r"[_\-]+", " ", doc_type).strip()
+            if normalized_doc_type:
+                styled_words: List[str] = []
+                for word in normalized_doc_type.split():
+                    lowered_word = word.lower()
+                    if lowered_word in {"sla", "kpi", "msa"}:
+                        styled_words.append(lowered_word.upper())
+                    else:
+                        styled_words.append(lowered_word.capitalize())
+                return " ".join(styled_words)[:80]
+
         return "Case Document"
 
     @classmethod
@@ -2354,7 +2669,7 @@ External research snippets (JSON):
             return "Records statements and commitments that may affect liability or settlement leverage"
         return "Adds evidentiary context for disputed obligations, chronology, and party positions"
 
-    def _build_case_document_resume_entry(self, *, document: Document, insights: Dict[str, Any]) -> str:
+    def _build_case_document_resume_entry(self, *, position: int, document: Document, insights: Dict[str, Any]) -> str:
         filename = self._normalize_text(document.filename) or f"Document #{document.id}"
         kind = self._infer_document_kind(filename=filename, insights=insights)
 
@@ -2371,6 +2686,7 @@ External research snippets (JSON):
             max_chars=170,
         )
         says = re.sub(r"^\s*(this|the)\s+document\s+(?:is|contains|covers|presents)\s+", "", says, flags=re.IGNORECASE)
+        says = says.rstrip(".")
 
         markers_source = " ".join(
             [
@@ -2402,7 +2718,7 @@ External research snippets (JSON):
             text=" ".join([raw_summary, says]),
         )
 
-        line = f"- {filename}: {kind}. Says: {says}. Matters: {impact}."
+        line = f"Document {position} ({filename}): {kind}. Says: {says}. Matters: {impact}."
         if marker_parts:
             line += " Key markers: " + "; ".join(marker_parts) + "."
 
@@ -2887,7 +3203,7 @@ External research snippets (JSON):
             sentences.append(normalized_summary)
 
         if len(parties) >= 2:
-            sentences.append(f"The active counterparties are {parties[0]} and {parties[1]}")
+            sentences.append(f"Primary counterparties are {parties[0]} and {parties[1]}")
 
         core_points = [self._normalize_text(item).rstrip(".") for item in main_points[:2] if self._normalize_text(item)]
         if core_points:
@@ -2895,14 +3211,14 @@ External research snippets (JSON):
 
         lowered_sources = [str(name or "").strip().lower() for name in evidence_sources]
         if any("notice" in name for name in lowered_sources) and any("response" in name for name in lowered_sources):
-            sentences.append("The file already contains competing legal positions from both parties")
+            sentences.append("The record includes both a formal breach notice and a counterparty response.")
 
         paragraph = ". ".join(item.strip(" .") for item in sentences if item.strip())
         paragraph = re.sub(r"\s+", " ", paragraph).strip()
         if paragraph and paragraph[-1] not in ".!?":
             paragraph += "."
-        if len(paragraph) > 620:
-            paragraph = paragraph[:620].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
+        if len(paragraph) > 460:
+            paragraph = paragraph[:460].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
 
         return paragraph or "Case evidence is available, but a concise overview could not be synthesized yet."
 
@@ -3428,10 +3744,10 @@ External research snippets (JSON):
         )
 
         document_resume_lines: List[str] = []
-        for document in documents:
+        for index, document in enumerate(documents, start=1):
             insights = self._safe_load_insights(document)
             document_resume_lines.append(
-                self._build_case_document_resume_entry(document=document, insights=insights)
+                self._build_case_document_resume_entry(position=index, document=document, insights=insights)
             )
 
         key_takeaways = self._build_case_key_takeaways(
@@ -3446,6 +3762,16 @@ External research snippets (JSON):
             key_dates=key_dates,
             evidence_sources=evidence_sources,
             quantitative_anchor=quantitative_anchor,
+        )
+        wants_next_steps = any(
+            token in lowered_request
+            for token in [
+                "next step",
+                "next steps",
+                "action plan",
+                "recommendation",
+                "recommended next steps",
+            ]
         )
 
         if wants_bullets:
@@ -3491,13 +3817,14 @@ External research snippets (JSON):
             else:
                 lines.append("- No critical dates were confidently extracted yet.")
 
-            lines.append("")
-            lines.append("Recommended Next Steps:")
-            if recommended_steps:
-                for step in recommended_steps[:4]:
-                    lines.append(f"- {step}")
-            else:
-                lines.append("- Validate chronology, disputed amounts, and contractual triggers against source documents.")
+            if wants_next_steps:
+                lines.append("")
+                lines.append("Recommended Next Steps:")
+                if recommended_steps:
+                    for step in recommended_steps[:4]:
+                        lines.append(f"- {step}")
+                else:
+                    lines.append("- Validate chronology, disputed amounts, and contractual triggers against source documents.")
 
         answer = "\n".join(lines).strip()
         if unavailable_documents:
@@ -4695,7 +5022,9 @@ External research snippets (JSON):
             case_id=case.id,
             case_title=case.title,
             documents=documents,
-            objective=objective or "Draft a practical contract redline with clause-level suggestions, fallback positions, and source documents.",
+            objective=self._normalize_contract_redline_objective(
+                objective or "Draft a practical contract redline with clause-level suggestions, fallback positions, and source documents."
+            ),
             focus_document_name=focus_document_name,
         )
 
@@ -4905,11 +5234,145 @@ External research snippets (JSON):
             "jurisdiction": jurisdiction_context,
         }
 
-    def _draft_negotiation_strategy(self, *, objective: str, horizon_days: int, use_external_research: bool) -> Dict[str, Any]:
+    def _draft_internal_email_for_case(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int]
+    ) -> Dict[str, Any]:
+        case_summary = self._summarize_case(db=db, tenant_id=tenant_id, case_id=case_id)
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+        sources = case_summary.get("sources") or []
+        document_names: list[str] = []
+        for source in sources:
+            filename = self._normalize_text(source.get("filename") if isinstance(source, dict) else "")
+            if filename and filename not in document_names:
+                document_names.append(filename)
+        documents_text = ", ".join(document_names[:8]) if document_names else "the current case record"
+
+        summary_text = str(case_summary.get("answer") or "").strip()
+        concise_overview = self._extract_internal_overview_sentence(summary_text, case.title)
+
+        internal_email_lines = [
+            f"Subject: Internal update - case #{case.id} ({case.title})",
+            "",
+            "Dear Supervising Lawyer,",
+            "",
+            (
+                f"Case #{case.id} is currently centered on {concise_overview}. Reviewed documents: {documents_text}. "
+                "Recommended next step: keep a short response window, preserve the factual record, and decide whether a narrower without-prejudice proposal should follow."
+            ),
+            "",
+            "Best regards,",
+            "Legal AI Platform",
+        ]
+
+        artifact_context = self._build_artifact_context(
+            db=db,
+            tenant_id=tenant_id,
+            artifact_type="case_email",
+            case_id=case.id,
+        )
+
+        return {
+            "answer": "\n".join(internal_email_lines).strip(),
+            "used_fallback": True,
+            "fallback_reason": "Used deterministic internal update template",
+            "confidence": "high",
+            "scope": "case",
+            "sources": case_summary["sources"],
+            "artifact": artifact_context,
+            "jurisdiction": jurisdiction_context,
+        }
+
+    def _draft_partner_strategy_note_for_case(
+        self,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int]
+    ) -> Dict[str, Any]:
+        case_summary = self._summarize_case(db=db, tenant_id=tenant_id, case_id=case_id)
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        jurisdiction_context = jurisdiction_context_service.get_response_context(case.jurisdiction_country)
+        sources = case_summary.get("sources") or []
+
+        document_names: list[str] = []
+        for source in sources:
+            filename = self._normalize_text(source.get("filename") if isinstance(source, dict) else "")
+            if filename and filename not in document_names:
+                document_names.append(filename)
+
+        documents_text = ", ".join(document_names[:8]) if document_names else "the current case record"
+        summary_text = str(case_summary.get("answer") or "").strip()
+        concise_overview = self._extract_internal_overview_sentence(summary_text, case.title)
+
+        note_lines = [
+            f"Partner-ready strategy note - case #{case.id} ({case.title})",
+            "",
+            (
+                f"Case #{case.id} is best framed as {concise_overview}. Reviewed documents: {documents_text}. "
+                "The current leverage sits in the facts, dates, and any unresolved documentary gaps, so the clean next move is to keep the ask narrow, preserve concessions, and hold a short without-prejudice fallback in reserve if the other side does not move."
+            ),
+        ]
+
+        artifact_context = self._build_artifact_context(
+            db=db,
+            tenant_id=tenant_id,
+            artifact_type="case_email",
+            case_id=case.id,
+        )
+
+        return {
+            "answer": "\n".join(note_lines).strip(),
+            "used_fallback": True,
+            "fallback_reason": "Used deterministic partner strategy note template",
+            "confidence": "high",
+            "scope": "case",
+            "sources": case_summary["sources"],
+            "artifact": artifact_context,
+            "jurisdiction": jurisdiction_context,
+        }
+
+    @staticmethod
+    def _extract_internal_overview_sentence(summary_text: str, case_title: str) -> str:
+        cleaned_lines = [
+            line.strip()
+            for line in str(summary_text or "").splitlines()
+            if line.strip()
+            and not line.startswith("Case #")
+            and not line.startswith("Overall Case Overview:")
+            and not line.startswith("Documents Summary:")
+            and not line.startswith("Key Takeaways:")
+            and not line.startswith("Important Dates:")
+            and not line.startswith("Recommended Next Steps:")
+        ]
+        if cleaned_lines:
+            return CopilotService._trim_internal_sentence(cleaned_lines[0], 220)
+
+        return CopilotService._trim_internal_sentence(case_title or "the current case record", 220)
+
+    @staticmethod
+    def _trim_internal_sentence(text: str, limit: int) -> str:
+        cleaned = re.sub(r"\s+", " ", str(text or "").strip())
+        if len(cleaned) <= limit:
+            return cleaned.rstrip(". ")
+        return cleaned[: limit - 1].rstrip(" ,;:-") + "..."
+
+    def _draft_negotiation_strategy(
+        self,
+        *,
+        objective: str,
+        horizon_days: int,
+        use_external_research: bool,
+        case_context: Dict[str, Any] | None = None,
+        case_snapshot: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         strategy_result = negotiation_strategy_agent.draft_strategy(
             objective=objective,
             horizon_days=horizon_days,
-            case_context=None,
+            case_context=case_context,
+            case_snapshot=case_snapshot,
             use_external_research=use_external_research,
         )
 
@@ -4919,6 +5382,11 @@ External research snippets (JSON):
         summary = self._normalize_text(payload.get("strategy_summary"))
         if summary:
             lines.append(summary)
+
+        case_basis = payload.get("case_basis") or []
+        if case_basis:
+            lines.extend(["", "Case basis:"])
+            lines.extend(f"- {item}" for item in case_basis[:5])
 
         opening_position = self._normalize_text(payload.get("opening_position"))
         if opening_position:

@@ -15,10 +15,12 @@ from backend.core.config import settings
 from backend.core.deps import get_current_user, get_db
 from backend.core.permissions import apply_tenant_scope
 from backend.models.case import Case
+from backend.models.case_image_asset import CaseImageAsset
 from backend.models.document import Document
 from backend.models.image_document_batch import ImageDocumentBatch
 from backend.models.user import User
 from backend.services.ai.image_document_service import image_document_service
+from backend.services.storage_service import stream_file_response
 from backend.services.use_cases.ingestion_use_case import ingestion_use_case
 
 
@@ -39,6 +41,14 @@ def get_tenant_document_or_404(db: Session, document_id: int, current_user: User
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     return document
+
+
+def get_tenant_image_asset_or_404(db: Session, asset_id: int, current_user: User) -> CaseImageAsset:
+    query = db.query(CaseImageAsset).filter(CaseImageAsset.id == asset_id)
+    asset = apply_tenant_scope(query, CaseImageAsset.tenant_id, current_user).first()
+    if not asset:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image asset not found.")
+    return asset
 
 
 def get_tenant_image_batch_or_404(db: Session, batch_id: int, current_user: User) -> ImageDocumentBatch:
@@ -69,6 +79,20 @@ def get_document(
     current_user: User = Depends(get_current_user),
 ):
     return get_tenant_document_or_404(db=db, document_id=document_id, current_user=current_user)
+
+
+@router.get("/{document_id}/file")
+def get_document_file(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = get_tenant_document_or_404(db=db, document_id=document_id, current_user=current_user)
+    return stream_file_response(
+        document.storage_path,
+        media_type=document.file_type or "application/pdf",
+        filename=document.filename,
+    )
 
 
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -131,25 +155,28 @@ def upload_image_batch(
 ):
     case = get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
     if not files:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one image is required.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one image or PDF is required.")
     if len(files) > max(1, int(settings.IMAGE_BATCH_MAX_FILES)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Too many images. Maximum allowed is {settings.IMAGE_BATCH_MAX_FILES}.",
+            detail=f"Too many files. Maximum allowed is {settings.IMAGE_BATCH_MAX_FILES}.",
         )
 
-    max_file_size = max(1, int(settings.IMAGE_UPLOAD_MAX_MB)) * 1024 * 1024
     for file in files:
         if not file.filename:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Every image file must have a filename.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Every file must have a filename.")
         image_document_service._validate_upload(filename=file.filename, content_type=file.content_type)
         file.file.seek(0, 2)
         file_size = file.file.tell()
         file.file.seek(0)
+        normalized_content_type = (file.content_type or "").split(";")[0].strip().lower()
+        extension = Path(file.filename).suffix.lower()
+        max_file_size_mb = settings.DOCUMENT_UPLOAD_MAX_MB if normalized_content_type == "application/pdf" or extension == ".pdf" else settings.IMAGE_UPLOAD_MAX_MB
+        max_file_size = max(1, int(max_file_size_mb)) * 1024 * 1024
         if file_size > max_file_size:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Image '{file.filename}' exceeds the {settings.IMAGE_UPLOAD_MAX_MB} MB limit.",
+                detail=f"File '{file.filename}' exceeds the {max_file_size_mb} MB limit.",
             )
 
     batch, job = ingestion_use_case.create_image_batch_upload(
@@ -186,3 +213,17 @@ def get_image_batch(
 ):
     batch = get_tenant_image_batch_or_404(db=db, batch_id=batch_id, current_user=current_user)
     return image_document_service.to_batch_detail_payload(db=db, batch=batch)
+
+
+@router.get("/image-assets/{asset_id}/file")
+def get_image_asset_file(
+    asset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    asset = get_tenant_image_asset_or_404(db=db, asset_id=asset_id, current_user=current_user)
+    return stream_file_response(
+        asset.storage_path,
+        media_type=asset.mime_type or "application/octet-stream",
+        filename=asset.filename,
+    )

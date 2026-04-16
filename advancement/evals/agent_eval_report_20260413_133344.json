@@ -1,0 +1,1418 @@
+{
+  "generated_at_utc": "2026-04-13T13:33:44.647338+00:00",
+  "base_url": "http://127.0.0.1:8036",
+  "case_id": 16,
+  "suite_path": "scripts\\evals\\default_eval_suite.json",
+  "total": 43,
+  "passed": 38,
+  "failed": 5,
+  "pass_rate": 0.8837,
+  "results": [
+    {
+      "id": "summary_case_paragraph_only_01",
+      "prompt": "Summarize case #16",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 1892.1522999880835,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Document 1 (",
+          "passed": false,
+          "detail": "must contain 'Document 1 ('"
+        },
+        {
+          "name": "contains:Document 2 (",
+          "passed": false,
+          "detail": "must contain 'Document 2 ('"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        },
+        {
+          "name": "not_contains:Recommended Next Steps:",
+          "passed": false,
+          "detail": "must not contain 'Recommended Next Steps:'"
+        },
+        {
+          "name": "not_contains:Practical Next Steps:",
+          "passed": true,
+          "detail": "must not contain 'Practical Next Steps:'"
+        },
+        {
+          "name": "max_answer_chars",
+          "passed": true,
+          "detail": "chars=1924, max=2800"
+        }
+      ],
+      "answer_preview": "Case #16 resume:\n\nOverall Case Overview:\nThe case currently contains 2 documents: a contract and a legal letter. Main parties detected include Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, and Atlas Retail Group SARL. Termination rights are triggered by material breach, and paym"
+    },
+    {
+      "id": "summary_case_paragraph_only_02",
+      "prompt": "Give me a concise case summary for case #16 in paragraph form only.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 1047.876700060442,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        }
+      ],
+      "answer_preview": "Case #16 resume:\n\nOverall Case Overview:\nThe case involves a contract and a legal letter, with main issues including termination rights triggered by material breach, payment terms of net 30 from invoice date, and a notice of breach and payment dispute. Nova Logistics Tunisia SARL disputes the material breach characteri"
+    },
+    {
+      "id": "summary_case_paragraph_only_03",
+      "prompt": "Make a resume of case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 1077.1126999752596,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        }
+      ],
+      "answer_preview": "Case #16 resume:\n\nOverall Case Overview:\nThe case includes a Master Service Agreement and a legal letter, with termination rights triggered by material breach and repeated SLA failure, payment terms of net 30 from invoice date, and Nova disputing material breach characterization. The active counterparties are Master Se"
+    },
+    {
+      "id": "summary_case_paragraph_only_04",
+      "prompt": "I need a short recap for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 961.6224000928923,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 resume:\n\nOverall Case Overview:\nThe case involves a contract dispute between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with issues related to termination rights triggered by material breach, payment terms, and notice of breach and payment dispute. The active counterparties are Master Service Agr"
+    },
+    {
+      "id": "summary_case_paragraph_only_05",
+      "prompt": "Provide a practical overview of case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 1574.722500052303,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 resume:\n\nOverall Case Overview:\nThe case involves a contract and a legal letter, with main issues including termination rights triggered by material breach, payment terms of net 30 from invoice date, and a notice of breach and payment dispute. Nova disputes the material breach characterization and proposes cor"
+    },
+    {
+      "id": "summary_case_paragraph_only_06",
+      "prompt": "Summarize all documents in case #16 with one paragraph per document.",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 5002.332500065677,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Document 1 (",
+          "passed": false,
+          "detail": "must contain 'Document 1 ('"
+        },
+        {
+          "name": "contains:Document 2 (",
+          "passed": false,
+          "detail": "must contain 'Document 2 ('"
+        }
+      ],
+      "answer_preview": "Case #16 summary:\n\n- Case posture: The case involves a contract dispute between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with issues related to termination rights, payment terms, and breach characterization. Nova disputes the material breach characterization and proposes corrective steps."
+    },
+    {
+      "id": "summary_case_paragraph_only_07",
+      "prompt": "Case #16 summary only, no bullets.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 11250.06700004451,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        },
+        {
+          "name": "not_contains:Recommended Next Steps:",
+          "passed": true,
+          "detail": "must not contain 'Recommended Next Steps:'"
+        }
+      ],
+      "answer_preview": "Case #16 summary:\n\n- Case posture: The case involves a contract and a legal letter, with Nova disputing the characterization of a material breach and proposing corrective steps, while the contract terms indicate termination rights triggered by material breach and repeated SLA failure, with payment terms set at net 30 f"
+    },
+    {
+      "id": "summary_case_paragraph_only_08",
+      "prompt": "brief synopsis for case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 12105.99650000222,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 resume:\n\nOverall Case Overview:\nThe case involves a Master Service Agreement between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with detected issues including termination rights triggered by material breach, payment terms of net 30 from invoice date, and a notice of breach and payment dispute. No"
+    },
+    {
+      "id": "summary_case_paragraph_only_09_no_risks",
+      "prompt": "Summarize case #16. Summary only, no risks and no dates.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "high",
+      "duration_ms": 11080.480600008741,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        }
+      ],
+      "answer_preview": "Case #16 resume:\n\nOverall Case Overview:\nThe case involves a Master Service Agreement between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with a dispute over termination rights and payment terms. Nova disputes the characterization of material breach and proposes corrective steps. The active counterparties "
+    },
+    {
+      "id": "summary_plus_risks_01",
+      "prompt": "For case #16, provide a concise summary and identify potential risks, citing relevant evidence and practical next steps.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 12063.487900071777,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Summary:",
+          "passed": true,
+          "detail": "must contain 'Summary:'"
+        },
+        {
+          "name": "contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must contain 'Risk Assessment:'"
+        },
+        {
+          "name": "contains:Practical Next Steps:",
+          "passed": true,
+          "detail": "must contain 'Practical Next Steps:'"
+        },
+        {
+          "name": "not_contains:<CASE_ID>",
+          "passed": true,
+          "detail": "must not contain '<CASE_ID>'"
+        },
+        {
+          "name": "not_contains:What success looks like",
+          "passed": true,
+          "detail": "must not contain 'What success looks like'"
+        },
+        {
+          "name": "not_contains:Optimize prompt:",
+          "passed": true,
+          "detail": "must not contain 'Optimize prompt:'"
+        },
+        {
+          "name": "not_contains:Sources appea",
+          "passed": true,
+          "detail": "must not contain 'Sources appea'"
+        },
+        {
+          "name": "not_contains:email for case #<",
+          "passed": true,
+          "detail": "must not contain 'email for case #<'"
+        }
+      ],
+      "answer_preview": "Case #16 summary and risk assessment:\n\nSummary:\nThe case involves a Master Service Agreement between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with a dispute over termination terms and payment obligations. Nova Logistics Tunisia SARL disputes the material breach characterization and proposes corrective s"
+    },
+    {
+      "id": "summary_plus_risks_02",
+      "prompt": "Summarize case #16 and then analyze the legal risks.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 11264.841499971226,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Summary:",
+          "passed": true,
+          "detail": "must contain 'Summary:'"
+        },
+        {
+          "name": "contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must contain 'Risk Assessment:'"
+        }
+      ],
+      "answer_preview": "Case #16 summary and risk assessment:\n\nSummary:\nThe case includes a contract and a legal letter, with main issues centered on termination rights triggered by material breach, payment terms, and notice of breach. Nova Logistics Tunisia SARL disputes the material breach characterization and proposes corrective steps.\n\nEv"
+    },
+    {
+      "id": "summary_plus_risks_03",
+      "prompt": "I want summary plus risk review for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 11244.796900078654,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 summary and risk assessment:\n\nSummary:\nThe case involves a contract dispute between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with issues related to termination terms, payment obligations, and breach characterization. The contract includes termination rights triggered by material breach and repe"
+    },
+    {
+      "id": "summary_plus_risks_04",
+      "prompt": "Case #16: concise brief + risk assessment + next legal steps.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 12267.150799976662,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must contain 'Risk Assessment:'"
+        }
+      ],
+      "answer_preview": "Case #16 summary and risk assessment:\n\nSummary:\nThe case involves a contract dispute between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, with issues related to termination terms, payment terms, and breach characterization. Nova disputes the material breach characterization and proposes corrective steps.\n\nE"
+    },
+    {
+      "id": "summary_plus_risks_05",
+      "prompt": "For case #16, summarize and detect dangers.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 11284.101800061762,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 summary and risk assessment:\n\nSummary:\nThe case includes a contract and a legal letter, with main issues centered around termination rights triggered by material breach, payment terms, and notice of breach and payment dispute, while Nova Logistics Tunisia SARL disputes the material breach characterization.\n\nEv"
+    },
+    {
+      "id": "summary_plus_risks_06",
+      "prompt": "Please provide a short case summary and risk mapping for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "summarize_and_analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 11185.005499981344,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_and_analyze_risks_case, got summarize_and_analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 summary and risk assessment:\n\nSummary:\nThe parties are engaged in a dispute over termination terms, with Nova Logistics Tunisia SARL disputing the characterization of a material breach and proposing corrective steps. The contract has a net 30 payment term from the invoice date, and termination rights are trigg"
+    },
+    {
+      "id": "risk_only_01",
+      "prompt": "Analyze risks for case #16.",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 12394.850900047459,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected legal risks for case",
+          "passed": false,
+          "detail": "must contain 'Detected legal risks for case'"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 16 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf\n2. HIGH | Legal | Termination rights are triggered by material breach and repeated SLA failure | Sources: eval_notice.pdf, eval_"
+    },
+    {
+      "id": "risk_only_02_single",
+      "prompt": "Give me only one risk for case #16.",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 11002.037500031292,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected legal risks for case",
+          "passed": false,
+          "detail": "must contain 'Detected legal risks for case'"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=0, max=1"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 16 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf"
+    },
+    {
+      "id": "risk_only_03_three",
+      "prompt": "Top 3 risks for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 11215.90599999763,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=0, max=3"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 16 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf\n2. HIGH | Legal | Termination rights are triggered by material breach and repeated SLA failure | Sources: eval_notice.pdf, eval_"
+    },
+    {
+      "id": "risk_only_04",
+      "prompt": "What is the biggest legal exposure in case #16?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 12116.343999980018,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 16 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf\n2. HIGH | Legal | Termination rights are triggered by material breach and repeated SLA failure | Sources: eval_notice.pdf, eval_"
+    },
+    {
+      "id": "risk_only_05",
+      "prompt": "List 2 risks for case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 11057.479799957946,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=0, max=2"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 16 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf\n2. HIGH | Legal | Termination rights are triggered by material breach and repeated SLA failure | Sources: eval_notice.pdf, eval_"
+    },
+    {
+      "id": "deadlines_01",
+      "prompt": "List deadlines for case #16.",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "low",
+      "duration_ms": 4974.447099957615,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected",
+          "passed": false,
+          "detail": "must contain 'Detected'"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "deadlines_02",
+      "prompt": "Top 2 deadlines for case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "low",
+      "duration_ms": 24.141900008544326,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=0, max=2"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "deadlines_03",
+      "prompt": "Any due dates and notice periods in case #16?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "low",
+      "duration_ms": 24.711899925023317,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "deadlines_04",
+      "prompt": "Show me 3 deadlines in case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "low",
+      "duration_ms": 28.606299892999232,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=0, max=3"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "deadlines_05",
+      "prompt": "Deadline audit for case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "low",
+      "duration_ms": 32.26329991593957,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "timeline_01",
+      "prompt": "Build timeline for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "build_timeline_case",
+      "confidence": "medium",
+      "duration_ms": 29.22490006312728,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected build_timeline_case, got build_timeline_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "min_confidence",
+          "passed": true,
+          "detail": "expected >= medium, got medium"
+        }
+      ],
+      "answer_preview": "Case #16 strict chronology (Eval Case 6884):\n\nDated Events:\nNone"
+    },
+    {
+      "id": "timeline_02",
+      "prompt": "Chronology of events in case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "build_timeline_case",
+      "confidence": "medium",
+      "duration_ms": 29.834200046025217,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected build_timeline_case, got build_timeline_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 strict chronology (Eval Case 6884):\n\nDated Events:\nNone"
+    },
+    {
+      "id": "timeline_03",
+      "prompt": "Create a chronological sequence for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "build_timeline_case",
+      "confidence": "medium",
+      "duration_ms": 24.540800019167364,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected build_timeline_case, got build_timeline_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 strict chronology (Eval Case 6884):\n\nDated Events:\nNone"
+    },
+    {
+      "id": "timeline_04",
+      "prompt": "case #16 timeline please",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "build_timeline_case",
+      "confidence": "medium",
+      "duration_ms": 21.80200000293553,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected build_timeline_case, got build_timeline_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Case #16 strict chronology (Eval Case 6884):\n\nDated Events:\nNone"
+    },
+    {
+      "id": "draft_email_01",
+      "prompt": "Draft client email for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "draft_client_email_case",
+      "confidence": "high",
+      "duration_ms": 12535.206499975175,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected draft_client_email_case, got draft_client_email_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Subject:",
+          "passed": true,
+          "detail": "must contain 'Subject:'"
+        }
+      ],
+      "answer_preview": "Subject: Update on Eval Case 6884\n\nDear Client,\n\nWe are currently reviewing the Master Service Agreement and legal letter related to your case, Eval Case 6884, in the jurisdiction of Tunisia. The main issues in this case involve termination rights, payment terms, and breach disputes between Atlas Retail Group SARL and "
+    },
+    {
+      "id": "draft_email_02",
+      "prompt": "Prepare a client update email for case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "draft_client_email_case",
+      "confidence": "high",
+      "duration_ms": 17316.757699940354,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected draft_client_email_case, got draft_client_email_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Subject: Update on Eval Case 6884\n\nDear Client,\n\nWe are reviewing the contract and legal letter between Atlas Retail Group SARL and Nova Logistics Tunisia SARL, focusing on termination rights, payment terms, and dispute resolution under Tunisian law. The core dispute revolves around the termination term, where terminat"
+    },
+    {
+      "id": "draft_email_03",
+      "prompt": "Write a concise negotiation update mail for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "draft_client_email_case",
+      "confidence": "high",
+      "duration_ms": 17554.20170002617,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected draft_client_email_case, got draft_client_email_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Subject: Update on Eval Case 6884\n\nDear Client,\n\nWe are reviewing the documents related to your case, including a contract and a legal letter, which indicate potential legal risks under Tunisian law. The core dispute focuses on termination terms and payment conditions. Our team is assessing the contractual baseline, ob"
+    },
+    {
+      "id": "compare_docs_01",
+      "prompt": "Compare documents in case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "compare_case_documents",
+      "confidence": "high",
+      "duration_ms": 5821.14650006406,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected compare_case_documents, got compare_case_documents"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "min_confidence",
+          "passed": true,
+          "detail": "expected >= medium, got high"
+        }
+      ],
+      "answer_preview": "Comparison overview for case 16:\n- eval_contract.pdf: type=contract, dates=0, risks=3, summary=Overview:\nThis document is a contract or contract-related record. The main named parties are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL. The document includes termination or notice-r"
+    },
+    {
+      "id": "compare_docs_02",
+      "prompt": "Find contradictions across documents in case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "compare_case_documents",
+      "confidence": "high",
+      "duration_ms": 4977.758500026539,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected compare_case_documents, got compare_case_documents"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Comparison overview for case 16:\n- eval_contract.pdf: type=contract, dates=0, risks=3, summary=Overview:\nThis document is a contract or contract-related record. The main named parties are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL. The document includes termination or notice-r"
+    },
+    {
+      "id": "compare_docs_03",
+      "prompt": "Document comparison for case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "compare_case_documents",
+      "confidence": "high",
+      "duration_ms": 5925.209300010465,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected compare_case_documents, got compare_case_documents"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Comparison overview for case 16:\n- eval_contract.pdf: type=contract, dates=0, risks=3, summary=Overview:\nThis document is a contract or contract-related record. The main named parties are Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL. The document includes termination or notice-r"
+    },
+    {
+      "id": "booking_review_01",
+      "prompt": "Review booking status for case #16.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "review_booking_case",
+      "confidence": "low",
+      "duration_ms": 20.042799995280802,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected review_booking_case, got review_booking_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "No consultation booking details are available for this case yet."
+    },
+    {
+      "id": "booking_review_02",
+      "prompt": "Do we have any consultation request for case #16?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "review_booking_case",
+      "confidence": "low",
+      "duration_ms": 19.094099989160895,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected review_booking_case, got review_booking_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "No consultation booking details are available for this case yet."
+    },
+    {
+      "id": "optimize_prompt_01",
+      "prompt": "Optimize prompt: draft a client update about payment dispute for case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "optimize_prompt",
+      "confidence": "high",
+      "duration_ms": 1736.4250000100583,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected optimize_prompt, got optimize_prompt"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected global, got global"
+        },
+        {
+          "name": "contains:Optimized prompt:",
+          "passed": true,
+          "detail": "must contain 'Optimized prompt:'"
+        }
+      ],
+      "answer_preview": "Optimized prompt: For case #16, draft a client update regarding the payment dispute, including relevant case details and proposed next steps.\n\nNotes: Added case #16 reference for context, and specified the inclusion of case details and next steps to enhance the response."
+    },
+    {
+      "id": "ask_case_01",
+      "prompt": "What is the payment structure in case #16?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "ask_case",
+      "confidence": "low",
+      "duration_ms": 70.10529993567616,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected ask_case, got ask_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "not_contains:<CASE_ID>",
+          "passed": true,
+          "detail": "must not contain '<CASE_ID>'"
+        },
+        {
+          "name": "not_contains:What success looks like",
+          "passed": true,
+          "detail": "must not contain 'What success looks like'"
+        },
+        {
+          "name": "not_contains:Optimize prompt:",
+          "passed": true,
+          "detail": "must not contain 'Optimize prompt:'"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "ask_case_02",
+      "prompt": "What evidence supports a breach argument in case #16?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "ask_case",
+      "confidence": "low",
+      "duration_ms": 67.20469996798784,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected ask_case, got ask_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "ask_case_03",
+      "prompt": "Can you explain this case #16 in plain legal terms?",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "ask_case",
+      "confidence": "low",
+      "duration_ms": 62.66409996896982,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected ask_case, got ask_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "I could not find enough evidence in the indexed documents."
+    },
+    {
+      "id": "memory_followup_01",
+      "prompt": "Analyze risks for case #16",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 10145.248499931768,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 16 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf\n2. HIGH | Legal | Termination rights are triggered by material breach and repeated SLA failure | Sources: eval_notice.pdf, eval_"
+    },
+    {
+      "id": "memory_followup_02",
+      "prompt": "just one",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "high",
+      "duration_ms": 11109.699800028466,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=0, max=1"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 16 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf"
+    }
+  ]
+}

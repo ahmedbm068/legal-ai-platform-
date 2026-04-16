@@ -137,8 +137,12 @@ class DocumentInsightService:
         sanitized_text = self._remove_structured_sections(text)
 
         classification = document_classifier_service.classify(sanitized_text)
+        document_type = self._refine_document_type_from_filename(
+            filename=document.filename,
+            document_type=classification.document_type,
+        )
 
-        parties_detected = self._extract_parties(sanitized_text, classification.document_type)
+        parties_detected = self._extract_parties(sanitized_text, document_type)
         important_dates = self._extract_important_dates(sanitized_text)
         payment_terms = self._extract_payment_terms(sanitized_text)
         termination_terms = self._extract_termination_terms(sanitized_text)
@@ -146,7 +150,7 @@ class DocumentInsightService:
 
         legal_risks = self._detect_legal_risks(
             text=sanitized_text,
-            document_type=classification.document_type,
+            document_type=document_type,
             parties_detected=parties_detected,
             important_dates=important_dates,
             payment_terms=payment_terms,
@@ -156,7 +160,7 @@ class DocumentInsightService:
 
         recommended_actions = self._recommend_next_actions(
             text=sanitized_text,
-            document_type=classification.document_type,
+            document_type=document_type,
             legal_risks=legal_risks,
             important_dates=important_dates,
             missing_evidence=missing_evidence,
@@ -172,7 +176,7 @@ class DocumentInsightService:
         )
 
         general_summary = self._generate_general_summary(
-            document_type=classification.document_type,
+            document_type=document_type,
             parties_detected=parties_detected,
             important_dates=important_dates,
             payment_terms=payment_terms,
@@ -182,7 +186,7 @@ class DocumentInsightService:
         )
 
         return {
-            "document_type": classification.document_type,
+            "document_type": document_type,
             "document_type_confidence": classification.confidence,
             "general_summary": general_summary,
             "key_points": key_points,
@@ -196,6 +200,32 @@ class DocumentInsightService:
             "summary_source": "elite_heuristic",
             "summary_version": "v9",
         }
+
+    @staticmethod
+    def _refine_document_type_from_filename(*, filename: str, document_type: str) -> str:
+        lowered = str(filename or "").lower()
+
+        filename_overrides = [
+            ("master_service_agreement", "master_service_agreement"),
+            ("msa", "master_service_agreement"),
+            ("notice_of_breach", "legal_letter"),
+            ("counterparty_response", "legal_letter"),
+            ("kpi", "complaint"),
+            ("dashboard", "complaint"),
+            ("invoice", "invoice"),
+            ("reconciliation", "invoice"),
+            ("settlement", "without_prejudice_settlement_offer"),
+            ("without_prejudice", "without_prejudice_settlement_offer"),
+            ("memo", "case_memo"),
+            ("transcript", "client_call_transcript_summary"),
+            ("call", "client_call_transcript_summary"),
+        ]
+
+        for needle, refined_type in filename_overrides:
+            if needle in lowered:
+                return refined_type
+
+        return document_type
 
     def to_json_string(self, insights: dict[str, Any]) -> str:
         return json.dumps(insights, ensure_ascii=False)
@@ -212,6 +242,7 @@ class DocumentInsightService:
     ) -> str:
         intro_map = {
             "contract": "This document is a contract or contract-related record.",
+            "master_service_agreement": "This document is a master service agreement.",
             "court_judgment": "This document is a court judgment or court-related decision.",
             "invoice": "This document is an invoice or payment-related billing record.",
             "legal_letter": "This document is a legal letter or formal notice.",
@@ -219,6 +250,8 @@ class DocumentInsightService:
             "identity_document": "This document is an identity-related document.",
             "evidence_attachment": "This document is a supporting evidence attachment.",
             "case_memo": "This document is an internal legal case memo.",
+            "without_prejudice_settlement_offer": "This document is a without-prejudice settlement offer.",
+            "client_call_transcript_summary": "This document is a call transcript summary.",
             "unknown": "This document concerns legal or administrative matters.",
         }
 
@@ -436,7 +469,7 @@ class DocumentInsightService:
             if re.search(rf"\b{re.escape(role)}\b", text, flags=re.IGNORECASE):
                 self._append_unique(role_parties, role)
 
-        if document_type == "contract" and not named_parties and not role_parties:
+        if document_type in {"contract", "master_service_agreement"} and not named_parties and not role_parties:
             if "landlord" in text.lower():
                 self._append_unique(role_parties, "Landlord")
             if "tenant" in text.lower():
@@ -534,7 +567,7 @@ class DocumentInsightService:
                 if self._is_reasonable_missing_evidence(cleaned):
                     self._append_unique(results, cleaned)
 
-            if lowered.startswith(("did not attach", "no signed", "no ", "missing ")):
+            if lowered.startswith(("did not attach", "no signed", "no clear", "no explicit", "no governing", "missing ")):
                 cleaned = self._trim_missing_evidence(stripped)
                 if self._is_reasonable_missing_evidence(cleaned):
                     self._append_unique(results, cleaned)
@@ -580,7 +613,16 @@ class DocumentInsightService:
             risks.append("The document contains deadlines or notice periods that may require active timeline monitoring.")
 
         if missing_evidence:
-            risks.append("Potential evidentiary gaps were detected and may weaken the legal position.")
+            missing_targets = [self._normalize_summary_sentence(item) for item in missing_evidence[:2] if item]
+            missing_targets = [item for item in missing_targets if item]
+            if missing_targets:
+                risks.append(
+                    "Missing evidence around "
+                    + " and ".join(missing_targets)
+                    + " may weaken the legal position."
+                )
+            else:
+                risks.append("Missing evidence may weaken the legal position.")
 
         if "late fee" in lowered or "late penalty" in lowered or "penalty" in lowered:
             risks.append("Penalty or late-fee language was detected and should be reviewed for enforceability and clarity.")

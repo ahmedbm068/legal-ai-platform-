@@ -286,10 +286,42 @@ Context:
         claims.extend(self._normalize_string_list(reasoning_payload.get("main_issues"), limit=6))
         claims.extend(self._normalize_string_list(reasoning_payload.get("legal_risks"), limit=6))
         if objective:
-            claims.insert(0, self._normalize_text(objective))
+            objective_claim = self._objective_to_claim(objective)
+            if objective_claim:
+                claims.insert(0, objective_claim)
         if not claims:
             claims.append("What does the current record support and what remains unproven?")
         return self._dedupe_ordered(claims)
+
+    @classmethod
+    def _objective_to_claim(cls, objective: str) -> str:
+        text = cls._normalize_text(objective)
+        if not text:
+            return ""
+
+        lowered = text.lower()
+        prefixes = (
+            r"^(what\s+)?evidence\s+supports\s+",
+            r"^(what\s+)?does\s+the\s+record\s+support\s+",
+            r"^(trace|map|show|find|identify)\s+",
+        )
+        for pattern in prefixes:
+            text = re.sub(pattern, "", text, flags=re.IGNORECASE).strip()
+
+        text = re.sub(r"\s+in\s+case\s+#?\d+\s*$", "", text, flags=re.IGNORECASE).strip()
+        text = re.sub(r"\b(case|matter|file)\s+#?\d+\s*$", "", text, flags=re.IGNORECASE).strip()
+        text = text.strip(" ?.-:")
+
+        if text and text[0].islower():
+            text = text[0].upper() + text[1:]
+
+        if not text:
+            return cls._normalize_text(objective)
+
+        if text.lower() == lowered.strip():
+            return text
+
+        return text
 
     def _rank_supporting_documents(
         self,
@@ -386,7 +418,7 @@ Context:
             actions.append(f"Re-read the source documents most tied to the claims: {', '.join(unique_docs)}.")
 
         if objective:
-            actions.append(f"Keep the trace aligned to the user objective: {self._normalize_text(objective)}.")
+            actions.append(f"Keep the trace aligned to the user objective: {AgentOutputFormatter.normalize_text(objective)}.")
 
         return AgentOutputFormatter.normalize_string_list(actions, limit=6)
 
@@ -436,6 +468,10 @@ Context:
             if limit is not None and len(normalized) >= limit:
                 break
         return normalized
+
+    @staticmethod
+    def _normalize_text(value: Any) -> str:
+        return AgentOutputFormatter.normalize_text(value)
 
     @staticmethod
     def _normalize_string_list(values: Any, *, limit: int | None = None) -> list[str]:

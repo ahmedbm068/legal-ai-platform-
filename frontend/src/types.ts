@@ -318,6 +318,13 @@ export interface ImageBatchUploadResponse {
   job?: BackgroundJobItem;
 }
 
+export interface ImageBatchDetailResponse {
+  batch: ImageDocumentBatch;
+  assets: CaseImageAsset[];
+  generated_document?: DocumentItem | null;
+  review?: EvidenceAnalysisReview | null;
+}
+
 export interface EvidenceReviewListResponse {
   reviews: EvidenceAnalysisReview[];
 }

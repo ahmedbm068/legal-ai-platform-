@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     RETRIEVAL_FILTER_NON_LEGAL_TEST: bool = True
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 180
+    SCANNED_PDF_MAX_PAGES: int = 80
+    SCANNED_PDF_RENDER_SCALE: float = 2.0
+    SCANNED_PDF_MIN_NATIVE_TEXT_CHARS: int = 240
 
     # Frontend
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"

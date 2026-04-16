@@ -6,7 +6,9 @@ import re
 import tempfile
 from threading import RLock
 import uuid
+from urllib.parse import quote
 
+from fastapi.responses import StreamingResponse
 from minio import Minio
 from minio.error import S3Error
 
@@ -109,3 +111,30 @@ def download_file_to_temp(object_name: str) -> str:
         raise RuntimeError(f"Failed to download file from object storage: {exc}") from exc
 
     return temp_file.name
+
+
+def stream_file_response(object_name: str, *, media_type: str | None = None, filename: str | None = None) -> StreamingResponse:
+    ensure_bucket_exists()
+
+    normalized_object_name = (object_name or "").replace("\\", "/").strip().lstrip("/")
+    if not normalized_object_name:
+        raise ValueError("Storage object path is required.")
+
+    object_response = client.get_object(BUCKET_NAME, normalized_object_name)
+
+    def iterator():
+        try:
+            while True:
+                chunk = object_response.read(1024 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            object_response.close()
+            object_response.release_conn()
+
+    headers: dict[str, str] = {}
+    if filename:
+        headers["Content-Disposition"] = f"inline; filename*=UTF-8''{quote(filename)}"
+
+    return StreamingResponse(iterator(), media_type=media_type or "application/octet-stream", headers=headers)

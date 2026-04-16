@@ -37,6 +37,12 @@ class ContractRedlineAgent(BaseAgent):
             "suggestion": "Define the KPI or service-level test and link it to service credits or remedies.",
             "fallback": "If they resist, keep the metric but narrow the remedy and measurement ambiguity.",
         },
+        "notice": {
+            "keywords": ("notice", "written notice", "breach notice", "formal notice", "notice period", "notice windows"),
+            "issue": "Notice mechanics should specify how breaches are raised, how cure is triggered, and when escalation starts.",
+            "suggestion": "Clarify notice method, notice timing, cure start date, and escalation consequences.",
+            "fallback": "If they resist, keep the notice process but define a clear cure-start trigger and delivery method.",
+        },
         "confidentiality": {
             "keywords": ("confidential", "confidentiality", "nondisclosure", "non-disclosure", "nda"),
             "issue": "Confidentiality scope should be checked for exceptions, duration, and disclosure rights.",
@@ -125,7 +131,11 @@ class ContractRedlineAgent(BaseAgent):
         focus_document_name: str | None,
     ) -> dict[str, Any]:
         document_rows = self._build_document_rows(documents)
-        clause_rows = self._build_clause_rows(document_rows=document_rows, focus_document_name=focus_document_name)
+        clause_rows = self._build_clause_rows(
+            document_rows=document_rows,
+            focus_document_name=focus_document_name,
+            objective=objective,
+        )
         target_document = self._choose_target_document(document_rows=document_rows, focus_document_name=focus_document_name)
         evidence_sources = [row["filename"] for row in document_rows if row.get("filename")]
 
@@ -256,9 +266,11 @@ Context:
         *,
         document_rows: list[dict[str, Any]],
         focus_document_name: str | None,
+        objective: str | None = None,
     ) -> list[dict[str, Any]]:
         clause_rows: list[dict[str, Any]] = []
         focus_lower = self._normalize_text(focus_document_name).lower()
+        focus_topics = self._extract_focus_topics(objective)
 
         for clause_name, definition in self.CLAUSE_TOPICS.items():
             matched_documents: list[str] = []
@@ -274,6 +286,9 @@ Context:
             if not matched_documents:
                 continue
 
+            if focus_topics and clause_name not in focus_topics:
+                continue
+
             issue = str(definition["issue"])
             suggestion = str(definition["suggestion"])
             fallback_position = str(definition["fallback"])
@@ -282,7 +297,8 @@ Context:
 
             clause_rows.append(
                 {
-                    "clause": clause_name.replace("_", " ").title(),
+                    "clause": self._display_clause_name(clause_name),
+                    "clause_key": clause_name,
                     "issue": issue,
                     "suggestion": suggestion,
                     "fallback_position": fallback_position,
@@ -290,7 +306,31 @@ Context:
                 }
             )
 
-        clause_rows.sort(key=lambda row: self._clause_priority(row["clause"]))
+        if focus_topics and not clause_rows:
+            for clause_name, definition in self.CLAUSE_TOPICS.items():
+                if clause_name not in focus_topics:
+                    continue
+                matched_documents: list[str] = []
+                for row in document_rows:
+                    text = str(row.get("text") or "").lower()
+                    if any(keyword in text for keyword in definition["keywords"]):
+                        filename = str(row.get("filename") or "").strip()
+                        if filename and filename not in matched_documents:
+                            matched_documents.append(filename)
+                if not matched_documents:
+                    continue
+                clause_rows.append(
+                    {
+                        "clause": self._display_clause_name(clause_name),
+                        "clause_key": clause_name,
+                        "issue": str(definition["issue"]),
+                        "suggestion": str(definition["suggestion"]),
+                        "fallback_position": str(definition["fallback"]),
+                        "source_documents": matched_documents[:4],
+                    }
+                )
+
+        clause_rows.sort(key=lambda row: self._clause_priority(row.get("clause_key") or row["clause"]))
         return clause_rows
 
     def _choose_target_document(
@@ -316,7 +356,8 @@ Context:
             "Liability",
             "Payment",
             "Termination",
-            "Sla",
+            "SLA",
+            "Notice",
             "Governing Law",
             "Confidentiality",
             "Warranty",
@@ -326,6 +367,41 @@ Context:
             return priority_order.index(clause_name)
         except ValueError:
             return len(priority_order)
+
+    @staticmethod
+    def _display_clause_name(clause_name: str) -> str:
+        mapping = {
+            "sla": "SLA",
+            "governing law": "Governing Law",
+            "liability": "Liability",
+            "payment": "Payment",
+            "termination": "Termination",
+            "notice": "Notice",
+            "confidentiality": "Confidentiality",
+            "warranty": "Warranty",
+            "assignment": "Assignment",
+        }
+        return mapping.get(clause_name, clause_name.replace("_", " ").title())
+
+    @staticmethod
+    def _extract_focus_topics(objective: str | None) -> set[str]:
+        lowered = str(objective or "").lower()
+        focus_topics: set[str] = set()
+        if any(token in lowered for token in ["liability", "cap", "indemnity"]):
+            focus_topics.add("liability")
+        if any(token in lowered for token in ["termination", "cure", "renewal", "expiration"]):
+            focus_topics.add("termination")
+        if any(token in lowered for token in ["sla", "service level", "kpi", "performance", "uptime"]):
+            focus_topics.add("sla")
+        if any(token in lowered for token in ["payment", "invoice", "fees", "billing", "late payment", "amount"]):
+            focus_topics.add("payment")
+        if any(token in lowered for token in ["notice", "breach notice", "formal notice", "written notice"]):
+            focus_topics.add("notice")
+        if any(token in lowered for token in ["governing law", "jurisdiction", "venue", "forum"]):
+            focus_topics.add("governing law")
+        if any(token in lowered for token in ["confidential", "nda", "nondisclosure"]):
+            focus_topics.add("confidentiality")
+        return focus_topics
 
     @staticmethod
     def _normalize_clause_rows(values: Any, *, limit: int | None = None) -> list[dict[str, Any]]:

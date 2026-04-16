@@ -79,6 +79,7 @@ class AgentOutputFormatter:
             f"Task: {task}",
             "- Use only the provided evidence and context.",
             "- Be concrete, specific, and outcome-oriented.",
+            "- Ground each conclusion in the supplied record and, when possible, name the supporting document, clause, date, amount, or transcript cue.",
             "- Avoid generic legal boilerplate, filler intros, and vague closing lines.",
             "- Prefer bullet points, named issues, dates, amounts, and clause-level references when available.",
             "- If something is uncertain, say so plainly instead of guessing.",

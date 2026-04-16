@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi import BackgroundTasks, HTTPException, status
@@ -17,8 +18,11 @@ from backend.models.document import Document
 from backend.models.evidence_analysis_review import EvidenceAnalysisReview
 from backend.models.image_document_batch import ImageDocumentBatch
 from backend.services.ai.case_snapshot_service import case_snapshot_service
+from backend.services.ai.document_insight_service import document_insight_service
 from backend.services.ai.image_authenticity_service import image_authenticity_service
 from backend.services.ai.ocr_service import ocr_service
+from backend.services.ai.legal_text_formatter import LegalTextFormatter
+from backend.services.ai.scanned_document_service import scanned_document_service
 from backend.services.ai.vision_errors import VisionServiceError
 from backend.services.jobs.job_queue_service import background_job_service
 from backend.services.storage_service import download_file_to_temp, upload_file
@@ -32,8 +36,9 @@ class ImageDocumentService:
         "image/webp",
         "image/heic",
         "image/heif",
+        "application/pdf",
     }
-    ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"}
+    ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif", ".pdf"}
 
     def create_image_batch_upload(
         self,
@@ -48,7 +53,7 @@ class ImageDocumentService:
         background_tasks: BackgroundTasks | None = None,
     ) -> tuple[ImageDocumentBatch, dict[str, Any]]:
         if not files:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one image is required.")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one image or PDF is required.")
 
         batch = ImageDocumentBatch(
             tenant_id=case.tenant_id,
@@ -56,7 +61,7 @@ class ImageDocumentService:
             created_by_user_id=created_by_user_id,
             title=(title or case.title or "Scanned document").strip(),
             status="queued",
-            asset_count=len(files),
+            asset_count=0,
             generate_document=bool(generate_document),
             run_authenticity_check=bool(run_authenticity_check),
         )
@@ -64,17 +69,61 @@ class ImageDocumentService:
         db.commit()
         db.refresh(batch)
 
-        for index, file in enumerate(files, start=1):
+        total_assets = 0
+
+        for file in files:
             filename = str(getattr(file, "filename", "") or "").strip()
             if not filename:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Every image file must have a filename.")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Every file must have a filename.")
             self._validate_upload(filename=filename, content_type=getattr(file, "content_type", None))
 
-            file.file.seek(0, 2)
-            file_size = file.file.tell()
+            file.file.seek(0)
+            raw_bytes = file.file.read()
             file.file.seek(0)
 
-            storage_path = upload_file(file.file, filename, prefix=f"case-images/case-{case.id}")
+            normalized_content_type = (getattr(file, "content_type", None) or "").split(";")[0].strip().lower()
+            extension = Path(filename).suffix.lower()
+            is_pdf = normalized_content_type == "application/pdf" or extension == ".pdf"
+
+            if is_pdf:
+                rendered_pages = scanned_document_service.render_pdf_pages(
+                    pdf_bytes=raw_bytes,
+                    original_filename=filename,
+                )
+                for page in rendered_pages:
+                    storage_path = upload_file(
+                        BytesIO(page.image_bytes),
+                        page.filename,
+                        prefix=f"case-images/case-{case.id}/pdf",
+                    )
+                    db.add(
+                        CaseImageAsset(
+                            tenant_id=case.tenant_id,
+                            case_id=case.id,
+                            batch_id=batch.id,
+                            created_by_user_id=created_by_user_id,
+                            filename=page.filename,
+                            storage_path=storage_path,
+                            mime_type=page.mime_type,
+                            file_size=len(page.image_bytes),
+                            page_order=total_assets + 1,
+                            source_scope="case_batch_pdf",
+                            processing_status="queued",
+                            metadata_json=json.dumps(
+                                {
+                                    "source_kind": "scanned_pdf",
+                                    "original_filename": filename,
+                                    "original_mime_type": normalized_content_type or "application/pdf",
+                                    "page_order": page.page_order,
+                                },
+                                ensure_ascii=False,
+                            ),
+                        )
+                    )
+                    total_assets += 1
+                continue
+
+            storage_path = upload_file(BytesIO(raw_bytes), filename, prefix=f"case-images/case-{case.id}")
             db.add(
                 CaseImageAsset(
                     tenant_id=case.tenant_id,
@@ -83,15 +132,18 @@ class ImageDocumentService:
                     created_by_user_id=created_by_user_id,
                     filename=filename,
                     storage_path=storage_path,
-                    mime_type=(getattr(file, "content_type", None) or self._guess_content_type(filename)).strip(),
-                    file_size=file_size,
-                    page_order=index,
+                    mime_type=(normalized_content_type or self._guess_content_type(filename)).strip(),
+                    file_size=len(raw_bytes),
+                    page_order=total_assets + 1,
                     source_scope="case_batch",
                     processing_status="queued",
                 )
             )
+            total_assets += 1
 
+        batch.asset_count = total_assets
         db.commit()
+
         job = background_job_service.enqueue(
             db=db,
             job_type="image_batch_process",
@@ -241,6 +293,8 @@ class ImageDocumentService:
                         "language": asset.detected_language,
                         "ocr_confidence": asset.ocr_confidence,
                         "text": ocr_result.text.strip(),
+                        "key_fields": ocr_result.key_fields,
+                        "layout_notes": ocr_result.layout_notes,
                     }
                 )
                 db.commit()
@@ -400,25 +454,12 @@ class ImageDocumentService:
         batch: ImageDocumentBatch,
         pages: list[dict[str, Any]],
     ) -> Document:
-        lines = [f"# OCR document for {batch.title}", ""]
-        for page in pages:
-            page_label = page.get("page_order") or "?"
-            language = page.get("language") or "unknown"
-            confidence = float(page.get("ocr_confidence") or 0.0)
-            lines.extend(
-                [
-                    f"## Page {page_label} - {page.get('filename')}",
-                    f"Language: {language}",
-                    f"OCR confidence: {confidence:.2f}",
-                    "",
-                    str(page.get("text") or "").strip(),
-                    "",
-                ]
-            )
+        lines = self._build_structured_generated_document_lines(batch=batch, pages=pages)
+        document_body = "\n".join(lines).strip() + "\n"
 
-        filename = f"{self._safe_stem(batch.title)}_ocr.md"
+        filename = f"{self._safe_stem(batch.title)}_structured_scan.md"
         storage_path = upload_file(
-            BytesIO("\n".join(lines).encode("utf-8")),
+            BytesIO(document_body.encode("utf-8")),
             filename,
             prefix=f"documents/case-{batch.case_id}/ocr",
         )
@@ -426,7 +467,7 @@ class ImageDocumentService:
             filename=filename,
             storage_path=storage_path,
             processing_status="queued",
-            file_size=len("\n".join(lines).encode("utf-8")),
+            file_size=len(document_body.encode("utf-8")),
             file_type="text/markdown",
             case_id=batch.case_id,
             tenant_id=batch.tenant_id,
@@ -446,6 +487,144 @@ class ImageDocumentService:
             queue_name="documents",
         )
         return document
+
+    def _build_structured_generated_document_lines(
+        self,
+        *,
+        batch: ImageDocumentBatch,
+        pages: list[dict[str, Any]],
+    ) -> list[str]:
+        combined_text = "\n\n".join(str(page.get("text") or "").strip() for page in pages if str(page.get("text") or "").strip())
+        normalized_text = LegalTextFormatter.prepare_for_summary(combined_text, max_chars=22000)
+        temp_document = SimpleNamespace(
+            filename=batch.title or f"case-{batch.case_id}-scan",
+            extracted_text=normalized_text,
+            redacted_text=None,
+        )
+        insights = document_insight_service.build_insights(temp_document)
+
+        page_count = len(pages)
+        average_confidence = 0.0
+        if pages:
+            average_confidence = sum(float(page.get("ocr_confidence") or 0.0) for page in pages) / len(pages)
+
+        lines: list[str] = [
+            f"# Structured OCR document for {batch.title}",
+            "",
+            "## Scan Overview",
+            f"- Source batch: {batch.title}",
+            f"- Pages processed: {page_count}",
+            f"- Average OCR confidence: {average_confidence:.2f}",
+            f"- Document type: {self._humanize_document_type(str(insights.get('document_type') or 'unknown'))}",
+        ]
+
+        general_summary = str(insights.get("general_summary") or "").strip()
+        if general_summary:
+            lines.extend(["", "## Executive Summary", general_summary])
+
+        parties = self._unique_strings(insights.get("parties_detected") or [])
+        if parties:
+            lines.extend(["", "## Parties", "- " + "\n- ".join(parties[:6])])
+
+        key_points = self._unique_strings(insights.get("key_points") or [])
+        if key_points:
+            lines.extend(["", "## Main Issues", "- " + "\n- ".join(key_points[:8])])
+
+        payment_terms = self._unique_strings(insights.get("payment_terms") or [])
+        termination_terms = self._unique_strings(insights.get("termination_terms") or [])
+        if payment_terms or termination_terms:
+            lines.append("")
+            lines.append("## Key Clauses / Obligations")
+            for item in payment_terms[:4]:
+                lines.append(f"- Payment: {item}")
+            for item in termination_terms[:4]:
+                lines.append(f"- Termination / Notice: {item}")
+
+        important_dates = insights.get("important_dates") if isinstance(insights.get("important_dates"), list) else []
+        if important_dates:
+            lines.extend(["", "## Key Dates"])
+            for item in important_dates[:8]:
+                if not isinstance(item, dict):
+                    continue
+                label = self._humanize_label(str(item.get("label") or "date"))
+                value = str(item.get("value") or "").strip()
+                if value:
+                    lines.append(f"- {value} ({label})")
+
+        legal_risks = self._unique_strings(insights.get("legal_risks") or [])
+        if legal_risks:
+            lines.extend(["", "## Legal Risks", "- " + "\n- ".join(legal_risks[:8])])
+
+        missing_evidence = self._unique_strings(insights.get("missing_evidence") or [])
+        if missing_evidence:
+            lines.extend(["", "## Missing Evidence / Gaps", "- " + "\n- ".join(missing_evidence[:6])])
+
+        recommended_actions = self._unique_strings(insights.get("recommended_actions") or [])
+        if recommended_actions:
+            lines.extend(["", "## Recommended Next Steps", "- " + "\n- ".join(recommended_actions[:8])])
+
+        lines.extend(["", "## OCR Transcript"])
+        for page in pages:
+            page_label = page.get("page_order") or "?"
+            language = page.get("language") or "unknown"
+            confidence = float(page.get("ocr_confidence") or 0.0)
+            text = str(page.get("text") or "").strip()
+            key_fields = page.get("key_fields") if isinstance(page.get("key_fields"), list) else []
+            layout_notes = page.get("layout_notes") if isinstance(page.get("layout_notes"), list) else []
+
+            lines.extend(
+                [
+                    f"### Page {page_label} - {page.get('filename')}",
+                    f"- Language: {language}",
+                    f"- OCR confidence: {confidence:.2f}",
+                ]
+            )
+            if key_fields:
+                rendered_fields = [f"{str(item.get('label') or '').strip()}: {str(item.get('value') or '').strip()}" for item in key_fields if isinstance(item, dict) and str(item.get('label') or '').strip() and str(item.get('value') or '').strip()]
+                rendered_fields = rendered_fields[:6]
+                if rendered_fields:
+                    lines.append("- Key fields: " + "; ".join(rendered_fields))
+            if layout_notes:
+                rendered_notes = [str(item).strip() for item in layout_notes if str(item).strip()]
+                rendered_notes = rendered_notes[:4]
+                if rendered_notes:
+                    lines.append("- Layout notes: " + "; ".join(rendered_notes))
+            if text:
+                lines.extend(["", text, ""])
+            else:
+                lines.extend(["", "[No readable text extracted on this page.]", ""])
+
+        return lines
+
+    @staticmethod
+    def _humanize_document_type(document_type: str) -> str:
+        cleaned = str(document_type or "unknown").strip().replace("_", " ")
+        if not cleaned or cleaned == "unknown":
+            return "Unknown"
+        parts = []
+        for word in cleaned.split():
+            lowered = word.lower()
+            if lowered in {"sla", "kpi", "msa"}:
+                parts.append(lowered.upper())
+            else:
+                parts.append(lowered.capitalize())
+        return " ".join(parts)
+
+    @staticmethod
+    def _humanize_label(value: str) -> str:
+        cleaned = str(value or "date").strip().replace("_", " ")
+        if not cleaned:
+            return "date"
+        return cleaned[:1].upper() + cleaned[1:]
+
+    @staticmethod
+    def _unique_strings(values: list[Any]) -> list[str]:
+        unique: list[str] = []
+        for value in values:
+            cleaned = str(value or "").strip()
+            if cleaned and cleaned not in unique:
+                unique.append(cleaned)
+        return unique
 
     def _create_authenticity_review(
         self,
@@ -498,7 +677,7 @@ class ImageDocumentService:
             return
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unsupported image format. Use PNG, JPG, JPEG, WEBP, or HEIC.",
+            detail="Unsupported file format. Use PNG, JPG, JPEG, WEBP, HEIC, or PDF.",
         )
 
     @staticmethod
@@ -511,6 +690,7 @@ class ImageDocumentService:
             ".webp": "image/webp",
             ".heic": "image/heic",
             ".heif": "image/heif",
+            ".pdf": "application/pdf",
         }.get(extension, "image/png")
 
     @staticmethod

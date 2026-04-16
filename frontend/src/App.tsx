@@ -11,7 +11,6 @@ import {
 } from "react";
 import { workspaceApi as api } from "./workspaceApi";
 import ChatMessageBubble, { type MessageFeedbackState } from "./components/ChatMessageBubble";
-import IntelligencePanel from "./components/IntelligencePanel";
 import type {
   CaseItem,
   ChatMessage,
@@ -19,6 +18,7 @@ import type {
   ConsultationRequest,
   DocumentItem,
   EvidenceAnalysisReview,
+  ImageBatchDetailResponse,
   ImageDocumentBatch,
   PromptLibraryEntry,
   ProviderStatusResponse,
@@ -46,6 +46,7 @@ type LibraryFilter = "all" | "pdf" | "voice" | "image";
 
 interface BibliothequeItem {
   id: string;
+  sourceId: number;
   kind: Exclude<LibraryFilter, "all">;
   title: string;
   subtitle: string;
@@ -53,6 +54,16 @@ interface BibliothequeItem {
   sizeLabel: string;
   createdAt: string;
   sortTime: number;
+  generatedDocumentId?: number | null;
+}
+
+interface LibraryPreviewAsset {
+  id: number;
+  filename: string;
+  mimeType: string;
+  url: string;
+  pageOrder?: number | null;
+  extractedText?: string | null;
 }
 
 type BrowserSpeechRecognition = {
@@ -497,6 +508,72 @@ function normalizeError(error: unknown, fallback: string): string {
   return fallback;
 }
 
+type MarkdownPreviewBlock =
+  | { kind: "heading"; level: 1 | 2 | 3; text: string }
+  | { kind: "paragraph"; text: string }
+  | { kind: "list"; items: string[] };
+
+function parseMarkdownPreview(text: string): MarkdownPreviewBlock[] {
+  const blocks: MarkdownPreviewBlock[] = [];
+  const lines = (text || "").split(/\r?\n/);
+  let paragraphLines: string[] = [];
+  let listItems: string[] = [];
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) return;
+    blocks.push({ kind: "paragraph", text: paragraphLines.join(" ").replace(/\s+/g, " ").trim() });
+    paragraphLines = [];
+  };
+
+  const flushList = () => {
+    if (!listItems.length) return;
+    blocks.push({ kind: "list", items: listItems });
+    listItems = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      flushParagraph();
+      flushList();
+      blocks.push({
+        kind: "heading",
+        level: headingMatch[1].length as 1 | 2 | 3,
+        text: headingMatch[2].trim(),
+      });
+      continue;
+    }
+
+    const bulletMatch = line.match(/^[-*]\s+(.+)$/);
+    if (bulletMatch) {
+      flushParagraph();
+      listItems.push(bulletMatch[1].trim());
+      continue;
+    }
+
+    const numberedMatch = line.match(/^\d+[\).]\s+(.+)$/);
+    if (numberedMatch) {
+      flushParagraph();
+      listItems.push(numberedMatch[1].trim());
+      continue;
+    }
+
+    flushList();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+  return blocks;
+}
+
 function normalizeStoredMessage(message: ChatMessage): ChatMessage {
   const rawAnswer = message.meta?.rawAnswer;
   if (message.role === "assistant" && typeof rawAnswer === "string" && rawAnswer && message.content !== rawAnswer) {
@@ -648,6 +725,14 @@ export default function App() {
   const [bibliothequeQuery, setBibliothequeQuery] = useState("");
   const [bibliothequeGlobalItems, setBibliothequeGlobalItems] = useState<BibliothequeItem[]>([]);
   const [bibliothequeLoading, setBibliothequeLoading] = useState(false);
+  const [libraryPreviewItem, setLibraryPreviewItem] = useState<BibliothequeItem | null>(null);
+  const [libraryPreviewLoading, setLibraryPreviewLoading] = useState(false);
+  const [libraryPreviewError, setLibraryPreviewError] = useState<string | null>(null);
+  const [libraryPreviewUrl, setLibraryPreviewUrl] = useState<string | null>(null);
+  const [libraryPreviewBatch, setLibraryPreviewBatch] = useState<ImageBatchDetailResponse | null>(null);
+  const [libraryPreviewAssets, setLibraryPreviewAssets] = useState<LibraryPreviewAsset[]>([]);
+  const [libraryPreviewAssetId, setLibraryPreviewAssetId] = useState<number | null>(null);
+  const [libraryPreviewMarkdownText, setLibraryPreviewMarkdownText] = useState<string | null>(null);
   const [selectionGateOpen, setSelectionGateOpen] = useState(false);
   const [selectionGateDone, setSelectionGateDone] = useState(false);
   const [gateClientId, setGateClientId] = useState<number | null>(null);
@@ -682,7 +767,7 @@ export default function App() {
   const [savingPromptTemplate, setSavingPromptTemplate] = useState(false);
   const [promptLibraryDeleteId, setPromptLibraryDeleteId] = useState<number | null>(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
-  const [chatHistoryOpen, setChatHistoryOpen] = useState(false);
+  const [chatHistoryOpen, setChatHistoryOpen] = useState(true);
   const [reviewDecisionBusyId, setReviewDecisionBusyId] = useState<number | null>(null);
 
   const [notice, setNotice] = useState<string | null>(null);
@@ -704,6 +789,8 @@ export default function App() {
   const messageStreamRef = useRef<HTMLDivElement | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
   const messageAnimationTimeoutsRef = useRef<Record<string, number>>({});
+  const libraryPreviewObjectUrlsRef = useRef<string[]>([]);
+  const libraryPreviewRequestIdRef = useRef(0);
 
   const t = useCallback(
     (key: string, fallback: string) => APP_TEXT[language]?.[key] || APP_TEXT.en[key] || fallback,
@@ -716,6 +803,10 @@ export default function App() {
   const selectedCase = useMemo(
     () => cases.find((item) => item.id === selectedCaseId) || null,
     [cases, selectedCaseId]
+  );
+  const selectedDocument = useMemo(
+    () => documents.find((item) => item.id === selectedDocumentId) || null,
+    [documents, selectedDocumentId]
   );
   const selectedClient = useMemo(
     () => clients.find((item) => item.id === selectedClientId) || null,
@@ -782,6 +873,7 @@ export default function App() {
       const sortTime = new Date(document.upload_timestamp).getTime();
       return {
         id: `pdf-${document.id}`,
+        sourceId: document.id,
         kind: "pdf",
         title: document.filename,
         subtitle: `Document #${document.id}`,
@@ -796,6 +888,7 @@ export default function App() {
       const sortTime = new Date(recording.created_at).getTime();
       return {
         id: `voice-${recording.id}`,
+        sourceId: recording.id,
         kind: "voice",
         title: recording.filename,
         subtitle: `Voice #${recording.id}`,
@@ -812,6 +905,7 @@ export default function App() {
       const generated = batch.generated_document_id ? ` -> Doc #${batch.generated_document_id}` : "";
       return {
         id: `image-${batch.id}`,
+        sourceId: batch.id,
         kind: "image",
         title: batch.title,
         subtitle: `Batch #${batch.id}${generated}`,
@@ -819,6 +913,7 @@ export default function App() {
         sizeLabel: `${batch.asset_count} ${imageWord}`,
         createdAt: compactDateTime(batch.created_at, dateLocale, t("noDate", "No date")),
         sortTime: Number.isNaN(sortTime) ? 0 : sortTime,
+        generatedDocumentId: batch.generated_document_id ?? null,
       };
     });
 
@@ -838,6 +933,177 @@ export default function App() {
         .includes(query);
     });
   }, [bibliothequeFilter, bibliothequeQuery, bibliothequeSourceItems]);
+
+  const libraryPreviewMarkdownBlocks = useMemo(
+    () => (libraryPreviewMarkdownText ? parseMarkdownPreview(libraryPreviewMarkdownText) : []),
+    [libraryPreviewMarkdownText]
+  );
+
+  const releaseLibraryPreviewObjectUrls = useCallback(() => {
+    libraryPreviewObjectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    libraryPreviewObjectUrlsRef.current = [];
+  }, []);
+
+  const resetLibraryPreview = useCallback(() => {
+    libraryPreviewRequestIdRef.current += 1;
+    releaseLibraryPreviewObjectUrls();
+    setLibraryPreviewLoading(false);
+    setLibraryPreviewError(null);
+    setLibraryPreviewUrl(null);
+    setLibraryPreviewBatch(null);
+    setLibraryPreviewAssets([]);
+    setLibraryPreviewAssetId(null);
+    setLibraryPreviewMarkdownText(null);
+  }, [releaseLibraryPreviewObjectUrls]);
+
+  const closeLibraryPreview = useCallback(() => {
+    resetLibraryPreview();
+    setLibraryPreviewItem(null);
+  }, [resetLibraryPreview]);
+
+  const trackLibraryPreviewUrl = useCallback((url: string) => {
+    libraryPreviewObjectUrlsRef.current.push(url);
+    return url;
+  }, []);
+
+  useEffect(
+    () => () => {
+      releaseLibraryPreviewObjectUrls();
+    },
+    [releaseLibraryPreviewObjectUrls]
+  );
+
+  useEffect(() => {
+    if (!libraryPreviewItem) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [libraryPreviewItem]);
+
+  const openLibraryPreview = useCallback(
+    async (item: BibliothequeItem) => {
+      if (!token) return;
+
+      resetLibraryPreview();
+      const requestId = libraryPreviewRequestIdRef.current;
+      setLibraryPreviewItem(item);
+      setLibraryPreviewLoading(true);
+
+      try {
+        if (item.kind === "pdf") {
+          const blob = await api.getDocumentFile(token, item.sourceId);
+          if (requestId !== libraryPreviewRequestIdRef.current) return;
+          const looksLikeMarkdown = item.title.toLowerCase().endsWith(".md") || item.title.toLowerCase().endsWith(".markdown");
+          const blobText = looksLikeMarkdown || (blob.type.startsWith("text/") && blob.type !== "text/html") ? await blob.text() : null;
+          if (requestId !== libraryPreviewRequestIdRef.current) return;
+          if (blobText) {
+            setLibraryPreviewMarkdownText(blobText);
+            return;
+          }
+          const objectUrl = trackLibraryPreviewUrl(URL.createObjectURL(blob));
+          setLibraryPreviewUrl(`${objectUrl}#page=1&zoom=80&toolbar=0&navpanes=0&scrollbar=0`);
+          return;
+        }
+
+        if (item.kind === "voice") {
+          const blob = await api.getVoiceRecordingFile(token, item.sourceId);
+          if (requestId !== libraryPreviewRequestIdRef.current) return;
+          const objectUrl = trackLibraryPreviewUrl(URL.createObjectURL(blob));
+          setLibraryPreviewUrl(objectUrl);
+          return;
+        }
+
+        const batchDetail = await api.getImageBatch(token, item.sourceId);
+        if (requestId !== libraryPreviewRequestIdRef.current) return;
+        const sortedAssets = [...batchDetail.assets].sort((left, right) => (left.page_order ?? 0) - (right.page_order ?? 0));
+        const assetPreviews = await Promise.all(
+          sortedAssets.map(async (asset) => {
+            const blob = await api.getImageAssetFile(token, asset.id);
+            if (requestId !== libraryPreviewRequestIdRef.current) return null;
+            const objectUrl = trackLibraryPreviewUrl(URL.createObjectURL(blob));
+            return {
+              id: asset.id,
+              filename: asset.filename,
+              mimeType: asset.mime_type,
+              url: objectUrl,
+              pageOrder: asset.page_order,
+              extractedText: asset.extracted_text,
+            } satisfies LibraryPreviewAsset;
+          })
+        );
+
+        if (requestId !== libraryPreviewRequestIdRef.current) return;
+        setLibraryPreviewBatch(batchDetail);
+        setLibraryPreviewAssets(assetPreviews.filter((asset): asset is LibraryPreviewAsset => asset !== null));
+        setLibraryPreviewAssetId(assetPreviews.find((asset): asset is LibraryPreviewAsset => asset !== null)?.id ?? null);
+      } catch (caught) {
+        if (requestId !== libraryPreviewRequestIdRef.current) return;
+        setLibraryPreviewError(normalizeError(caught, t("unableOpenPreview", "Unable to open preview.")));
+      } finally {
+        if (requestId !== libraryPreviewRequestIdRef.current) return;
+        setLibraryPreviewLoading(false);
+      }
+    },
+    [resetLibraryPreview, t, token, trackLibraryPreviewUrl]
+  );
+
+  const openLibraryGeneratedDocument = useCallback(
+    async (documentId: number) => {
+      if (!token) return;
+
+      resetLibraryPreview();
+      const requestId = libraryPreviewRequestIdRef.current;
+      setLibraryPreviewItem({
+        id: `pdf-generated-${documentId}`,
+        sourceId: documentId,
+        kind: "pdf",
+        title: `Generated document #${documentId}`,
+        subtitle: "Generated from scanned images",
+        status: "ready",
+        sizeLabel: "Generated PDF",
+        createdAt: t("noDate", "No date"),
+        sortTime: Date.now(),
+      });
+      setLibraryPreviewLoading(true);
+
+      try {
+        const blob = await api.getDocumentFile(token, documentId);
+        if (requestId !== libraryPreviewRequestIdRef.current) return;
+        const blobText = blob.type.startsWith("text/") && blob.type !== "text/html" ? await blob.text() : null;
+        if (requestId !== libraryPreviewRequestIdRef.current) return;
+        if (blobText) {
+          setLibraryPreviewMarkdownText(blobText);
+          return;
+        }
+        const objectUrl = trackLibraryPreviewUrl(URL.createObjectURL(blob));
+        setLibraryPreviewUrl(objectUrl);
+      } catch (caught) {
+        if (requestId !== libraryPreviewRequestIdRef.current) return;
+        setLibraryPreviewError(normalizeError(caught, t("unableOpenPreview", "Unable to open preview.")));
+      } finally {
+        if (requestId !== libraryPreviewRequestIdRef.current) return;
+        setLibraryPreviewLoading(false);
+      }
+    },
+    [resetLibraryPreview, t, token, trackLibraryPreviewUrl]
+  );
+
+  useEffect(() => {
+    if (!libraryPreviewItem) return undefined;
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeLibraryPreview();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [closeLibraryPreview, libraryPreviewItem]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -1061,6 +1327,7 @@ export default function App() {
             const sortTime = new Date(document.upload_timestamp).getTime();
             return {
               id: `pdf-${caseItem.id}-${document.id}`,
+              sourceId: document.id,
               kind: "pdf",
               title: document.filename,
               subtitle: `${caseItem.title} · Document #${document.id}`,
@@ -1075,6 +1342,7 @@ export default function App() {
             const sortTime = new Date(recording.created_at).getTime();
             return {
               id: `voice-${caseItem.id}-${recording.id}`,
+              sourceId: recording.id,
               kind: "voice",
               title: recording.filename,
               subtitle: `${caseItem.title} · Voice #${recording.id}`,
@@ -1090,6 +1358,7 @@ export default function App() {
             const imageWord = batch.asset_count === 1 ? "image" : "images";
             return {
               id: `image-${caseItem.id}-${batch.id}`,
+              sourceId: batch.id,
               kind: "image",
               title: batch.title,
               subtitle: `${caseItem.title} · Batch #${batch.id}`,
@@ -1097,6 +1366,7 @@ export default function App() {
               sizeLabel: `${batch.asset_count} ${imageWord}`,
               createdAt: compactDateTime(batch.created_at, dateLocale, t("noDate", "No date")),
               sortTime: Number.isNaN(sortTime) ? 0 : sortTime,
+              generatedDocumentId: batch.generated_document_id ?? null,
             };
           });
 
@@ -1689,18 +1959,18 @@ export default function App() {
     setError(null);
     try {
       const response = await api.uploadImageBatch(token, selectedCaseId, files, {
-        title: selectedCase ? `${selectedCase.title} - scanned photos` : "Scanned photos",
+        title: selectedCase ? `${selectedCase.title} - scanned documents` : "Scanned documents",
         generateDocument: true,
         runAuthenticityCheck: runScannedAuthenticityCheck,
       });
       await loadCaseContext(selectedCaseId);
       setNotice(
         response.job?.id
-          ? `Scanned photos uploaded and queued for OCR${runScannedAuthenticityCheck ? " with authenticity screening" : ""}. Job: ${response.job.id}`
-          : `Scanned photos uploaded and queued for OCR${runScannedAuthenticityCheck ? " with authenticity screening" : ""}.`
+          ? `Scanned documents uploaded and queued for OCR${runScannedAuthenticityCheck ? " with authenticity screening" : ""}. Job: ${response.job.id}`
+          : `Scanned documents uploaded and queued for OCR${runScannedAuthenticityCheck ? " with authenticity screening" : ""}.`
       );
     } catch (caught) {
-      setError(normalizeError(caught, "Unable to upload scanned photos."));
+      setError(normalizeError(caught, "Unable to upload scanned documents."));
     } finally {
       setUploadingScannedPhotos(false);
     }
@@ -2041,16 +2311,6 @@ export default function App() {
     if (!selectedCase) return "No active case";
     return `${selectedCase.jurisdiction_country} | ${selectedCase.status}`;
   }, [selectedCase]);
-  const workspaceModules = useMemo(
-    () => [
-      { title: "Assistant", detail: `${activeMessages.filter((item) => item.role === "assistant").length} replies`, accent: "ai" },
-      { title: "Vault", detail: `${documents.length} docs | ${imageBatches.length} batches`, accent: "neutral" },
-      { title: "Review", detail: `${caseReviewTable?.row_count ?? 0} rows | ${evidenceReviews.length} reviews`, accent: "warning" },
-      { title: "Workflows", detail: `${consultations.length} consultations | ${recordings.length} voice notes`, accent: "stable" },
-      { title: "Library", detail: `${promptLibraryEntries.length} saved prompts`, accent: "neutral" },
-    ],
-    [activeMessages, documents.length, imageBatches.length, caseReviewTable?.row_count, evidenceReviews.length, consultations.length, recordings.length, promptLibraryEntries.length]
-  );
   const suggestedActions = useMemo(
     () => [
       selectedCase ? `Summarize case #${selectedCase.id}` : "Summarize this matter",
@@ -2099,50 +2359,6 @@ export default function App() {
       return action;
     },
     [selectedCase]
-  );
-  const launchSpecialistWorkflow = useCallback(
-    (prompt: string) => {
-      if (!prompt.trim()) return;
-      setWorkspaceMode("agent");
-      setAttachmentMenuOpen(false);
-      setChatHistoryOpen(true);
-      setChatInput(prompt);
-      focusComposer();
-    },
-    [focusComposer]
-  );
-  const specialistLaunchers = useMemo(
-    () => [
-      {
-        title: "Case memory",
-        detail: "Build a memory snapshot with gaps and deadlines",
-        prompt: selectedCase
-          ? `Generate a case memory snapshot for case #${selectedCase.id} (${selectedCase.title}). Include document inventory, claim trace, contradictions, open proof gaps, and deadline signals.`
-          : "Generate a case memory snapshot for the active matter. Include document inventory, claim trace, contradictions, open proof gaps, and deadline signals.",
-      },
-      {
-        title: "Trace evidence",
-        detail: "Map claims to the strongest supporting documents",
-        prompt: selectedCase
-          ? `Trace claims to evidence for case #${selectedCase.id} (${selectedCase.title}). Show supporting documents, unsupported claims, and recommended follow-up.`
-          : "Trace claims to evidence for the active matter. Show supporting documents, unsupported claims, and recommended follow-up.",
-      },
-      {
-        title: "Deadline monitor",
-        detail: "Track live deadlines, obligations, and cure periods",
-        prompt: selectedCase
-          ? `Monitor deadlines and obligations for case #${selectedCase.id} (${selectedCase.title}). Identify notice windows, cure periods, renewal dates, and recommended next steps.`
-          : "Monitor deadlines and obligations for the active matter. Identify notice windows, cure periods, renewal dates, and recommended next steps.",
-      },
-      {
-        title: "Contract redline",
-        detail: "Draft clause-level edits and fallback positions",
-        prompt: selectedCase
-          ? `Draft a contract redline for case #${selectedCase.id} (${selectedCase.title}).${selectedDocument ? ` Focus on document #${selectedDocument.id} (${selectedDocument.filename}).` : " Focus on the most relevant contract document in the case file."} Include clause-level edits, fallback positions, risk notes, and source documents.`
-          : "Draft a contract redline for the active matter. Include clause-level edits, fallback positions, risk notes, and source documents.",
-      },
-    ],
-    [selectedCase, selectedDocument]
   );
   const showMinimalSearchOnly = !workspaceLoading
     && !caseContextLoading
@@ -2324,43 +2540,31 @@ export default function App() {
                   </select>
                 </label>
 
-                <div className="case-list">
-                  {filteredCases.length ? (
-                    filteredCases.map((item) => (
-                      <button
-                        key={item.id}
-                        className={`case-item ${selectedCaseId === item.id ? "active" : ""}`}
-                        onClick={() => setSelectedCaseId(item.id)}
-                        type="button"
-                      >
-                        <strong>{item.title}</strong>
-                        <small>
-                          {t("caseLabel", "Case")} #{item.id} | {item.jurisdiction_country}
-                        </small>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="muted">{t("noCasesForClient", "No cases found for selected client.")}</p>
-                  )}
-                </div>
-              </section>
+                <label>
+                  {t("caseLabel", "Case")}
+                  <select
+                    disabled={!filteredCases.length}
+                    value={selectedCaseId ?? ""}
+                    onChange={(event) => setSelectedCaseId(event.target.value ? Number(event.target.value) : null)}
+                  >
+                    {filteredCases.length ? (
+                      filteredCases.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.title} · #{item.id} · {item.jurisdiction_country}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">{t("noCasesForClient", "No cases found for selected client.")}</option>
+                    )}
+                  </select>
+                </label>
 
-              <section className="left-section">
-                <div className="section-heading">
-                  <div>
-                    <p className="section-kicker">Modules</p>
-                    <h3>Workspace Map</h3>
-                  </div>
-                  <span className="section-count">{workspaceModules.length}</span>
-                </div>
-                <div className="module-nav">
-                  {workspaceModules.map((module) => (
-                    <article key={module.title} className={`module-nav-item ${module.accent}`}>
-                      <strong>{module.title}</strong>
-                      <small>{module.detail}</small>
-                    </article>
-                  ))}
-                </div>
+                {selectedCase ? (
+                  <p className="muted">
+                    {selectedCase.jurisdiction_country} · {selectedCase.status}
+                    {selectedCase.case_number ? ` · ${selectedCase.case_number}` : ""}
+                  </p>
+                ) : null}
               </section>
 
               <section className="left-section">
@@ -2415,53 +2619,9 @@ export default function App() {
                 </div>
               </section>
 
-              <details className="left-extra-sections">
-                <summary>{t("moreWorkspaceTools", "Workspace tools")}</summary>
+              <section className="left-section left-extra-sections">
+                <h3>{t("moreWorkspaceTools", "Workspace tools")}</h3>
                 <div className="left-extra-body">
-                  <section className="left-section">
-                    <div className="history-heading-row">
-                      <h3>Prompt Library</h3>
-                      <div className="history-actions">
-                        <button
-                          className="ghost-button history-action"
-                          disabled={!chatInput.trim() || savingPromptTemplate}
-                          onClick={() => void saveCurrentPromptToLibrary()}
-                          type="button"
-                        >
-                          {savingPromptTemplate ? "Saving..." : "Save prompt"}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="history-list prompt-library-list">
-                      {promptLibraryEntries.length ? (
-                        promptLibraryEntries.slice(0, 8).map((entry) => (
-                          <article key={entry.id} className="history-item prompt-library-item">
-                            <button className="prompt-library-main" onClick={() => applyPromptLibraryEntry(entry)} type="button">
-                              <strong>{entry.title}</strong>
-                              <p>{entry.description || truncateText(entry.prompt_text, 96)}</p>
-                              <small>
-                                {(entry.category || "general").toUpperCase()}
-                                {" · "}
-                                {compactDateTime(entry.updated_at, dateLocale, t("noDate", "No date"))}
-                              </small>
-                            </button>
-                            <button
-                              aria-label={`Delete ${entry.title}`}
-                              className="ghost-button history-action prompt-library-delete"
-                              disabled={promptLibraryDeleteId === entry.id}
-                              onClick={() => void deletePromptLibraryEntry(entry.id)}
-                              type="button"
-                            >
-                              {promptLibraryDeleteId === entry.id ? "..." : "Delete"}
-                            </button>
-                          </article>
-                        ))
-                      ) : (
-                        <p className="muted">Save your best prompts here for drafting, legal research, and case workflows.</p>
-                      )}
-                    </div>
-                  </section>
-
                   <section className="left-section">
                     <h3>{t("ingestion", "Ingestion")}</h3>
                     <div className="quick-actions">
@@ -2499,10 +2659,10 @@ export default function App() {
                         type="button"
                       >
                         {uploadingScannedPhotos
-                          ? "Uploading photos..."
+                          ? "Uploading documents..."
                           : visionUiDisabled
-                            ? "Scanned photos unavailable"
-                            : "Upload scanned photos"}
+                            ? "Scanned documents unavailable"
+                            : "Upload scanned documents"}
                       </button>
                     </div>
                     <label className="composer-save-toggle ingestion-toggle">
@@ -2514,7 +2674,7 @@ export default function App() {
                       <span>Run authenticity screening only when needed</span>
                     </label>
                     {visionUiDisabled ? (
-                      <p className="muted">{visionUnavailableReason || "Scanned-photo OCR is unavailable right now."}</p>
+                      <p className="muted">{visionUnavailableReason || "Scanned-document OCR is unavailable right now."}</p>
                     ) : (
                       <p className="muted">
                         {runScannedAuthenticityCheck
@@ -2564,7 +2724,7 @@ export default function App() {
                     </div>
                   </section>
                 </div>
-              </details>
+              </section>
 
               <button className="ghost-button logout" onClick={logout} type="button">
                 {t("logout", "Logout")}
@@ -2625,7 +2785,12 @@ export default function App() {
                 <div className="bibliotheque-list">
                   {bibliothequeVisibleItems.length ? (
                     bibliothequeVisibleItems.map((item) => (
-                      <article key={item.id} className="bibliotheque-item">
+                      <button
+                        key={item.id}
+                        className="bibliotheque-item bibliotheque-item-button"
+                        onClick={() => void openLibraryPreview(item)}
+                        type="button"
+                      >
                         <div className="bibliotheque-item-head">
                           <strong>{item.title}</strong>
                           <span className={`bibliotheque-kind ${item.kind}`}>{item.kind.toUpperCase()}</span>
@@ -2633,7 +2798,7 @@ export default function App() {
                         <small>{item.subtitle}</small>
                         <small>{item.status}</small>
                         <small>{item.sizeLabel} · {item.createdAt}</small>
-                      </article>
+                      </button>
                     ))
                   ) : (
                     <p className="muted">No uploaded files match this filter.</p>
@@ -2667,8 +2832,9 @@ export default function App() {
                 {t("logout", "Logout")}
               </button>
             </>
-          )}
-        </aside>
+          )
+          }
+        </aside >
       ) : (
         <aside className="left-rail-collapsed glass" aria-label="Collapsed sidebar">
           <button
@@ -2818,98 +2984,8 @@ export default function App() {
           {error ? <div className="error-banner">{error}</div> : null}
 
           <div className={`chat-surface ${showMinimalSearchOnly ? "chat-surface-minimal" : ""}`}>
-            <section className="workflow-primary">
-              <h3>{t("recommendedWorkflows", "Recommended workflows")}</h3>
-              <div className="workflow-grid">
-                {suggestedActions.slice(0, 4).map((action) => (
-                  <button key={action} className="workflow-card" onClick={() => setChatInput(buildWorkflowSeedPrompt(action))} type="button">
-                    <strong>{action}</strong>
-                    <small>{t("draftLabel", "Draft")} · 2 steps</small>
-                  </button>
-                ))}
-              </div>
-              <div className="empty-chat-actions">
-                {suggestedActions.slice(4).map((action) => (
-                  <button key={action} className="ghost-button suggestion-chip" onClick={() => setChatInput(buildWorkflowSeedPrompt(action))} type="button">
-                    {action}
-                  </button>
-                ))}
-              </div>
-              <div className="workflow-grid">
-                {specialistLaunchers.map((launcher) => (
-                  <button
-                    key={launcher.title}
-                    className="workflow-card"
-                    onClick={() => launchSpecialistWorkflow(launcher.prompt)}
-                    type="button"
-                  >
-                    <strong>{launcher.title}</strong>
-                    <small>{launcher.detail}</small>
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <details className="composer-advanced">
-              <summary>{t("advancedPromptOptions", "Advanced prompt options")}</summary>
-              <div className="composer-tool-row">
-                <button
-                  className="composer-tool"
-                  onClick={() => setAttachmentMenuOpen((current) => !current)}
-                  type="button"
-                >
-                  {t("plusAttachmentsTitle", "Files and sources")}
-                </button>
-                <button
-                  className="composer-tool"
-                  onClick={() => setAttachmentMenuOpen(true)}
-                  type="button"
-                >
-                  {t("prompts", "Prompts")}
-                </button>
-                <button
-                  className="composer-tool"
-                  onClick={() => setAttachmentMenuOpen(true)}
-                  type="button"
-                >
-                  {t("customize", "Customize")}
-                </button>
-                <button
-                  className="composer-tool"
-                  onClick={() => setAttachmentMenuOpen(true)}
-                  type="button"
-                >
-                  {t("improve", "Improve")}
-                </button>
-              </div>
-              <div className="mode-chip-row">
-                <button
-                  className={`mode-chip ${externalModeEnabled ? "external" : ""}`}
-                  onClick={() => setExternalModeEnabled((current) => !current)}
-                  type="button"
-                >
-                  {t("deepResearch", "Deep research")}
-                </button>
-                <span className="mode-chip">
-                  {workspaceMode === "chat"
-                    ? t("modeChat", "Chat Mode")
-                    : workspaceMode === "agent"
-                      ? t("modeAgent", "Agent Mode")
-                      : t("modeLegalSearch", "Legal Search Mode")}
-                </span>
-                {externalModeEnabled ? <span className="mode-chip external">{t("modeExternal", "External Mode")}</span> : null}
-              </div>
-              <p className="composer-footnote">
-                {workspaceMode === "legal_search"
-                  ? t("legalSearchFootnote", "Legal Search Mode prioritizes jurisdiction-specific legal sources before fallback reasoning.")
-                  : workspaceMode === "agent"
-                    ? t("agentFootnote", "Agent Mode enables structured reasoning and legal workflow orchestration.")
-                    : t("chatFootnote", "Chat Mode provides conversational legal support grounded in your case context.")}
-              </p>
-            </details>
-
             <details
-              className="workspace-collapsible chat-history-collapsible"
+              className="workspace-collapsible chat-history-collapsible chat-history-collapsible-main"
               open={chatHistoryOpen}
               onToggle={(event) => setChatHistoryOpen((event.currentTarget as HTMLDetailsElement).open)}
             >
@@ -2922,7 +2998,7 @@ export default function App() {
                 {!activeMessages.length && !copilotLoading ? (
                   <div className="empty-chat conversation-empty">
                     <h3>{t("noConversationYet", "No conversation yet")}</h3>
-                    <p>{t("conversationHint", "Use the prompt box above to start.")}</p>
+                    <p>{t("conversationHint", "Use the prompt box below to start.")}</p>
                   </div>
                 ) : null}
 
@@ -2942,18 +3018,6 @@ export default function App() {
                 <div ref={messageEndRef} aria-hidden="true" />
               </div>
             </details>
-
-            <IntelligencePanel
-              analysis={null}
-              caseItem={selectedCase}
-              client={selectedClient}
-              consultations={consultations}
-              documents={documents}
-              language={language}
-              latestAssistantMessage={latestAssistantMessage}
-              onLaunchAction={launchSpecialistWorkflow}
-              recordings={recordings}
-            />
 
             <footer className="composer-shell">
               {attachmentMenuOpen ? (
@@ -3007,7 +3071,7 @@ export default function App() {
                   </div>
                   <div className="menu-group">
                     <small className="menu-group-title">{t("plusAttachmentsTitle", "Attachments")}</small>
-                    <p className="muted">Chat image analysis was removed. Use scanned-photo upload from the case workspace instead.</p>
+                    <p className="muted">Chat image analysis was removed. Use scanned-document upload from the case workspace instead.</p>
                   </div>
                 </div>
               ) : null}
@@ -3170,6 +3234,127 @@ export default function App() {
             </section>
           </div>
         ) : null}
+
+        {libraryPreviewItem ? (
+          <div className="bibliotheque-preview-backdrop" onClick={closeLibraryPreview}>
+            <section
+              aria-label={`Preview ${libraryPreviewItem.title}`}
+              aria-modal="true"
+              className="bibliotheque-preview-card glass"
+              onClick={(event) => event.stopPropagation()}
+              role="dialog"
+            >
+              <header className="bibliotheque-preview-header">
+                <div>
+                  <p className="section-kicker">Library preview</p>
+                  <h3>{libraryPreviewItem.title}</h3>
+                  <p className="bibliotheque-preview-meta">
+                    {libraryPreviewItem.subtitle} · {libraryPreviewItem.status}
+                  </p>
+                </div>
+                <div className="bibliotheque-preview-actions">
+                  {libraryPreviewBatch?.generated_document?.id ? (
+                    <button
+                      className="ghost-button history-action"
+                      onClick={() => void openLibraryGeneratedDocument(libraryPreviewBatch.generated_document!.id)}
+                      type="button"
+                    >
+                      Open generated document
+                    </button>
+                  ) : null}
+                  <button className="ghost-button history-action" onClick={closeLibraryPreview} type="button">
+                    Close
+                  </button>
+                </div>
+              </header>
+
+              {libraryPreviewLoading ? (
+                <div className="bibliotheque-preview-loading">Opening preview...</div>
+              ) : libraryPreviewError ? (
+                <div className="bibliotheque-preview-error">{libraryPreviewError}</div>
+              ) : libraryPreviewMarkdownText ? (
+                <div className="bibliotheque-preview-markdown-shell">
+                  <article className="bibliotheque-preview-markdown-paper">
+                    {libraryPreviewMarkdownBlocks.map((block, index) => {
+                      if (block.kind === "heading") {
+                        const HeadingTag = (`h${Math.min(3, Math.max(1, block.level))}` as const);
+                        return (
+                          <HeadingTag key={`${block.kind}-${index}`} className={`markdown-heading level-${block.level}`}>
+                            {block.text}
+                          </HeadingTag>
+                        );
+                      }
+
+                      if (block.kind === "list") {
+                        return (
+                          <ul key={`${block.kind}-${index}`} className="markdown-list">
+                            {block.items.map((item, itemIndex) => (
+                              <li key={`${block.kind}-${index}-${itemIndex}`}>{item}</li>
+                            ))}
+                          </ul>
+                        );
+                      }
+
+                      return (
+                        <p key={`${block.kind}-${index}`} className="markdown-paragraph">
+                          {block.text}
+                        </p>
+                      );
+                    })}
+                  </article>
+                </div>
+              ) : libraryPreviewItem.kind === "pdf" && libraryPreviewUrl ? (
+                <iframe className="bibliotheque-preview-frame" src={libraryPreviewUrl} title={libraryPreviewItem.title} />
+              ) : libraryPreviewItem.kind === "voice" && libraryPreviewUrl ? (
+                <div className="bibliotheque-preview-voice">
+                  <audio autoPlay controls src={libraryPreviewUrl} />
+                  <p className="muted">Use the audio controls to play the recording in place.</p>
+                </div>
+              ) : libraryPreviewItem.kind === "image" ? (
+                <div className="bibliotheque-preview-image-shell">
+                  <div className="bibliotheque-preview-image-main">
+                    {libraryPreviewAssets.length ? (
+                      <img
+                        alt={libraryPreviewAssets.find((asset) => asset.id === libraryPreviewAssetId)?.filename || libraryPreviewAssets[0].filename}
+                        src={
+                          libraryPreviewAssets.find((asset) => asset.id === libraryPreviewAssetId)?.url || libraryPreviewAssets[0].url
+                        }
+                      />
+                    ) : (
+                      <div className="bibliotheque-preview-loading">No image pages were returned for this batch.</div>
+                    )}
+                  </div>
+
+                  {libraryPreviewBatch?.generated_document?.id ? (
+                    <div className="bibliotheque-preview-note">
+                      <strong>Generated document available</strong>
+                      <p>
+                        This image batch produced document #{libraryPreviewBatch.generated_document.id}. Open it from the
+                        button above to read the generated case document.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {libraryPreviewAssets.length > 1 ? (
+                    <div className="bibliotheque-preview-thumbs">
+                      {libraryPreviewAssets.map((asset) => (
+                        <button
+                          key={asset.id}
+                          className={`bibliotheque-preview-thumb ${libraryPreviewAssetId === asset.id ? "active" : ""}`}
+                          onClick={() => setLibraryPreviewAssetId(asset.id)}
+                          type="button"
+                        >
+                          <img alt={asset.filename} src={asset.url} />
+                          <span>{asset.pageOrder ?? asset.id}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+          </div>
+        ) : null}
       </main>
 
       <input
@@ -3188,13 +3373,13 @@ export default function App() {
       />
       <input
         ref={scannedPhotoInputRef}
-        accept="image/*"
+        accept="image/*,.pdf,application/pdf"
         multiple
         onChange={onScannedPhotosSelected}
         style={{ display: "none" }}
         type="file"
       />
-    </div>
+    </div >
   );
 }
 

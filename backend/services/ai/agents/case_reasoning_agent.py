@@ -245,6 +245,7 @@ class CaseReasoningAgent(BaseAgent):
             has_governing_law_signal=has_governing_law_signal,
             has_payment_terms_signal=has_payment_terms_signal,
         )
+        risks = self._clean_legal_risks(risks=risks, parties=parties)
         main_issues = self._clean_main_issues(
             issues=main_issues,
             has_governing_law_signal=has_governing_law_signal,
@@ -386,6 +387,41 @@ class CaseReasoningAgent(BaseAgent):
         return cleaned
 
     @classmethod
+    def _clean_legal_risks(
+        cls,
+        *,
+        risks: list[str],
+        parties: list[str],
+    ) -> list[str]:
+        cleaned: list[str] = []
+        has_clear_parties = len([item for item in parties if cls._normalize_text(item)]) >= 2
+
+        for risk in risks:
+            item = risk.strip()
+            if not item:
+                continue
+
+            if cls._looks_like_prompt_noise(item):
+                continue
+
+            lowered = item.lower()
+            if has_clear_parties and any(
+                fragment in lowered
+                for fragment in [
+                    "unclear contractual parties",
+                    "unclear parties",
+                    "parties are unclear",
+                    "party identification is unclear",
+                ]
+            ):
+                continue
+
+            if item not in cleaned:
+                cleaned.append(item)
+
+        return cleaned
+
+    @classmethod
     def _looks_like_prompt_noise(cls, value: str) -> bool:
         candidate = str(value or "").strip().lower()
         if not candidate:
@@ -443,6 +479,8 @@ You are the Case Reasoning Agent inside a legal AI platform.
 
 You receive grounded case intelligence that came from documents, intake records, and voice transcripts.
 Your job is to synthesize that information into a clean case brief without inventing facts.
+    Prioritize a partner-ready reading of the file: state the dispute posture, identify the controlling contract or legal hooks, surface the most consequential dates, and rank the exposure from highest to lowest.
+    When the case is commercial or contract-driven, foreground breach, notice, payment, SLA, liability, and jurisdiction signals before broader commentary.
 
 {AgentOutputFormatter.build_quality_guidance(task="reason over case evidence and produce a structured legal brief", structured_json=True)}
 

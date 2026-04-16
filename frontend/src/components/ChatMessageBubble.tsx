@@ -85,6 +85,18 @@ const BUBBLE_TEXT: Record<UiLanguage, Record<string, string>> = {
 };
 
 const KEYWORD_PATTERN = /\b(risk|deadline|urgent|liability|evidence|article|section|compliance|penalty)\b/gi;
+const KNOWN_BARE_SECTION_TITLES = new Set([
+  "summary",
+  "document inventory",
+  "claim trace",
+  "contradictions",
+  "contradictions to resolve",
+  "live deadlines and date signals",
+  "live deadlines",
+  "open proof gaps",
+  "recommended next steps",
+  "evidence reviewed",
+]);
 
 function formatMessageTime(value: string, language: UiLanguage): string {
   const locale = language === "de" ? "de-DE" : language === "ar" ? "ar-TN" : "en-US";
@@ -104,6 +116,12 @@ function parseSections(content: string, defaultTitle: string): MessageSection[] 
   const lines = content.split(/\r?\n/);
   const sections: MessageSection[] = [];
   let current: MessageSection = { title: defaultTitle, paragraphs: [], bullets: [] };
+
+  const isBareSectionTitle = (line: string): boolean => {
+    const normalized = line.trim().toLowerCase();
+    if (!normalized || normalized.length > 48) return false;
+    return KNOWN_BARE_SECTION_TITLES.has(normalized);
+  };
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -136,12 +154,24 @@ function parseSections(content: string, defaultTitle: string): MessageSection[] 
       continue;
     }
 
+    if (isBareSectionTitle(line)) {
+      if (current.paragraphs.length || current.bullets.length) {
+        sections.push(current);
+      }
+      current = {
+        title: line,
+        paragraphs: [],
+        bullets: [],
+      };
+      continue;
+    }
+
     if (line.startsWith("- ") || line.startsWith("* ")) {
       current.bullets.push(line.slice(2).trim());
       continue;
     }
 
-    const numberedBullet = line.match(/^\d+\.\s+(.+)/);
+    const numberedBullet = line.match(/^\d+[\).]\s+(.+)/);
     if (numberedBullet) {
       current.bullets.push(numberedBullet[1].trim());
       continue;

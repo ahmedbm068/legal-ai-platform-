@@ -86,6 +86,9 @@ class CommandParsingService:
         "case snapshot",
     ]
     EVIDENCE_TRACE_KEYWORDS = [
+        "what evidence supports",
+        "evidence supports",
+        "trace the evidence",
         "trace evidence",
         "evidence trace",
         "claim trace",
@@ -151,6 +154,23 @@ class CommandParsingService:
         "term sheet",
         "package",
         "settlement structure",
+    ]
+    INTERNAL_EMAIL_KEYWORDS = [
+        "internal update",
+        "supervising lawyer",
+        "lawyer update",
+        "internal memo",
+        "team update",
+        "partner update",
+        "supervisor update",
+    ]
+    STRATEGY_NOTE_KEYWORDS = [
+        "partner-ready",
+        "partner ready",
+        "strategy note",
+        "legal strategy note",
+        "strategy memo",
+        "strategy memorandum",
     ]
     CASE_STATUS_PATTERN = re.compile(
         r"\b(open|in\s+progress|in_progress|closed|archived)\b",
@@ -370,6 +390,16 @@ class CommandParsingService:
 
         if self._contains_any(lowered, self.NEGOTIATION_KEYWORDS) and self._contains_any(lowered, self.NEGOTIATION_STRATEGY_KEYWORDS):
             return "draft_negotiation_strategy", "high"
+
+        if self._contains_any(lowered, self.STRATEGY_NOTE_KEYWORDS):
+            if target_type == "case" or self._contains_any(lowered, ["case", "matter", "workspace"]):
+                return "draft_partner_strategy_note_case", "high"
+            return "draft_partner_strategy_note_case", "medium"
+
+        if self._contains_any(lowered, self.INTERNAL_EMAIL_KEYWORDS):
+            if target_type == "case" or self._contains_any(lowered, ["case", "matter", "workspace"]):
+                return "draft_internal_email_case", "high"
+            return "draft_internal_email_case", "medium"
 
         # Handle compound requests first: "summarize ... and analyze risks ..."
         if target_type == "case":

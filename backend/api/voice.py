@@ -16,6 +16,7 @@ from backend.models.case import Case
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
 from backend.services.ai.transcription_service import transcription_service
+from backend.services.storage_service import stream_file_response
 from backend.services.use_cases.ingestion_use_case import ingestion_use_case
 
 
@@ -139,6 +140,20 @@ def get_recording(
         db.refresh(recording)
 
     return recording
+
+
+@router.get("/{recording_id}/file")
+def get_recording_file(
+    recording_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    recording = get_tenant_recording_or_404(db=db, recording_id=recording_id, current_user=current_user)
+    return stream_file_response(
+        recording.storage_path,
+        media_type=recording.mime_type or "application/octet-stream",
+        filename=recording.filename,
+    )
 
 
 @router.post("/upload", response_model=VoiceUploadResponse, status_code=status.HTTP_201_CREATED)

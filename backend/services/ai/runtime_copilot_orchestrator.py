@@ -273,6 +273,8 @@ class RuntimeCopilotOrchestrator:
             preoptimized_query=optimized_message,
             allowed_case_ids=allowed_case_ids,
             allowed_document_ids=allowed_document_ids,
+            case_context=case_context,
+            case_snapshot=snapshot_payload,
         )
         self._append_stage(
             stage_records,

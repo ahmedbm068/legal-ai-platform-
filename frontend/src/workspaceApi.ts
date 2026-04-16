@@ -15,6 +15,7 @@ import type {
   EvidenceReviewListResponse,
   FullDocumentAnalysis,
   ImageBatchUploadResponse,
+  ImageBatchDetailResponse,
   ImageDocumentBatch,
   JurisdictionCountry,
   LLMTestResponse,
@@ -59,6 +60,27 @@ interface RequestOptions {
   body?: unknown;
   formData?: FormData;
   timeoutMs?: number;
+}
+
+async function requestBlob(path: string, token: string): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const payload = (await response.json()) as { detail?: string };
+      throw new Error(payload.detail || `Request failed with status ${response.status}`);
+    }
+
+    const textResponse = await response.text();
+    throw new Error(textResponse || `Request failed with status ${response.status}`);
+  }
+
+  return response.blob();
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -197,6 +219,8 @@ export const workspaceApi = {
       token,
     }),
 
+  getDocumentFile: (token: string, documentId: number) => requestBlob(`/documents/${documentId}/file`, token),
+
   uploadDocument: (token: string, caseId: number, file: File) => {
     const formData = new FormData();
     formData.append("file", file);
@@ -237,6 +261,13 @@ export const workspaceApi = {
     request<ImageDocumentBatch[]>(`/documents/case/${caseId}/image-batches`, {
       token,
     }),
+
+  getImageBatch: (token: string, batchId: number) =>
+    request<ImageBatchDetailResponse>(`/documents/image-batches/${batchId}`, {
+      token,
+    }),
+
+  getImageAssetFile: (token: string, assetId: number) => requestBlob(`/documents/image-assets/${assetId}/file`, token),
 
   listEvidenceReviews: (token: string, caseId: number) =>
     request<EvidenceReviewListResponse>(`/evidence-reviews/case/${caseId}`, {
@@ -290,6 +321,8 @@ export const workspaceApi = {
     request<VoiceRecording[]>(`/voice/case/${caseId}`, {
       token,
     }),
+
+  getVoiceRecordingFile: (token: string, recordingId: number) => requestBlob(`/voice/${recordingId}/file`, token),
 
   uploadVoiceRecording: (token: string, caseId: number, file: File) => {
     const formData = new FormData();

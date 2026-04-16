@@ -35,7 +35,11 @@ class DocumentAIPipeline:
             self._mark_processing(db=db, document=document, status_value="processing", error=None)
 
             temp_file_path = download_file_to_temp(document.storage_path)
-            text = extract_text_from_file(temp_file_path)
+            text = extract_text_from_file(
+                temp_file_path,
+                filename=document.filename,
+                use_ocr_fallback=True,
+            )
             text = normalize_text(text)
 
             if not text.strip():

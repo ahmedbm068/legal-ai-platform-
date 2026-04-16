@@ -1,0 +1,222 @@
+{
+  "generated_at_utc": "2026-04-13T13:40:39.898089+00:00",
+  "base_url": "http://127.0.0.1:8043",
+  "case_id": 15,
+  "suite_path": "scripts\\evals\\default_eval_suite.json",
+  "total": 5,
+  "passed": 1,
+  "failed": 4,
+  "pass_rate": 0.2,
+  "results": [
+    {
+      "id": "summary_case_paragraph_only_01",
+      "prompt": "Summarize case #15",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "medium",
+      "duration_ms": 618.3971000136808,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Document 1 (",
+          "passed": false,
+          "detail": "must contain 'Document 1 ('"
+        },
+        {
+          "name": "contains:Document 2 (",
+          "passed": false,
+          "detail": "must contain 'Document 2 ('"
+        },
+        {
+          "name": "not_contains:Main Issues:",
+          "passed": true,
+          "detail": "must not contain 'Main Issues:'"
+        },
+        {
+          "name": "not_contains:Key Dates:",
+          "passed": true,
+          "detail": "must not contain 'Key Dates:'"
+        },
+        {
+          "name": "not_contains:Legal Risks:",
+          "passed": true,
+          "detail": "must not contain 'Legal Risks:'"
+        },
+        {
+          "name": "not_contains:Risk Assessment:",
+          "passed": true,
+          "detail": "must not contain 'Risk Assessment:'"
+        },
+        {
+          "name": "not_contains:Recommended Next Steps:",
+          "passed": false,
+          "detail": "must not contain 'Recommended Next Steps:'"
+        },
+        {
+          "name": "not_contains:Practical Next Steps:",
+          "passed": true,
+          "detail": "must not contain 'Practical Next Steps:'"
+        },
+        {
+          "name": "max_answer_chars",
+          "passed": true,
+          "detail": "chars=1973, max=2800"
+        }
+      ],
+      "answer_preview": "Case #15 resume:\n\nOverall Case Overview:\nCase 15 - Eval Case 1410 The case currently contains 2 document(s). Detected document types: contract, legal_letter. Main parties detected: Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova. The active cou"
+    },
+    {
+      "id": "summary_case_paragraph_only_06",
+      "prompt": "Summarize all documents in case #15 with one paragraph per document.",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "summarize_case",
+      "confidence": "medium",
+      "duration_ms": 99.99010001774877,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected summarize_case, got summarize_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Document 1 (",
+          "passed": false,
+          "detail": "must contain 'Document 1 ('"
+        },
+        {
+          "name": "contains:Document 2 (",
+          "passed": false,
+          "detail": "must contain 'Document 2 ('"
+        }
+      ],
+      "answer_preview": "Case #15 summary:\n\n- Case posture: Case 15 - Eval Case 1410 The case currently contains 2 document(s). Detected document types: contract, legal_letter. Main parties detected: Master Service Agreement between Atlas Retail Group SARL, Nova Logistics Tunisia SARL, Atlas Retail Group SARL, Atlas, Nova."
+    },
+    {
+      "id": "risk_only_01",
+      "prompt": "Analyze risks for case #15.",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "medium",
+      "duration_ms": 97.89259999524802,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected legal risks for case",
+          "passed": false,
+          "detail": "must contain 'Detected legal risks for case'"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 15 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf\n2. HIGH | Legal | Termination rights are triggered by material breach and repeated SLA failure | Sources: eval_notice.pdf, eval_"
+    },
+    {
+      "id": "risk_only_02_single",
+      "prompt": "Give me only one risk for case #15.",
+      "passed": false,
+      "status_code": 200,
+      "parsed_intent": "analyze_risks_case",
+      "confidence": "medium",
+      "duration_ms": 87.75880001485348,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected analyze_risks_case, got analyze_risks_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected legal risks for case",
+          "passed": false,
+          "detail": "must contain 'Detected legal risks for case'"
+        },
+        {
+          "name": "max_bullets",
+          "passed": true,
+          "detail": "bullets=0, max=1"
+        }
+      ],
+      "answer_preview": "Top legal risks for case 15 (ranked high to low):\n\n1. HIGH | Legal | Nova disputes material breach characterization and proposes corrective steps | Sources: eval_notice.pdf, eval_contract.pdf"
+    },
+    {
+      "id": "deadlines_01",
+      "prompt": "List deadlines for case #15.",
+      "passed": true,
+      "status_code": 200,
+      "parsed_intent": "list_deadlines_case",
+      "confidence": "high",
+      "duration_ms": 26.834000018425286,
+      "assertions": [
+        {
+          "name": "intent_match",
+          "passed": true,
+          "detail": "expected list_deadlines_case, got list_deadlines_case"
+        },
+        {
+          "name": "target_type_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "scope_match",
+          "passed": true,
+          "detail": "expected case, got case"
+        },
+        {
+          "name": "contains:Detected",
+          "passed": true,
+          "detail": "must contain 'Detected'"
+        }
+      ],
+      "answer_preview": "Detected deadlines and time-related obligations for case 15:\n\nDeadlines / Due Dates:\n- April 3, 2026 (Corrective action report due) - eval_notice.pdf\n\nNotice Periods:\n- March 29, 2026 (Notice date) - eval_notice.pdf"
+    }
+  ]
+}

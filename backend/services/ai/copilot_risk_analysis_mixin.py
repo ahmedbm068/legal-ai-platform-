@@ -260,14 +260,13 @@ class CopilotRiskAnalysisMixin:
         wants_legal: bool,
         wants_operational: bool,
     ) -> str:
-        if wants_legal and wants_operational:
-            scope = "legal and operational"
-        elif wants_operational:
-            scope = "operational"
-        else:
-            scope = "legal"
+        header = f"Detected legal risks for case {case_id} (ranked high to low):"
+        if wants_operational and not wants_legal:
+            header = f"Detected legal risks for case {case_id} (operational signals, ranked high to low):"
+        elif wants_legal and wants_operational:
+            header = f"Detected legal risks for case {case_id} (including operational signals, ranked high to low):"
 
-        lines = [f"Top {scope} risks for case {case_id} (ranked high to low):", ""]
+        lines = [header, ""]
         for index, item in enumerate(ranked_entries[:target_count], start=1):
             source_values = item.get("sources") or []
             source_text = ", ".join(source_values[:3]) if source_values else "Case evidence synthesis"

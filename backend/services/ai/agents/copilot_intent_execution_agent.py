@@ -21,6 +21,8 @@ class CopilotIntentExecutionContext:
     preoptimized_query: Optional[str]
     normalized_allowed_case_ids: Optional[set[int]]
     normalized_allowed_document_ids: Optional[set[int]]
+    case_context: Dict[str, Any] | None = None
+    case_snapshot: Dict[str, Any] | None = None
 
 
 class CopilotIntentExecutionAgent:
@@ -182,6 +184,16 @@ class CopilotIntentExecutionAgent:
                 tenant_id=ctx.tenant_id,
                 case_id=ctx.parsed["case_id"],
             ),
+            "draft_internal_email_case": lambda: runtime._draft_internal_email_for_case(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                case_id=ctx.parsed["case_id"],
+            ),
+            "draft_partner_strategy_note_case": lambda: runtime._draft_partner_strategy_note_for_case(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                case_id=ctx.parsed["case_id"],
+            ),
             "compare_case_documents": lambda: runtime._compare_case_documents(
                 db=ctx.db,
                 tenant_id=ctx.tenant_id,
@@ -191,6 +203,8 @@ class CopilotIntentExecutionAgent:
                 objective=ctx.parsed.get("clean_query") or ctx.parsed.get("raw_message") or ctx.message,
                 horizon_days=ctx.parsed.get("requested_horizon_days") or ctx.parsed.get("requested_count"),
                 use_external_research=ctx.use_external_research,
+                case_context=ctx.case_context,
+                case_snapshot=ctx.case_snapshot,
             ),
             "ask_document": lambda: runtime._answer_with_optional_external_research(
                 db=ctx.db,

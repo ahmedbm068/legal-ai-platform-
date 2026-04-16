@@ -171,7 +171,10 @@ function iconFor(key: CardKey): string {
 function extractRiskLines(text: string): string[] {
   if (!text.trim()) return [];
   const rows = text
+    .replace(/\s+(?=\d+[\).]\s+)/g, "\n")
     .split(/\r?\n/)
+    .map((line) => line.trim())
+    .flatMap((line) => line.split(/\s+(?=\d+[\).]\s+)/g))
     .map((line) => line.trim())
     .filter(Boolean)
     .filter((line) => /risk|deadline|exposure|penalty|breach|liability/i.test(line))
