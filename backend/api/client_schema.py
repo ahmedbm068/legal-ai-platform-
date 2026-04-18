@@ -8,7 +8,7 @@ class ClientCreate(BaseModel):
 
     name: str = Field(..., min_length=2, max_length=160)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(default=None, max_length=40)
+    phone: str = Field(..., min_length=5, max_length=40)
     address: Optional[str] = Field(default=None, max_length=255)
 
 

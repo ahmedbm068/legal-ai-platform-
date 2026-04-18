@@ -2,16 +2,43 @@ from __future__ import annotations
 
 import logging
 import os
+import re
+from datetime import datetime, timezone
 
 from backend.database.database import SessionLocal
+from backend.models.call_session import CallSession
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.voice_recording import VoiceRecording
 from backend.services.ai.agents.intake_agent import intake_agent
 from backend.services.ai.transcription_service import transcription_service
 from backend.services.storage_service import download_file_to_temp
+from backend.services.call_transcript_service import build_conversation_transcript
 
 
 logger = logging.getLogger(__name__)
+
+
+def build_call_summary(transcript_text: str | None) -> str | None:
+    clean_text = " ".join((transcript_text or "").split())
+    if not clean_text:
+        return None
+
+    sentences = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", clean_text) if segment.strip()]
+    if not sentences:
+        return clean_text[:500].rstrip()
+
+    summary_sentences: list[str] = []
+    summary_length = 0
+    for sentence in sentences:
+        summary_sentences.append(sentence)
+        summary_length += len(sentence)
+        if len(summary_sentences) >= 3 or summary_length >= 420:
+            break
+
+    summary = " ".join(summary_sentences).strip()
+    if len(summary) > 520:
+        summary = summary[:517].rsplit(" ", 1)[0].rstrip() + "..."
+    return summary
 
 
 def process_voice_recording(recording_id: int, consultation_request_id: int | None = None) -> None:
@@ -37,12 +64,41 @@ def process_voice_recording(recording_id: int, consultation_request_id: int | No
             recording.transcript_text = transcription["text"]
             recording.transcript_source = transcription["source"]
             recording.transcript_language = transcription["language"]
+            recording.conversation_transcript_text = (
+                str(transcription.get("conversation_text") or "").strip() or None
+                or build_conversation_transcript(recording.transcript_text)
+            )
         else:
             recording.transcription_status = "failed"
             recording.transcription_error = transcription["error"]
             recording.transcript_text = None
+            recording.conversation_transcript_text = None
             recording.transcript_source = transcription["source"]
             recording.transcript_language = transcription["language"]
+
+        if recording.call_session_id:
+            call_session = (
+                db.query(CallSession)
+                .filter(CallSession.id == recording.call_session_id)
+                .first()
+            )
+            if call_session:
+                call_session.recording_status = recording.transcription_status
+                call_session.transcript_text = recording.transcript_text
+                call_session.conversation_transcript_text = recording.conversation_transcript_text
+                call_session.transcript_source = recording.transcript_source
+                call_session.transcription_error = recording.transcription_error
+                call_session.ended_at = call_session.ended_at or datetime.now(timezone.utc)
+
+                if recording.transcription_status == "completed" and recording.transcript_text:
+                    call_session.call_status = "completed"
+                    call_session.summary_status = "completed"
+                    call_session.summary_text = build_call_summary(
+                        recording.conversation_transcript_text or recording.transcript_text
+                    )
+                else:
+                    call_session.call_status = "failed"
+                    call_session.summary_status = "failed"
 
         if consultation_request_id and recording.transcription_status == "completed" and recording.transcript_text:
             consultation = (

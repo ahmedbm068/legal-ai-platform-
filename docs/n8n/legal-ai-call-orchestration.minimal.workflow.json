@@ -1,0 +1,29 @@
+{
+    "name": "Legal AI - Call Orchestration",
+    "nodes": [
+        {
+            "parameters": {
+                "path": "legal-ai/call-events",
+                "httpMethod": "POST",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "1",
+            "name": "Backend Consent Event",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                320,
+                300
+            ],
+            "webhookId": "legal-ai-call-orchestration"
+        }
+    ],
+    "connections": {},
+    "active": false,
+    "settings": {
+        "executionOrder": "v1",
+        "timezone": "UTC"
+    },
+    "tags": []
+}

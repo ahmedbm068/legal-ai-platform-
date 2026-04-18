@@ -16,6 +16,8 @@ class User(Base):
 
     email = Column(String, unique=True, index=True, nullable=False)
 
+    phone = Column(String, nullable=True)
+
     hashed_password = Column(String, nullable=False)
 
     role = Column(

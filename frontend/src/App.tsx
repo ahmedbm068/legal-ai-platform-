@@ -11,9 +11,12 @@ import {
 } from "react";
 import { workspaceApi as api } from "./workspaceApi";
 import ChatMessageBubble, { type MessageFeedbackState } from "./components/ChatMessageBubble";
+import CaseCalendarPanel from "./components/CaseCalendarPanel";
 import type {
   CaseItem,
   ChatMessage,
+  CallSession,
+  CalendarAppointment,
   Client,
   ConsultationRequest,
   DocumentItem,
@@ -41,7 +44,7 @@ type UiLanguage = "en" | "de" | "ar";
 type WorkspaceMode = "chat" | "agent" | "legal_search";
 type ReasoningLevel = "low" | "medium" | "high";
 type FeedbackValue = "up" | "down";
-type SidebarTab = "navigator" | "bibliotheque";
+type SidebarTab = "navigator" | "bibliotheque" | "calendar";
 type LibraryFilter = "all" | "pdf" | "voice" | "image";
 
 interface BibliothequeItem {
@@ -97,6 +100,9 @@ interface AuthFormState {
   password: string;
   role: "admin" | "lawyer" | "assistant";
 }
+
+const DEFAULT_LAWYER_PHONE = "+216 24 996 073";
+const CHAT_GLOBAL_SCOPE_ID = 0;
 
 interface ChatSession {
   id: string;
@@ -709,6 +715,8 @@ export default function App() {
   const [cases, setCases] = useState<CaseItem[]>([]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [recordings, setRecordings] = useState<VoiceRecording[]>([]);
+  const [callSessions, setCallSessions] = useState<CallSession[]>([]);
+  const [calendarAppointments, setCalendarAppointments] = useState<CalendarAppointment[]>([]);
   const [consultations, setConsultations] = useState<ConsultationRequest[]>([]);
   const [imageBatches, setImageBatches] = useState<ImageDocumentBatch[]>([]);
   const [evidenceReviews, setEvidenceReviews] = useState<EvidenceAnalysisReview[]>([]);
@@ -718,6 +726,11 @@ export default function App() {
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<number | null>(null);
+  const [activeCallSessionId, setActiveCallSessionId] = useState<number | null>(null);
+  const [lawyerPhoneDraft, setLawyerPhoneDraft] = useState(DEFAULT_LAWYER_PHONE);
+  const [callNotesDraft, setCallNotesDraft] = useState("");
+  const [creatingCallSession, setCreatingCallSession] = useState(false);
+  const [savingLawyerPhone, setSavingLawyerPhone] = useState(false);
 
   const [leftRailOpen, setLeftRailOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("navigator");
@@ -761,6 +774,7 @@ export default function App() {
   const [uploadingScannedPhotos, setUploadingScannedPhotos] = useState(false);
   const [runScannedAuthenticityCheck, setRunScannedAuthenticityCheck] = useState(false);
   const [recordingVoice, setRecordingVoice] = useState(false);
+  const [summarizingCallRecordingId, setSummarizingCallRecordingId] = useState<number | null>(null);
   const [composerRecording, setComposerRecording] = useState(false);
   const [composerTranscribing, setComposerTranscribing] = useState(false);
   const [optimizingPrompt, setOptimizingPrompt] = useState(false);
@@ -791,6 +805,8 @@ export default function App() {
   const messageAnimationTimeoutsRef = useRef<Record<string, number>>({});
   const libraryPreviewObjectUrlsRef = useRef<string[]>([]);
   const libraryPreviewRequestIdRef = useRef(0);
+  const callRecordingFollowUpTimeoutRef = useRef<number | null>(null);
+  const copilotAbortControllerRef = useRef<AbortController | null>(null);
 
   const t = useCallback(
     (key: string, fallback: string) => APP_TEXT[language]?.[key] || APP_TEXT.en[key] || fallback,
@@ -799,6 +815,7 @@ export default function App() {
   const dateLocale = language === "de" ? "de-DE" : language === "ar" ? "ar-TN" : "en-US";
   const chatSessionsByCase = chatState.sessionsByCase;
   const activeSessionIdByCase = chatState.activeSessionIdByCase;
+  const activeChatScopeId = selectedCaseId ?? CHAT_GLOBAL_SCOPE_ID;
 
   const selectedCase = useMemo(
     () => cases.find((item) => item.id === selectedCaseId) || null,
@@ -808,23 +825,26 @@ export default function App() {
     () => documents.find((item) => item.id === selectedDocumentId) || null,
     [documents, selectedDocumentId]
   );
+  const activeCallSession = useMemo(
+    () => callSessions.find((item) => item.id === activeCallSessionId) || null,
+    [activeCallSessionId, callSessions]
+  );
   const selectedClient = useMemo(
     () => clients.find((item) => item.id === selectedClientId) || null,
     [clients, selectedClientId]
   );
   const activeSessions = useMemo(
-    () => (selectedCaseId ? chatSessionsByCase[selectedCaseId] || [] : []),
-    [chatSessionsByCase, selectedCaseId]
+    () => chatSessionsByCase[activeChatScopeId] || [],
+    [chatSessionsByCase, activeChatScopeId]
   );
   const activeChatSessionId = useMemo(() => {
-    if (!selectedCaseId) return null;
-    const explicit = activeSessionIdByCase[selectedCaseId];
+    const explicit = activeSessionIdByCase[activeChatScopeId];
     if (explicit && activeSessions.some((session) => session.id === explicit)) {
       return explicit;
     }
     return [...activeSessions]
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]?.id ?? null;
-  }, [activeSessionIdByCase, activeSessions, selectedCaseId]);
+  }, [activeSessionIdByCase, activeSessions, activeChatScopeId]);
   const activeSession = useMemo(
     () => activeSessions.find((session) => session.id === activeChatSessionId) || null,
     [activeSessions, activeChatSessionId]
@@ -847,6 +867,16 @@ export default function App() {
         promptCount: session.messages.filter((message) => message.role === "user").length,
       }));
   }, [activeSessions]);
+  const chatStarterPrompts = useMemo(() => {
+    const caseAwarePrompt = selectedCase
+      ? `Summarize the main legal risks in case #${selectedCase.id} and propose the next 5 actions.`
+      : "Help me structure a legal issue analysis in 5 clear steps.";
+    return [
+      caseAwarePrompt,
+      "Draft a professional client update email about current legal posture and next steps.",
+      "Create a deadline checklist and missing-information list for this matter.",
+    ];
+  }, [selectedCase]);
   const visionUnavailableReason = useMemo(() => {
     if (providerStatus?.vision_available) return null;
     return (
@@ -1038,8 +1068,9 @@ export default function App() {
 
         if (requestId !== libraryPreviewRequestIdRef.current) return;
         setLibraryPreviewBatch(batchDetail);
-        setLibraryPreviewAssets(assetPreviews.filter((asset): asset is LibraryPreviewAsset => asset !== null));
-        setLibraryPreviewAssetId(assetPreviews.find((asset): asset is LibraryPreviewAsset => asset !== null)?.id ?? null);
+        const validAssetPreviews = assetPreviews.filter((asset) => asset !== null) as LibraryPreviewAsset[];
+        setLibraryPreviewAssets(validAssetPreviews);
+        setLibraryPreviewAssetId(validAssetPreviews[0]?.id ?? null);
       } catch (caught) {
         if (requestId !== libraryPreviewRequestIdRef.current) return;
         setLibraryPreviewError(normalizeError(caught, t("unableOpenPreview", "Unable to open preview.")));
@@ -1223,9 +1254,11 @@ export default function App() {
       if (!token) return;
       setCaseContextLoading(true);
       try {
-        const [docs, voiceRows, consultationRows, imageBatchRows, reviewRows, reviewTableRows] = await Promise.all([
+        const [docs, voiceRows, callRows, calendarRows, consultationRows, imageBatchRows, reviewRows, reviewTableRows] = await Promise.all([
           api.listCaseDocuments(token, caseId),
           api.listVoiceRecordings(token, caseId),
+          api.listCallSessions(token, caseId),
+          api.listCalendarAppointments(token, caseId),
           api.listConsultationRequests(token, caseId),
           api.listCaseImageBatches(token, caseId),
           api.listEvidenceReviews(token, caseId),
@@ -1233,6 +1266,8 @@ export default function App() {
         ]);
         setDocuments(docs);
         setRecordings(voiceRows);
+        setCallSessions(callRows);
+        setCalendarAppointments(calendarRows);
         setConsultations(consultationRows);
         setImageBatches(imageBatchRows);
         setEvidenceReviews(reviewRows.reviews || []);
@@ -1241,13 +1276,18 @@ export default function App() {
           if (current && docs.some((document) => document.id === current)) return current;
           return docs[0]?.id ?? null;
         });
+        setLawyerPhoneDraft((current) => current || user?.phone || DEFAULT_LAWYER_PHONE);
+        setActiveCallSessionId((current) => {
+          if (current && callRows.some((session) => session.id === current)) return current;
+          return callRows[0]?.id ?? null;
+        });
       } catch (caught) {
         setError(normalizeError(caught, t("unableLoadCaseContext", "Unable to load case context.")));
       } finally {
         setCaseContextLoading(false);
       }
     },
-    [token, t]
+    [token, t, selectedClient?.phone]
   );
 
   useEffect(() => {
@@ -1340,12 +1380,13 @@ export default function App() {
 
           const voiceItems: BibliothequeItem[] = caseRecordings.map((recording) => {
             const sortTime = new Date(recording.created_at).getTime();
+            const isCallRecording = recording.recording_kind === "call_recording";
             return {
               id: `voice-${caseItem.id}-${recording.id}`,
               sourceId: recording.id,
               kind: "voice",
-              title: recording.filename,
-              subtitle: `${caseItem.title} · Voice #${recording.id}`,
+              title: isCallRecording ? `Call recording #${recording.id}` : recording.filename,
+              subtitle: `${caseItem.title} · ${isCallRecording ? "Call" : "Voice"} #${recording.id}`,
               status: recording.transcription_status,
               sizeLabel: formatFileSize(recording.file_size),
               createdAt: compactDateTime(recording.created_at, dateLocale, t("noDate", "No date")),
@@ -1395,6 +1436,8 @@ export default function App() {
     if (!selectedCaseId) {
       setDocuments([]);
       setRecordings([]);
+      setCallSessions([]);
+      setCalendarAppointments([]);
       setConsultations([]);
       setImageBatches([]);
       setEvidenceReviews([]);
@@ -1403,6 +1446,11 @@ export default function App() {
     }
     void loadCaseContext(selectedCaseId);
   }, [selectedCaseId, loadCaseContext]);
+
+  useEffect(() => {
+    setActiveCallSessionId(null);
+    setCallNotesDraft("");
+  }, [selectedCaseId, selectedClient?.phone]);
 
   useEffect(() => {
     if (!token || !selectedCaseId || !hasPendingImageBatch) {
@@ -1640,21 +1688,38 @@ export default function App() {
     messageAnimationTimeoutsRef.current[messageId] = window.setTimeout(tick, 110);
   }, [appendMessage, updateMessageContent]);
 
+  const refreshWorkspaceAfterCrud = useCallback(async () => {
+    if (!token) return;
+    const caseIdToRefresh = selectedCaseId;
+    await bootstrapWorkspace(token);
+    if (caseIdToRefresh) {
+      try {
+        await loadCaseContext(caseIdToRefresh);
+      } catch {
+        // The selected case may have been deleted or moved by the CRUD action.
+      }
+    }
+  }, [bootstrapWorkspace, loadCaseContext, selectedCaseId, token]);
+
   const sendMessage = useCallback(
     async (promptText: string) => {
-      if (!token || !selectedCaseId) return;
+      if (!token) return;
       const trimmed = promptText.trim();
       if (!trimmed) return;
 
       const outboundPrompt = trimmed;
-      const sessionId = activeChatSessionId || createChatSession(selectedCaseId, outboundPrompt);
+      const chatScopeId = selectedCaseId ?? CHAT_GLOBAL_SCOPE_ID;
+      const sessionId = activeChatSessionId || createChatSession(chatScopeId, outboundPrompt);
       const userMessage = createMessage("user", outboundPrompt);
       const caseMessages = activeSession?.messages || [];
-      appendMessage(selectedCaseId, sessionId, userMessage);
+      appendMessage(chatScopeId, sessionId, userMessage);
       setChatInput("");
       setAttachmentMenuOpen(false);
       setCopilotLoading(true);
       setError(null);
+
+      const abortController = new AbortController();
+      copilotAbortControllerRef.current = abortController;
 
       try {
         const response = await api.copilot(token, outboundPrompt, {
@@ -1674,6 +1739,7 @@ export default function App() {
               case_id: selectedCaseId,
               document_id: selectedDocumentId,
             })),
+          signal: abortController.signal,
         });
 
         const assistantMessage = createMessage("assistant", response.answer || response.message, {
@@ -1696,10 +1762,22 @@ export default function App() {
           rawAnswer: response.answer,
         });
 
-        animateAssistantMessage(selectedCaseId, sessionId, assistantMessage);
+        if (response.action_category === "crud" && response.action_status === "completed") {
+          void refreshWorkspaceAfterCrud();
+        }
+
+        animateAssistantMessage(chatScopeId, sessionId, assistantMessage);
       } catch (caught) {
-        setError(normalizeError(caught, t("copilotFailed", "Copilot request failed.")));
+        const message = normalizeError(caught, t("copilotFailed", "Copilot request failed."));
+        if (message !== "Request stopped.") {
+          setError(message);
+        } else {
+          setNotice("Request stopped.");
+        }
       } finally {
+        if (copilotAbortControllerRef.current === abortController) {
+          copilotAbortControllerRef.current = null;
+        }
         setCopilotLoading(false);
       }
     },
@@ -1715,6 +1793,7 @@ export default function App() {
       workspaceMode,
       selectedDocumentId,
       externalModeEnabled,
+      refreshWorkspaceAfterCrud,
       t,
     ]
   );
@@ -1769,6 +1848,10 @@ export default function App() {
     [activeMessages, selectedCaseId, selectedDocumentId, token, workspaceMode]
   );
 
+  const stopCopilotRequest = useCallback(() => {
+    copilotAbortControllerRef.current?.abort();
+  }, []);
+
   const handleCopy = useCallback((message: ChatMessage) => {
     void navigator.clipboard.writeText(message.content);
     setNotice(t("copiedClipboard", "Copied to clipboard."));
@@ -1776,7 +1859,6 @@ export default function App() {
 
   const handleRegenerate = useCallback(
     (message: ChatMessage) => {
-      if (!selectedCaseId) return;
       const caseMessages = activeMessages;
       const index = caseMessages.findIndex((row) => row.id === message.id);
       if (index < 1) return;
@@ -1788,31 +1870,32 @@ export default function App() {
         }
       }
     },
-    [activeMessages, selectedCaseId, sendMessage]
+    [activeMessages, sendMessage]
   );
 
   const clearActiveCaseHistory = useCallback(() => {
-    if (!selectedCaseId || !activeChatSessionId) return;
+    if (!activeChatSessionId) return;
+    const chatScopeId = activeChatScopeId;
     setChatState((current) => {
-      const nextSessions = (current.sessionsByCase[selectedCaseId] || []).filter((session) => session.id !== activeChatSessionId);
+      const nextSessions = (current.sessionsByCase[chatScopeId] || []).filter((session) => session.id !== activeChatSessionId);
       const nextActiveId = nextSessions[0]?.id;
       const nextActiveSessionIdByCase = { ...current.activeSessionIdByCase };
       if (nextActiveId) {
-        nextActiveSessionIdByCase[selectedCaseId] = nextActiveId;
+        nextActiveSessionIdByCase[chatScopeId] = nextActiveId;
       } else {
-        delete nextActiveSessionIdByCase[selectedCaseId];
+        delete nextActiveSessionIdByCase[chatScopeId];
       }
       return {
         sessionsByCase: {
           ...current.sessionsByCase,
-          [selectedCaseId]: nextSessions,
+          [chatScopeId]: nextSessions,
         },
         activeSessionIdByCase: nextActiveSessionIdByCase,
       };
     });
     setChatFeedback({});
     setNotice(`${t("chatHistory", "Chat History")}: ${t("clearHistory", "Clear history")}`);
-  }, [activeChatSessionId, selectedCaseId, t]);
+  }, [activeChatScopeId, activeChatSessionId, t]);
 
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1851,6 +1934,7 @@ export default function App() {
     setCases([]);
     setDocuments([]);
     setRecordings([]);
+    setCalendarAppointments([]);
     setConsultations([]);
     setImageBatches([]);
     setEvidenceReviews([]);
@@ -1859,6 +1943,7 @@ export default function App() {
     setSelectedCaseId(null);
     setSelectedClientId(null);
     setSelectedDocumentId(null);
+    setLawyerPhoneDraft(DEFAULT_LAWYER_PHONE);
     setChatInput("");
     setExternalModeEnabled(false);
     setWorkspaceMode("chat");
@@ -1878,6 +1963,40 @@ export default function App() {
     const clean = prompt.replace(/\s+/g, " ").trim();
     if (!clean) return "Saved prompt";
     return truncateText(clean, 48);
+  }
+
+  function normalizePhoneForWhatsApp(phone: string) {
+    return phone.replace(/[^\d]/g, "");
+  }
+
+  function openWhatsAppForPhone(phone: string, note?: string) {
+    const normalized = normalizePhoneForWhatsApp(phone);
+    if (!normalized) {
+      setError("No phone number is available for WhatsApp.");
+      return;
+    }
+
+    const text = note ? `&text=${encodeURIComponent(note)}` : "";
+    const deepLink = `whatsapp://send?phone=${normalized}${text}`;
+    const link = document.createElement("a");
+    link.href = deepLink;
+    link.rel = "noopener noreferrer";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    window.setTimeout(() => {
+      link.remove();
+    }, 0);
+  }
+
+  function openPhoneDialer(phone: string) {
+    const normalized = phone.trim();
+    if (!normalized) {
+      setError("No phone number is available to call.");
+      return;
+    }
+
+    window.open(`tel:${normalized}`, "_self");
   }
 
   async function uploadPdfFile(file: File) {
@@ -1903,24 +2022,121 @@ export default function App() {
     }
   }
 
+  async function saveLawyerPhone() {
+    if (!token) return;
+    const phone = lawyerPhoneDraft.trim();
+    if (!phone) {
+      setError("Lawyer phone number is required.");
+      return;
+    }
+
+    setSavingLawyerPhone(true);
+    setError(null);
+    try {
+      const updatedUser = await api.updateMyPhone(token, phone);
+      setUser(updatedUser);
+      setNotice("Lawyer outbound number saved.");
+    } catch (caught) {
+      setError(normalizeError(caught, "Unable to save the lawyer phone number."));
+    } finally {
+      setSavingLawyerPhone(false);
+    }
+  }
+
   async function uploadAudioFile(file: File) {
     if (!token || !selectedCaseId) return;
     setUploadingAudio(true);
     setError(null);
     try {
-      const response = await api.uploadVoiceRecording(token, selectedCaseId, file);
+      const callSessionId = activeCallSessionId ?? undefined;
+      const response = await api.uploadVoiceRecording(token, selectedCaseId, file, {
+        recordingKind: callSessionId ? "call_recording" : "voice_note",
+        callSessionId,
+      });
       await loadCaseContext(selectedCaseId);
-      setNotice(
-        response.job?.id
-          ? `${t("uploadAudioSuccess", "Voice file uploaded. Transcription is running.")} Job: ${response.job.id}`
-          : t("uploadAudioSuccess", "Voice file uploaded. Transcription is running.")
-      );
+      if (callSessionId) {
+        setNotice(
+          response.job?.id
+            ? `Call recording uploaded. Transcription is running. Job: ${response.job.id}`
+            : "Call recording uploaded. Transcription is running."
+        );
+        clearCallRecordingFollowUp();
+        void pollCallRecordingUntilReady(response.recording.id);
+      } else {
+        setNotice(
+          response.job?.id
+            ? `Voice file uploaded. Transcription is running. Job: ${response.job.id}`
+            : "Voice file uploaded. Transcription is running."
+        );
+      }
     } catch (caught) {
       setError(normalizeError(caught, t("uploadAudioFailed", "Unable to upload audio.")));
     } finally {
       setUploadingAudio(false);
     }
   }
+
+  async function summarizeCallRecording(recordingId: number) {
+    if (!token || !selectedCaseId) return;
+
+    setSummarizingCallRecordingId(recordingId);
+    setError(null);
+
+    try {
+      const response = await api.createConsultationFromRecording(token, recordingId);
+      await loadCaseContext(selectedCaseId);
+      setNotice(response.message || "Call recording summarized and added to the case.");
+    } catch (caught) {
+      setError(normalizeError(caught, "Unable to summarize the call recording."));
+    } finally {
+      setSummarizingCallRecordingId(null);
+    }
+  }
+
+  const clearCallRecordingFollowUp = useCallback(() => {
+    if (callRecordingFollowUpTimeoutRef.current !== null) {
+      window.clearTimeout(callRecordingFollowUpTimeoutRef.current);
+      callRecordingFollowUpTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearCallRecordingFollowUp();
+    };
+  }, [clearCallRecordingFollowUp]);
+
+  const pollCallRecordingUntilReady = useCallback(
+    async (recordingId: number, attempt = 0) => {
+      if (!token || !selectedCaseId) return;
+
+      try {
+        const current = await api.getVoiceRecording(token, recordingId);
+        if (current.transcription_status === "completed" && current.transcript_text?.trim()) {
+          await summarizeCallRecording(recordingId);
+          return;
+        }
+
+        if (current.transcription_status === "failed") {
+          setError(current.transcription_error || "The call recording transcription failed.");
+          return;
+        }
+      } catch {
+        // Keep polling until the recording is ready or we hit the retry cap.
+      }
+
+      if (attempt >= 20) {
+        setNotice("Call recording uploaded. You can summarize it later from the case library.");
+        return;
+      }
+
+      clearCallRecordingFollowUp();
+      callRecordingFollowUpTimeoutRef.current = window.setTimeout(() => {
+        void pollCallRecordingUntilReady(recordingId, attempt + 1);
+      }, 3000);
+    },
+    [clearCallRecordingFollowUp, selectedCaseId, summarizeCallRecording, token]
+  );
 
   const focusComposer = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -1944,6 +2160,43 @@ export default function App() {
     if (!file) return;
     void uploadAudioFile(file);
     event.target.value = "";
+  }
+
+  async function createCallSession() {
+    if (!token || !selectedCaseId) return;
+    const phone = selectedClient?.phone || "";
+    if (!phone) {
+      setError("The client must have a phone number before creating a call session.");
+      return;
+    }
+
+    const callerPhone = lawyerPhoneDraft.trim() || user?.phone || DEFAULT_LAWYER_PHONE;
+    if (!callerPhone) {
+      setError("The lawyer phone number is required before creating a call session.");
+      return;
+    }
+
+    setCreatingCallSession(true);
+    setError(null);
+
+    try {
+      const response = await api.createCallSession(token, selectedCaseId, {
+        providerName: "whatsapp",
+        callerPhone,
+        clientPhone: phone,
+        notes: callNotesDraft.trim() || null,
+      });
+      await loadCaseContext(selectedCaseId);
+      setActiveCallSessionId(response.call_session.id);
+      if (response.consent_delivery_mode === "manual" && response.whatsapp_chat_url) {
+        window.open(response.whatsapp_chat_url, "_blank", "noopener,noreferrer");
+      }
+      setNotice(response.message);
+    } catch (caught) {
+      setError(normalizeError(caught, "Unable to create the call session."));
+    } finally {
+      setCreatingCallSession(false);
+    }
   }
 
   async function uploadScannedPhotoFiles(files: File[]) {
@@ -2490,10 +2743,10 @@ export default function App() {
       {leftRailOpen ? (
         <aside className="left-rail glass">
           <header className="left-brand">
-            <div className="brand-mark">H</div>
+            <div className="brand-mark">LA</div>
             <div>
               <strong>Legal AI</strong>
-              <small>{t("premiumWorkspace", "Legal Copilot Workspace")}</small>
+              <small>{t("premiumWorkspace", "Evidence-first legal workspace")}</small>
             </div>
             <button
               aria-label="Collapse sidebar"
@@ -2519,6 +2772,13 @@ export default function App() {
               type="button"
             >
               {t("bibliotheque", "Bibliotheque")}
+            </button>
+            <button
+              className={`sidebar-tab ${sidebarTab === "calendar" ? "active" : ""}`}
+              onClick={() => setSidebarTab("calendar")}
+              type="button"
+            >
+              Calendar
             </button>
           </div>
 
@@ -2562,7 +2822,6 @@ export default function App() {
                 {selectedCase ? (
                   <p className="muted">
                     {selectedCase.jurisdiction_country} · {selectedCase.status}
-                    {selectedCase.case_number ? ` · ${selectedCase.case_number}` : ""}
                   </p>
                 ) : null}
               </section>
@@ -2573,10 +2832,9 @@ export default function App() {
                   <div className="history-actions">
                     <button
                       className="ghost-button history-action"
-                      disabled={!selectedCaseId}
+                      disabled={false}
                       onClick={() => {
-                        if (!selectedCaseId) return;
-                        createChatSession(selectedCaseId);
+                        createChatSession(activeChatScopeId);
                       }}
                       type="button"
                     >
@@ -2598,10 +2856,7 @@ export default function App() {
                       <button
                         key={item.id}
                         className={`history-item ${item.id === activeChatSessionId ? "active" : ""}`}
-                        onClick={() => {
-                          if (!selectedCaseId) return;
-                          selectChatSession(selectedCaseId, item.id);
-                        }}
+                        onClick={() => selectChatSession(activeChatScopeId, item.id)}
                         type="button"
                       >
                         <strong>{item.title}</strong>
@@ -2639,7 +2894,11 @@ export default function App() {
                         onClick={() => audioInputRef.current?.click()}
                         type="button"
                       >
-                        {uploadingAudio ? t("uploadingAudio", "Uploading audio...") : t("uploadAudioFile", "Upload audio file")}
+                        {uploadingAudio
+                          ? t("uploadingAudio", "Uploading audio...")
+                          : activeCallSession
+                            ? "Upload call recording"
+                            : t("uploadAudioFile", "Upload audio file")}
                       </button>
                       <button
                         className={`secondary-button ${recordingVoice ? "recording" : ""}`}
@@ -2650,7 +2909,13 @@ export default function App() {
                         }}
                         type="button"
                       >
-                        {recordingVoice ? t("stopRecording", "Stop recording") : t("recordVoice", "Record voice")}
+                        {recordingVoice
+                          ? activeCallSession
+                            ? "Stop and save call recording"
+                            : t("stopRecording", "Stop recording")
+                          : activeCallSession
+                            ? "Start call recording"
+                            : t("recordVoice", "Record voice")}
                       </button>
                       <button
                         className="secondary-button"
@@ -2682,6 +2947,151 @@ export default function App() {
                           : "The upload will run OCR only and skip authenticity screening."}
                       </p>
                     )}
+                  </section>
+
+                  <section className="left-section call-section">
+                    <h3>Client call</h3>
+                    <div className="call-form">
+                      <label>
+                        Lawyer outbound number
+                        <input
+                          onChange={(event) => setLawyerPhoneDraft(event.target.value)}
+                          placeholder={DEFAULT_LAWYER_PHONE}
+                          value={lawyerPhoneDraft}
+                        />
+                      </label>
+                      <button
+                        className="ghost-button history-action"
+                        disabled={savingLawyerPhone}
+                        onClick={() => void saveLawyerPhone()}
+                        type="button"
+                      >
+                        {savingLawyerPhone ? "Saving..." : "Save lawyer number"}
+                      </button>
+                      <div className="call-phone-summary">
+                        <span>Client phone</span>
+                        <strong>{selectedClient?.phone || "No phone saved for this client"}</strong>
+                      </div>
+                      <label>
+                        Call notes
+                        <textarea
+                          onChange={(event) => setCallNotesDraft(event.target.value)}
+                          placeholder="Call goal, client context, and follow-up items"
+                          value={callNotesDraft}
+                        />
+                      </label>
+                      <button
+                        className="primary-button call-create-button"
+                        disabled={!selectedCaseId || creatingCallSession || !selectedClient?.phone || !(lawyerPhoneDraft.trim() || user?.phone)}
+                        onClick={() => void createCallSession()}
+                        type="button"
+                      >
+                        {creatingCallSession ? "Calling..." : "Call"}
+                      </button>
+                      <p className="muted call-flow-note">
+                        After consent, start call recording from this page. The audio is saved to the case library as a call recording and can be summarized automatically when transcription finishes.
+                      </p>
+                    </div>
+
+                    <div className="call-session-list">
+                      {callSessions.length ? (
+                        callSessions.slice(0, 4).map((session) => {
+                          const isActive = session.id === activeCallSessionId;
+                          const voiceRecording = session.voice_recording;
+                          return (
+                            <article key={session.id} className={`call-session-card ${isActive ? "active" : ""}`}>
+                              <div className="call-session-card-head">
+                                <strong>Call #{session.id}</strong>
+                                <span>{session.call_status}</span>
+                              </div>
+                              <small>{session.client_phone || selectedClient?.phone || "No phone captured yet"}</small>
+                              <small>{session.caller_phone || lawyerPhoneDraft || user?.phone || DEFAULT_LAWYER_PHONE}</small>
+                              <small>{session.provider_name || "whatsapp"}</small>
+                              <small>
+                                Consent: {session.consent_request_status || (session.consent_accepted ? "accepted" : "pending")}
+                              </small>
+                              {session.summary_text ? <p>{truncateText(session.summary_text, 120)}</p> : <p className="muted">Summary will appear after transcription.</p>}
+                              <div className="call-session-actions">
+                                <button
+                                  className="ghost-button history-action"
+                                  onClick={() => setActiveCallSessionId(session.id)}
+                                  type="button"
+                                >
+                                  {isActive ? "Selected" : "Select"}
+                                </button>
+                                <button
+                                  className="ghost-button history-action"
+                                  onClick={() => openWhatsAppForPhone(
+                                    session.client_phone || selectedClient?.phone || "",
+                                    `Hello, this is Legal AI regarding case #${selectedCase?.id || session.case_id}.`
+                                  )}
+                                  type="button"
+                                >
+                                  WhatsApp
+                                </button>
+                                <button
+                                  className="ghost-button history-action"
+                                  onClick={() => openPhoneDialer(session.client_phone || selectedClient?.phone || "")}
+                                  type="button"
+                                >
+                                  Call number
+                                </button>
+                                {voiceRecording ? (
+                                  <>
+                                    <button
+                                      className="ghost-button history-action"
+                                      onClick={() => void openLibraryPreview({
+                                        id: `voice-${voiceRecording.id}`,
+                                        sourceId: voiceRecording.id,
+                                        kind: "voice",
+                                        title: voiceRecording.recording_kind === "call_recording"
+                                          ? `Call recording #${voiceRecording.id}`
+                                          : voiceRecording.filename,
+                                        subtitle: `Call #${session.id}`,
+                                        status: voiceRecording.transcription_status,
+                                        sizeLabel: formatFileSize(voiceRecording.file_size),
+                                        createdAt: compactDateTime(voiceRecording.created_at, dateLocale, t("noDate", "No date")),
+                                        sortTime: new Date(voiceRecording.created_at).getTime(),
+                                      })}
+                                      type="button"
+                                    >
+                                      Open recording
+                                    </button>
+                                    <button
+                                      className="ghost-button history-action"
+                                      disabled={
+                                        summarizingCallRecordingId === voiceRecording.id
+                                        || voiceRecording.transcription_status !== "completed"
+                                      }
+                                      onClick={() => void summarizeCallRecording(voiceRecording.id)}
+                                      type="button"
+                                    >
+                                      {summarizingCallRecordingId === voiceRecording.id ? "Summarizing..." : "Summarize call"}
+                                    </button>
+                                  </>
+                                ) : null}
+                              </div>
+                            </article>
+                          );
+                        })
+                      ) : (
+                        <p className="muted">No call sessions yet.</p>
+                      )}
+                    </div>
+
+                    {activeCallSession ? (
+                      <article className="call-session-detail">
+                        <div className="call-session-detail-head">
+                          <strong>Active call session</strong>
+                          <span>{activeCallSession.consent_request_status || activeCallSession.recording_status}</span>
+                        </div>
+                        {activeCallSession.consent_message ? <p>{activeCallSession.consent_message}</p> : null}
+                        <p>{activeCallSession.summary_text ? activeCallSession.summary_text : "The summary will appear here after transcription."}</p>
+                        <pre className="call-transcript">
+                          {activeCallSession.conversation_transcript_text || activeCallSession.transcript_text ? (activeCallSession.conversation_transcript_text || activeCallSession.transcript_text) : "The transcript will appear here after transcription."}
+                        </pre>
+                      </article>
+                    ) : null}
                   </section>
 
                   <section className="left-section">
@@ -2730,6 +3140,25 @@ export default function App() {
                 {t("logout", "Logout")}
               </button>
             </>
+          ) : sidebarTab === "calendar" ? (
+            <CaseCalendarPanel
+              caseItem={selectedCase}
+              client={selectedClient}
+              user={user}
+              appointments={calendarAppointments}
+              consultations={consultations}
+              loading={caseContextLoading}
+              locale={dateLocale}
+              onCreateAppointment={async (payload) => {
+                if (!token || !selectedCaseId) {
+                  throw new Error("Select a case before creating a calendar appointment.");
+                }
+
+                await api.createCalendarAppointment(token, selectedCaseId, payload);
+                await loadCaseContext(selectedCaseId);
+                setNotice("Calendar appointment created and AI notes updated.");
+              }}
+            />
           ) : (
             <>
               <section className="left-section bibliotheque-section">
@@ -2936,7 +3365,7 @@ export default function App() {
       <main className="center-panel glass center-panel-full">
         <header className="workspace-topbar">
           <div>
-            <p className="meta">{t("setClientMatter", "Set client matter")}</p>
+            <p className="meta">{t("workspaceOverview", "Workspace overview")}</p>
             <h1>{t("workspaceBrand", "Legal AI")}</h1>
             <p className="workspace-subtitle">
               {selectedCase
@@ -2999,6 +3428,26 @@ export default function App() {
                   <div className="empty-chat conversation-empty">
                     <h3>{t("noConversationYet", "No conversation yet")}</h3>
                     <p>{t("conversationHint", "Use the prompt box below to start.")}</p>
+                    {workspaceMode === "chat" ? (
+                      <>
+                        <p className="starter-prompt-note">
+                          {t("chatStarterHint", "Starter prompts")}
+                        </p>
+                        <div className="empty-chat-actions starter-prompt-actions">
+                          {chatStarterPrompts.map((prompt) => (
+                            <button
+                              key={prompt}
+                              className="starter-prompt-chip"
+                              disabled={copilotLoading}
+                              onClick={() => void sendMessage(prompt)}
+                              type="button"
+                            >
+                              {prompt}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -3114,6 +3563,18 @@ export default function App() {
                     </svg>
                   </button>
                   <button
+                    aria-label={t("stopRequest", "Stop request")}
+                    className="composer-stop"
+                    disabled={!copilotLoading}
+                    onClick={() => stopCopilotRequest()}
+                    title={t("stopRequest", "Stop request")}
+                    type="button"
+                  >
+                    <svg aria-hidden="true" viewBox="0 0 20 20">
+                      <rect x="5.2" y="5.2" width="9.6" height="9.6" rx="2.2" />
+                    </svg>
+                  </button>
+                  <button
                     aria-label={composerRecording ? t("stopVoiceInput", "Stop voice input") : t("voiceInput", "Voice input")}
                     className={`composer-icon-button ${composerRecording ? "recording" : ""}`}
                     disabled={!token || copilotLoading || composerTranscribing || optimizingPrompt || recordingVoice}
@@ -3140,7 +3601,7 @@ export default function App() {
                   <button
                     aria-label={t("send", "Send")}
                     className="composer-send"
-                    disabled={!chatInput.trim() || copilotLoading || !selectedCaseId || composerRecording || composerTranscribing || optimizingPrompt}
+                    disabled={!chatInput.trim() || copilotLoading || composerRecording || composerTranscribing || optimizingPrompt}
                     type="submit"
                   >
                     {t("askHarvey", "Ask Legal AI")}
@@ -3277,7 +3738,7 @@ export default function App() {
                   <article className="bibliotheque-preview-markdown-paper">
                     {libraryPreviewMarkdownBlocks.map((block, index) => {
                       if (block.kind === "heading") {
-                        const HeadingTag = (`h${Math.min(3, Math.max(1, block.level))}` as const);
+                        const HeadingTag = `h${Math.min(3, Math.max(1, block.level))}` as keyof JSX.IntrinsicElements;
                         return (
                           <HeadingTag key={`${block.kind}-${index}`} className={`markdown-heading level-${block.level}`}>
                             {block.text}

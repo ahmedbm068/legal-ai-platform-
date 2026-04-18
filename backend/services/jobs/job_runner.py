@@ -51,12 +51,34 @@ def _dispatch(*, job: BackgroundJob, payload: dict[str, Any], db: Session) -> di
         from backend.models.document import Document
         from backend.services.ai.case_snapshot_service import case_snapshot_service
         from backend.services.ai.runtime_services import shared_document_pipeline
+        from backend.services.document_calendar_sync_service import document_calendar_sync_service
 
         document_id = int(payload["document_id"])
         document = db.query(Document).filter(Document.id == document_id).first()
         if not document:
             raise ValueError("Document job target was not found.")
         result = shared_document_pipeline.process_document(document, db)
+
+        calendar_sync_result: dict[str, Any] = {
+            "created_count": 0,
+            "skipped_count": 0,
+            "reason": "document_processing_not_completed",
+        }
+        if bool(result.get("success")) and str(document.processing_status or "") == "processed":
+            try:
+                calendar_sync_result = document_calendar_sync_service.sync_document_key_dates(
+                    db=db,
+                    document=document,
+                )
+            except Exception as exc:
+                calendar_sync_result = {
+                    "created_count": 0,
+                    "skipped_count": 0,
+                    "reason": "calendar_sync_failed",
+                    "error": str(exc),
+                }
+
+        result["calendar_sync"] = calendar_sync_result
         if document.case_id and document.tenant_id:
             case_snapshot_service.refresh_case_snapshot(
                 db=db,

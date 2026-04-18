@@ -20,10 +20,14 @@ def create_client(
 ):
     require_roles(current_user, [UserRole.admin, UserRole.lawyer])
 
+    normalized_phone = client_data.phone.strip()
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail="Client phone number is required")
+
     new_client = Client(
         name=client_data.name,
         email=client_data.email,
-        phone=client_data.phone,
+        phone=normalized_phone,
         address=client_data.address,
         tenant_id=current_user.tenant_id
     )

@@ -12,6 +12,7 @@ class UserRegister(BaseModel):
     role: UserRole = UserRole.lawyer
     tenant_name: str | None = Field(default=None, min_length=2, max_length=120)
     invite_token: str | None = Field(default=None, min_length=8, max_length=120)
+    phone: str | None = Field(default=None, min_length=5, max_length=40)
 
 
 class UserLogin(BaseModel):
@@ -27,9 +28,16 @@ class UserOut(BaseModel):
     id: int
     name: str
     email: EmailStr
+    phone: str | None = None
     role: UserRole
     tenant_id: int
     created_at: datetime
+
+
+class UserPhoneUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    phone: str = Field(..., min_length=5, max_length=40)
 
 
 class Token(BaseModel):

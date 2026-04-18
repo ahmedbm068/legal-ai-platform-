@@ -25,6 +25,10 @@ BASE_SCHEMA_PATCHES = [
     ADD COLUMN IF NOT EXISTS portal_access_enabled BOOLEAN NOT NULL DEFAULT TRUE;
     """,
     """
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS phone VARCHAR;
+    """,
+    """
     CREATE UNIQUE INDEX IF NOT EXISTS ix_tenants_slug_unique
     ON tenants (slug)
     WHERE slug IS NOT NULL;
@@ -44,6 +48,22 @@ BASE_SCHEMA_PATCHES = [
     """
     ALTER TABLE voice_recordings
     ADD COLUMN IF NOT EXISTS transcript_language VARCHAR;
+    """,
+    """
+    ALTER TABLE voice_recordings
+    ADD COLUMN IF NOT EXISTS conversation_transcript_text TEXT;
+    """,
+    """
+    ALTER TABLE voice_recordings
+    ADD COLUMN IF NOT EXISTS recording_kind VARCHAR NOT NULL DEFAULT 'voice_note';
+    """,
+    """
+    ALTER TABLE voice_recordings
+    ADD COLUMN IF NOT EXISTS call_session_id INTEGER;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_voice_recordings_call_session_id
+    ON voice_recordings (call_session_id);
     """,
     """
     ALTER TABLE voice_recordings
@@ -89,6 +109,115 @@ BASE_SCHEMA_PATCHES = [
     """
     CREATE INDEX IF NOT EXISTS ix_image_document_batches_case_created
     ON image_document_batches (case_id, created_at DESC);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS call_sessions (
+        id SERIAL PRIMARY KEY,
+        case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+        started_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        provider_name VARCHAR,
+        provider_call_id VARCHAR,
+        caller_phone VARCHAR,
+        client_phone VARCHAR,
+        call_status VARCHAR NOT NULL DEFAULT 'planned',
+        recording_status VARCHAR NOT NULL DEFAULT 'waiting_for_audio',
+        summary_status VARCHAR NOT NULL DEFAULT 'pending',
+        consent_accepted BOOLEAN NOT NULL DEFAULT FALSE,
+        consent_accepted_at TIMESTAMPTZ,
+        consent_request_status VARCHAR NOT NULL DEFAULT 'not_requested',
+        consent_requested_at TIMESTAMPTZ,
+        consent_message TEXT,
+        consent_response_text TEXT,
+        consent_responded_at TIMESTAMPTZ,
+        started_at TIMESTAMPTZ,
+        ended_at TIMESTAMPTZ,
+        duration_seconds INTEGER,
+        summary_text TEXT,
+        transcript_text TEXT,
+        conversation_transcript_text TEXT,
+        transcript_source VARCHAR,
+        transcription_error TEXT,
+        notes TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    ALTER TABLE call_sessions
+    ADD COLUMN IF NOT EXISTS caller_phone VARCHAR;
+    """,
+    """
+    ALTER TABLE call_sessions
+    ADD COLUMN IF NOT EXISTS consent_request_status VARCHAR NOT NULL DEFAULT 'not_requested';
+    """,
+    """
+    ALTER TABLE call_sessions
+    ADD COLUMN IF NOT EXISTS consent_requested_at TIMESTAMPTZ;
+    """,
+    """
+    ALTER TABLE call_sessions
+    ADD COLUMN IF NOT EXISTS consent_message TEXT;
+    """,
+    """
+    ALTER TABLE call_sessions
+    ADD COLUMN IF NOT EXISTS consent_response_text TEXT;
+    """,
+    """
+    ALTER TABLE call_sessions
+    ADD COLUMN IF NOT EXISTS consent_responded_at TIMESTAMPTZ;
+    """,
+    """
+    ALTER TABLE call_sessions
+    ADD COLUMN IF NOT EXISTS conversation_transcript_text TEXT;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_call_sessions_case_created
+    ON call_sessions (case_id, created_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_call_sessions_tenant_created
+    ON call_sessions (tenant_id, created_at DESC);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS appointments (
+        id SERIAL PRIMARY KEY,
+        case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        lawyer_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+        consultation_request_id INTEGER REFERENCES consultation_requests(id) ON DELETE SET NULL,
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        title VARCHAR NOT NULL,
+        description TEXT,
+        appointment_type VARCHAR NOT NULL DEFAULT 'meeting',
+        visibility_scope VARCHAR NOT NULL DEFAULT 'shared',
+        status VARCHAR NOT NULL DEFAULT 'scheduled',
+        scheduled_at TIMESTAMPTZ NOT NULL,
+        duration_minutes INTEGER NOT NULL DEFAULT 30,
+        location VARCHAR,
+        timezone_name VARCHAR NOT NULL DEFAULT 'UTC',
+        ai_summary TEXT,
+        ai_recommendation TEXT,
+        ai_confidence VARCHAR,
+        ai_source VARCHAR,
+        notes TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_appointments_case_scheduled_at
+    ON appointments (case_id, scheduled_at ASC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_appointments_tenant_scheduled_at
+    ON appointments (tenant_id, scheduled_at ASC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_appointments_lawyer_scheduled_at
+    ON appointments (lawyer_id, scheduled_at ASC);
     """,
     """
     CREATE INDEX IF NOT EXISTS ix_evidence_analysis_reviews_case_status

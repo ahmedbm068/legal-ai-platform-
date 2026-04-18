@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Public+Sans:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600&display=swap");
 
 :root {
   --space-0: 4px;
@@ -17,28 +17,28 @@
   --motion-mid: 240ms;
   --motion-slow: 340ms;
 
-  --bg: #eef4f2;
-  --bg-layer: #f4f7f6;
-  --bg-panel: #fcfdfc;
-  --bg-soft: #eaf1ee;
-  --bg-glass: rgba(255, 255, 255, 0.92);
+  --bg: #edf2ef;
+  --bg-layer: #f4f7f5;
+  --bg-panel: #fdfdfc;
+  --bg-soft: #e6eeea;
+  --bg-glass: rgba(255, 255, 255, 0.9);
 
-  --ink: #17211e;
-  --ink-soft: #32453f;
-  --ink-muted: #60706a;
+  --ink: #15201c;
+  --ink-soft: #334842;
+  --ink-muted: #5f716b;
 
-  --emerald: #1f5f52;
-  --emerald-soft: #357767;
-  --border: rgba(22, 50, 42, 0.14);
-  --border-strong: rgba(22, 50, 42, 0.3);
-  --accent: #1f5f52;
-  --accent-soft: #357767;
-  --accent-ink: #edf8f4;
-  --surface-1: rgba(252, 253, 252, 0.92);
-  --surface-2: rgba(234, 241, 238, 0.76);
+  --emerald: #174f46;
+  --emerald-soft: #2c6a5f;
+  --border: rgba(22, 50, 42, 0.12);
+  --border-strong: rgba(22, 50, 42, 0.26);
+  --accent: #174f46;
+  --accent-soft: #2c6a5f;
+  --accent-ink: #f2fbf7;
+  --surface-1: rgba(253, 253, 252, 0.94);
+  --surface-2: rgba(230, 238, 234, 0.78);
   --surface-3: rgba(255, 255, 255, 0.72);
-  --surface-4: rgba(255, 255, 255, 0.52);
-  --focus-ring: rgba(31, 95, 82, 0.28);
+  --surface-4: rgba(255, 255, 255, 0.54);
+  --focus-ring: rgba(23, 79, 70, 0.26);
   --text-reading: 0.93rem;
   --line-reading: 1.56;
 
@@ -46,37 +46,37 @@
   --warning: #9a7b3d;
   --stable: #4a806a;
 
-  --shadow-soft: 0 10px 24px rgba(11, 35, 28, 0.08);
-  --shadow-glow: 0 0 0 1px rgba(31, 95, 82, 0.22), 0 12px 26px rgba(11, 35, 28, 0.14);
-  --shadow-pop: 0 20px 40px rgba(11, 35, 28, 0.12);
+  --shadow-soft: 0 12px 28px rgba(11, 35, 28, 0.08);
+  --shadow-glow: 0 0 0 1px rgba(23, 79, 70, 0.2), 0 14px 30px rgba(11, 35, 28, 0.12);
+  --shadow-pop: 0 22px 44px rgba(11, 35, 28, 0.12);
 
-  font-family: "Public Sans", "Manrope", "Segoe UI", sans-serif;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
   color-scheme: light;
 }
 
 [data-theme="dark"] {
-  --bg: #0d1815;
-  --bg-layer: #12211d;
-  --bg-panel: #182a25;
-  --bg-soft: #203631;
-  --bg-glass: rgba(18, 33, 29, 0.88);
+  --bg: #0d1715;
+  --bg-layer: #12211c;
+  --bg-panel: #182822;
+  --bg-soft: #20362f;
+  --bg-glass: rgba(18, 32, 28, 0.88);
 
-  --ink: #e7f0ec;
-  --ink-soft: #bdd0c8;
-  --ink-muted: #90a79f;
+  --ink: #e5eeea;
+  --ink-soft: #bdcec6;
+  --ink-muted: #8c9f98;
 
-  --emerald: #68c7a1;
-  --emerald-soft: #8fd8b8;
-  --border: rgba(145, 171, 161, 0.2);
-  --border-strong: rgba(145, 171, 161, 0.38);
-  --accent: #68c7a1;
-  --accent-soft: #8fd8b8;
+  --emerald: #71d0ac;
+  --emerald-soft: #95dcc0;
+  --border: rgba(144, 171, 161, 0.18);
+  --border-strong: rgba(144, 171, 161, 0.34);
+  --accent: #71d0ac;
+  --accent-soft: #95dcc0;
   --accent-ink: #0f1f1a;
-  --surface-1: rgba(24, 42, 37, 0.88);
-  --surface-2: rgba(32, 54, 49, 0.72);
-  --surface-3: rgba(28, 48, 43, 0.66);
-  --surface-4: rgba(28, 48, 43, 0.5);
-  --focus-ring: rgba(143, 216, 184, 0.34);
+  --surface-1: rgba(24, 40, 34, 0.9);
+  --surface-2: rgba(32, 54, 47, 0.74);
+  --surface-3: rgba(28, 47, 41, 0.68);
+  --surface-4: rgba(28, 47, 41, 0.52);
+  --focus-ring: rgba(149, 220, 192, 0.34);
   --text-reading: 0.95rem;
   --line-reading: 1.6;
 
@@ -84,9 +84,9 @@
   --warning: #d3a861;
   --stable: #68bf99;
 
-  --shadow-soft: 0 10px 24px rgba(0, 0, 0, 0.22);
-  --shadow-glow: 0 0 0 1px rgba(135, 201, 173, 0.16), 0 10px 20px rgba(0, 0, 0, 0.2);
-  --shadow-pop: 0 18px 36px rgba(0, 0, 0, 0.34);
+  --shadow-soft: 0 12px 28px rgba(0, 0, 0, 0.22);
+  --shadow-glow: 0 0 0 1px rgba(149, 220, 192, 0.14), 0 12px 24px rgba(0, 0, 0, 0.22);
+  --shadow-pop: 0 20px 40px rgba(0, 0, 0, 0.34);
 
   color-scheme: dark;
 }
@@ -373,7 +373,7 @@ textarea {
   width: min(100%, var(--layout-max));
   margin-inline: auto;
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 296px minmax(0, 1fr);
   gap: 12px;
   padding: var(--space-2) clamp(10px, 1.1vw, 20px);
   padding-bottom: max(var(--space-2), env(safe-area-inset-bottom));
@@ -412,6 +412,7 @@ textarea {
 }
 
 .left-rail {
+  min-width: 296px;
   display: grid;
   align-content: start;
   gap: 10px;
@@ -644,6 +645,99 @@ textarea {
 .quick-actions {
   display: grid;
   gap: 8px;
+}
+
+.call-section {
+  gap: 10px;
+}
+
+.call-form {
+  display: grid;
+  gap: 8px;
+}
+
+.call-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.83rem;
+  color: var(--ink-soft);
+}
+
+.call-consent-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.call-create-button {
+  width: 100%;
+}
+
+.call-session-list {
+  display: grid;
+  gap: 8px;
+}
+
+.call-session-card,
+.call-session-detail {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-soft) 68%, transparent);
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.call-session-card.active {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--emerald) 12%, transparent);
+}
+
+.call-session-card-head,
+.call-session-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.call-session-card strong,
+.call-session-detail strong {
+  font-size: 0.86rem;
+}
+
+.call-session-card small {
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+}
+
+.call-session-card p,
+.call-session-detail p {
+  margin: 0;
+  font-size: 0.77rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.call-session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.call-transcript {
+  margin: 0;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  color: var(--ink-soft);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
 }
 
 .case-item {
@@ -1791,6 +1885,42 @@ textarea {
   gap: 8px;
 }
 
+.starter-prompt-note {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  letter-spacing: 0.01em;
+}
+
+.starter-prompt-actions {
+  align-items: flex-start;
+}
+
+.starter-prompt-chip {
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+  color: var(--ink-soft);
+  font-size: 0.79rem;
+  line-height: 1.35;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: border-color var(--motion-fast), background var(--motion-fast), transform var(--motion-fast);
+}
+
+.starter-prompt-chip:hover {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--emerald) 10%, var(--bg-panel));
+  transform: translateY(-1px);
+}
+
+.starter-prompt-chip:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .workflow-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2310,6 +2440,7 @@ textarea {
 }
 
 .composer-icon-button,
+.composer-stop,
 .composer-send {
   height: 34px;
   border-radius: 8px;
@@ -2323,6 +2454,13 @@ textarea {
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-panel) 90%, transparent);
   color: var(--ink-soft);
+}
+
+.composer-stop {
+  width: 34px;
+  border: 1px solid color-mix(in srgb, var(--risk) 52%, var(--border));
+  background: color-mix(in srgb, var(--risk) 15%, transparent);
+  color: color-mix(in srgb, var(--risk) 76%, var(--ink));
 }
 
 .composer-send {
@@ -2339,6 +2477,7 @@ textarea {
 
 .composer-plus:hover,
 .composer-optimize:hover,
+.composer-stop:hover,
 .composer-icon-button:hover,
 .composer-send:hover {
   border-color: var(--border-strong);
@@ -2350,6 +2489,7 @@ textarea {
 
 .composer-plus:hover,
 .composer-optimize:hover,
+.composer-stop:hover,
 .composer-icon-button:hover {
   background: color-mix(in srgb, var(--bg-soft) 92%, transparent);
 }
@@ -2377,6 +2517,7 @@ textarea {
 }
 
 .composer-optimize:disabled,
+.composer-stop:disabled,
 .composer-icon-button:disabled,
 .composer-send:disabled {
   opacity: 0.6;
@@ -2755,7 +2896,11 @@ textarea {
 
 @media (max-width: 1360px) {
   .workspace-shell {
-    grid-template-columns: 224px minmax(0, 1fr);
+    grid-template-columns: 264px minmax(0, 1fr);
+  }
+
+  .left-rail {
+    min-width: 264px;
   }
 
   .copilot-message.user .copilot-bubble {
@@ -2906,5 +3051,543 @@ textarea {
   .composer-controls {
     grid-column: 1 / -1;
     justify-content: flex-end;
+  }
+}
+
+body {
+  background:
+    radial-gradient(1100px 520px at 100% -60px, color-mix(in srgb, var(--emerald) 12%, transparent), transparent 70%),
+    radial-gradient(900px 360px at 0% 0%, color-mix(in srgb, var(--stable) 9%, transparent), transparent 68%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-layer) 86%, white), var(--bg));
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.auth-shell {
+  gap: 18px;
+  padding: clamp(18px, 2.4vw, 34px);
+}
+
+.auth-hero,
+.auth-panel {
+  position: relative;
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  box-shadow: var(--shadow-pop);
+}
+
+.auth-hero {
+  padding: clamp(28px, 4vw, 56px);
+  background:
+    radial-gradient(760px 360px at 15% 0%, color-mix(in srgb, var(--emerald) 16%, transparent), transparent 55%),
+    linear-gradient(160deg, color-mix(in srgb, var(--surface-1) 92%, transparent), color-mix(in srgb, var(--surface-2) 72%, transparent));
+}
+
+.auth-hero::before,
+.auth-hero::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.auth-hero::before {
+  width: 220px;
+  height: 220px;
+  right: -70px;
+  top: -80px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 20%, transparent), transparent 68%);
+}
+
+.auth-hero::after {
+  width: 340px;
+  height: 340px;
+  left: -140px;
+  bottom: -180px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--stable) 14%, transparent), transparent 70%);
+}
+
+.auth-hero h1,
+.auth-panel h2,
+.selection-gate-card h3,
+.bibliotheque-preview-header h3,
+.workspace-topbar h1 {
+  font-family: "IBM Plex Serif", Georgia, serif;
+  letter-spacing: -0.02em;
+}
+
+.auth-hero h1 {
+  font-size: clamp(2.3rem, 4.2vw, 4.1rem);
+  max-width: 9ch;
+}
+
+.hero-points span {
+  border-radius: 999px;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 86%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.auth-panel {
+  padding: clamp(22px, 3vw, 32px);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 96%, transparent), color-mix(in srgb, var(--surface-2) 72%, transparent));
+}
+
+.auth-switch button {
+  border-radius: 12px;
+  border-color: color-mix(in srgb, var(--border) 92%, transparent);
+  background: color-mix(in srgb, var(--bg-soft) 72%, transparent);
+}
+
+.auth-switch button.active {
+  background: color-mix(in srgb, var(--emerald) 16%, transparent);
+}
+
+.auth-form label {
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.auth-form input,
+.auth-form select {
+  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
+}
+
+.notice-banner,
+.error-banner {
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.workspace-shell {
+  padding: 14px clamp(12px, 1.6vw, 24px);
+  gap: 14px;
+}
+
+.workspace-shell::before {
+  inset: 14px clamp(12px, 1.6vw, 24px);
+  border-radius: 30px;
+  background:
+    radial-gradient(100% 66% at 50% -18%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 74%),
+    radial-gradient(110% 70% at 12% 108%, color-mix(in srgb, var(--surface-4) 70%, transparent), transparent 60%),
+    linear-gradient(170deg, color-mix(in srgb, var(--surface-3) 76%, transparent), transparent);
+}
+
+.left-rail,
+.left-rail-collapsed,
+.center-panel,
+.bibliotheque-preview-card,
+.selection-gate-card {
+  border-color: color-mix(in srgb, var(--border) 84%, transparent);
+  box-shadow: var(--shadow-pop);
+}
+
+.left-rail,
+.left-rail-collapsed {
+  padding: 16px;
+  gap: 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 94%, transparent), color-mix(in srgb, var(--surface-2) 70%, transparent));
+}
+
+.left-brand {
+  align-items: center;
+  gap: 10px;
+  padding: 4px 2px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(160deg, var(--accent), color-mix(in srgb, var(--accent-soft) 85%, white));
+  box-shadow: var(--shadow-glow);
+}
+
+.left-brand strong,
+.left-section h3,
+.history-item strong,
+.case-item strong,
+.simple-list strong,
+.mode-button strong,
+.bibliotheque-item strong {
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.left-brand small {
+  color: var(--ink-muted);
+}
+
+.rail-toggle,
+.sidebar-tab,
+.collapsed-rail-button,
+.collapsed-mode-button,
+.history-item,
+.case-item,
+.simple-list article,
+.mode-button,
+.bibliotheque-item-button,
+.ghost-button,
+.secondary-button,
+.primary-button,
+.menu-item {
+  border-radius: 14px;
+}
+
+.sidebar-tab-row {
+  padding: 4px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--surface-1) 84%, transparent);
+}
+
+.sidebar-tab {
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+}
+
+.sidebar-tab.active {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--emerald) 14%, transparent);
+}
+
+.left-section {
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 18px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 96%, transparent), color-mix(in srgb, var(--surface-2) 72%, transparent));
+  gap: 10px;
+}
+
+.left-extra-sections {
+  border-bottom: 0;
+  padding-bottom: 14px;
+}
+
+.left-extra-body {
+  margin-top: 0;
+  gap: 12px;
+}
+
+.history-item,
+.case-item,
+.simple-list article,
+.bibliotheque-item-button,
+.mode-button {
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.history-item:hover,
+.case-item:hover,
+.mode-button:hover,
+.bibliotheque-item-button:hover,
+.simple-list article:hover {
+  box-shadow: var(--shadow-soft);
+  transform: translateY(-1px);
+}
+
+.center-panel {
+  border-radius: 28px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 94%, transparent), color-mix(in srgb, var(--surface-2) 64%, transparent));
+}
+
+.center-panel::before {
+  height: 220px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 74%);
+}
+
+.workspace-topbar {
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 22px 24px 16px;
+  text-align: left;
+}
+
+.workspace-topbar>div:first-child {
+  justify-items: start;
+  text-align: left;
+  gap: 6px;
+  max-width: 74ch;
+}
+
+.workspace-topbar h1 {
+  font-size: clamp(1.85rem, 3.4vw, 3rem);
+}
+
+.workspace-topbar .meta {
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--emerald-soft);
+}
+
+.workspace-subtitle {
+  max-width: 68ch;
+  font-size: 0.92rem;
+}
+
+.workspace-context-chips {
+  margin-top: 6px;
+  justify-content: flex-start;
+}
+
+.toolbar-controls {
+  position: static;
+  margin-left: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, auto));
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.toolbar-controls label {
+  min-width: 112px;
+}
+
+.toolbar-controls select {
+  padding-block: 9px;
+}
+
+.copilot-shell {
+  width: min(100%, 1180px);
+  padding: 0 24px 24px;
+}
+
+.chat-surface {
+  border-radius: 24px;
+  border-color: color-mix(in srgb, var(--border) 86%, transparent);
+  background:
+    radial-gradient(140% 72% at 50% -12%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 72%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 98%, transparent), color-mix(in srgb, var(--bg-soft) 50%, transparent));
+  box-shadow: var(--shadow-pop);
+}
+
+.chat-surface::after {
+  opacity: 0.16;
+}
+
+.message-stream {
+  padding: 20px 18px 18px;
+}
+
+.copilot-message {
+  gap: 16px;
+}
+
+.copilot-avatar {
+  border-radius: 12px;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--surface-3) 82%, transparent), color-mix(in srgb, var(--bg-soft) 94%, transparent));
+}
+
+.copilot-message.user .copilot-avatar {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 22%, transparent), color-mix(in srgb, var(--surface-3) 68%, transparent));
+}
+
+.copilot-bubble {
+  border-radius: 22px;
+  padding: 18px;
+  background: linear-gradient(170deg, color-mix(in srgb, var(--surface-1) 94%, transparent), color-mix(in srgb, var(--surface-2) 58%, transparent));
+  box-shadow: var(--shadow-soft);
+}
+
+.copilot-message.user .copilot-bubble {
+  border-color: color-mix(in srgb, var(--emerald) 28%, var(--border));
+  background: linear-gradient(170deg, color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--surface-1) 90%, transparent));
+}
+
+.assistant-meta-badge {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-soft) 70%, transparent);
+}
+
+.assistant-meta-badge.ai {
+  background: color-mix(in srgb, var(--emerald) 14%, transparent);
+}
+
+.assistant-section,
+.copilot-bubble p,
+.copilot-bubble li {
+  line-height: 1.6;
+}
+
+.composer-shell {
+  padding: 14px 16px 16px;
+  border-top-color: color-mix(in srgb, var(--border) 82%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 90%, transparent), color-mix(in srgb, var(--surface-2) 60%, transparent));
+}
+
+.attachment-menu {
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--surface-1) 90%, transparent);
+}
+
+.composer {
+  padding: 12px;
+  border-radius: 20px;
+  background: linear-gradient(165deg, color-mix(in srgb, var(--surface-1) 94%, transparent), color-mix(in srgb, var(--surface-2) 70%, transparent));
+}
+
+.composer textarea {
+  min-height: 56px;
+  line-height: 1.5;
+}
+
+.composer-plus,
+.composer-optimize,
+.composer-icon-button,
+.composer-send,
+.selected-mode-chip,
+.mode-chip {
+  border-radius: 14px;
+}
+
+.composer-send {
+  min-width: 138px;
+  font-weight: 700;
+}
+
+.selection-gate-backdrop,
+.bibliotheque-preview-backdrop {
+  backdrop-filter: blur(20px) saturate(1.06);
+}
+
+.selection-gate-card {
+  padding: 22px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 96%, transparent), color-mix(in srgb, var(--surface-2) 72%, transparent));
+}
+
+.bibliotheque-preview-card {
+  width: min(1100px, calc(100% - 8px));
+  height: min(calc(100dvh - 40px), 880px);
+  padding: 20px;
+  border-radius: 28px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-1) 96%, transparent), color-mix(in srgb, var(--surface-2) 72%, transparent));
+}
+
+.bibliotheque-preview-frame,
+.bibliotheque-preview-image-main,
+.bibliotheque-preview-thumb,
+.bibliotheque-preview-loading,
+.bibliotheque-preview-error,
+.bibliotheque-preview-note {
+  border-radius: 18px;
+}
+
+.bibliotheque-preview-markdown-paper {
+  border-radius: 22px;
+  padding: 28px 34px;
+  font-family: "IBM Plex Serif", Georgia, serif;
+  line-height: 1.74;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 99%, white), color-mix(in srgb, var(--bg-panel) 95%, transparent)),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 6%, transparent), transparent 30%);
+}
+
+.markdown-heading.level-1,
+.markdown-heading.level-2,
+.markdown-heading.level-3 {
+  font-family: "IBM Plex Serif", Georgia, serif;
+}
+
+.bibliotheque-preview-image-main {
+  min-height: min(54dvh, 560px);
+  background: color-mix(in srgb, var(--surface-2) 82%, transparent);
+}
+
+.bibliotheque-preview-image-main img {
+  max-height: min(54dvh, 560px);
+}
+
+.bibliotheque-preview-thumb.active {
+  box-shadow: 0 12px 22px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+@media (max-width: 1120px) {
+  .workspace-topbar {
+    flex-direction: column;
+  }
+
+  .toolbar-controls {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .workspace-intro-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .copilot-shell {
+    width: min(100%, 100%);
+  }
+}
+
+@media (max-width: 860px) {
+  .workspace-topbar {
+    padding: 18px 18px 14px;
+  }
+
+  .toolbar-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-intro-grid,
+  .copilot-shell {
+    padding-inline: 18px;
+  }
+
+  .bibliotheque-preview-card {
+    padding: 16px;
+  }
+
+  .bibliotheque-preview-markdown-paper {
+    padding: 20px 18px;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace-shell {
+    padding: 8px;
+  }
+
+  .workspace-shell::before {
+    inset: 8px;
+    border-radius: 22px;
+  }
+
+  .workspace-intro-grid,
+  .copilot-shell {
+    padding-inline: 12px;
+  }
+
+  .workspace-topbar h1 {
+    font-size: clamp(1.65rem, 7vw, 2.1rem);
+  }
+
+  .copilot-message {
+    gap: 10px;
+  }
+
+  .copilot-bubble,
+  .composer,
+  .selection-gate-card,
+  .bibliotheque-preview-card {
+    border-radius: 18px;
   }
 }

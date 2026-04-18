@@ -44,6 +44,18 @@ class Case(Base):
         cascade="all, delete-orphan"
     )
 
+    appointments = relationship(
+        "Appointment",
+        back_populates="case",
+        cascade="all, delete-orphan"
+    )
+
+    call_sessions = relationship(
+        "CallSession",
+        back_populates="case",
+        cascade="all, delete-orphan"
+    )
+
     consultation_requests = relationship(
         "ConsultationRequest",
         back_populates="case",

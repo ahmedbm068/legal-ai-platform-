@@ -1,0 +1,579 @@
+{
+    "name": "Legal AI - Call Orchestration",
+    "nodes": [
+        {
+            "parameters": {
+                "path": "legal-ai/call-events",
+                "httpMethod": "POST",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "1f3b1c58-6ed0-4f2f-8c3d-5d6a3f4f0f01",
+            "name": "Backend Consent Event",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                320,
+                300
+            ],
+            "webhookId": "legal-ai-call-orchestration"
+        },
+        {
+            "parameters": {
+                "rules": {
+                    "values": [
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": false,
+                                    "leftValue": "",
+                                    "typeValidation": "strict",
+                                    "version": 2
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.event_type }}",
+                                        "rightValue": "consent.request",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ],
+                                "combinator": "and"
+                            },
+                            "renameOutput": true,
+                            "outputKey": "consent.request"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": false,
+                                    "leftValue": "",
+                                    "typeValidation": "strict",
+                                    "version": 2
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.event_type }}",
+                                        "rightValue": "consent.reply.received",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ],
+                                "combinator": "and"
+                            },
+                            "renameOutput": true,
+                            "outputKey": "consent.reply.received"
+                        },
+                        {
+                            "conditions": {
+                                "options": {
+                                    "caseSensitive": false,
+                                    "leftValue": "",
+                                    "typeValidation": "strict",
+                                    "version": 2
+                                },
+                                "conditions": [
+                                    {
+                                        "leftValue": "={{ $json.event_type }}",
+                                        "rightValue": "transcription.completed",
+                                        "operator": {
+                                            "type": "string",
+                                            "operation": "equals"
+                                        }
+                                    }
+                                ],
+                                "combinator": "and"
+                            },
+                            "renameOutput": true,
+                            "outputKey": "transcription.completed"
+                        }
+                    ]
+                },
+                "options": {}
+            },
+            "id": "25a2d68a-6e70-4f9d-b0c5-5f0ad1fdc502",
+            "name": "Route Event",
+            "type": "n8n-nodes-base.switch",
+            "typeVersion": 2,
+            "position": [
+                540,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const backendBaseUrl = ($env.LEGAL_AI_BACKEND_URL || 'http://host.docker.internal:8000').replace(/\/$/, '');\nconst whatsappTo = $json.client_phone || $json.caller_phone || '';\nconst consentMessage = $json.consent_message || `Hello, this is Legal AI regarding case #${$json.case_id}. Please reply YES to confirm consent for this WhatsApp call and recording.`;\n\nreturn [{\n  json: {\n    ...$json,\n    backendBaseUrl,\n    whatsappTo,\n    consentMessage,\n    backendCallbackUrl: `${backendBaseUrl}/integrations/n8n/events`,\n  },\n}];"
+            },
+            "id": "76f6b0a6-2b71-4b65-8dd0-8ed2732f4c03",
+            "name": "Build Consent Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                780,
+                180
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $env.WHATSAPP_SEND_ENDPOINT }}",
+                "authentication": "none",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "={{ $env.WHATSAPP_SEND_AUTH_TOKEN ? `Bearer ${$env.WHATSAPP_SEND_AUTH_TOKEN}` : '' }}"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"to\": $json.whatsappTo,\n  \"message\": $json.consentMessage,\n  \"metadata\": {\n    \"call_session_id\": $json.call_session_id,\n    \"case_id\": $json.case_id,\n    \"client_id\": $json.client_id,\n    \"tenant_id\": $json.tenant_id\n  }\n}",
+                "options": {
+                    "ignoreResponseCode": true
+                }
+            },
+            "id": "c9a8ae05-b2a6-4fb8-9a64-1c5d4f6bb104",
+            "name": "Send WhatsApp Consent",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1020,
+                180
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $json.backendCallbackUrl }}",
+                "authentication": "none",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "X-N8N-SECRET",
+                            "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"event_type\": \"consent.request.sent\",\n  \"call_session_id\": $json.call_session_id,\n  \"voice_recording_id\": null,\n  \"provider_call_id\": null,\n  \"client_phone\": $json.client_phone,\n  \"caller_phone\": $json.caller_phone,\n  \"consent_message\": $json.consentMessage,\n  \"status\": \"awaiting_consent\"\n}",
+                "options": {
+                    "ignoreResponseCode": true
+                }
+            },
+            "id": "b43c4fa4-3c4a-4b37-b5ec-2d12b2b6e205",
+            "name": "Notify Backend Consent Sent",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1260,
+                180
+            ]
+        },
+        {
+            "parameters": {
+                "responseCode": 200,
+                "responseBody": "={\n  \"success\": true,\n  \"message\": \"Consent request was sent to the client.\",\n  \"call_session_id\": $json.call_session_id,\n  \"delivery_mode\": \"n8n\"\n}",
+                "options": {}
+            },
+            "id": "8f6d7d6b-8c5a-42d5-95e2-3c8f4b2b8f06",
+            "name": "Respond Consent Sent",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1500,
+                180
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const bodyText = String($json.body || '').trim();\nconst normalized = bodyText.toLowerCase();\nconst accepted = ['yes', 'y', 'ok', 'okay', 'oui'].includes(normalized) || normalized.startsWith('yes ') || normalized.startsWith('oui ');\n\nreturn [{\n  json: {\n    ...$json,\n    normalizedReply: normalized,\n    consentAccepted: accepted,\n    backendBaseUrl: ($env.LEGAL_AI_BACKEND_URL || 'http://host.docker.internal:8000').replace(/\/$/, ''),\n    backendCallbackUrl: `${($env.LEGAL_AI_BACKEND_URL || 'http://host.docker.internal:8000').replace(/\/$/, '')}/integrations/n8n/events`,\n  },\n}];"
+            },
+            "id": "bfaad89f-1a0e-45a0-a8d0-8a87a85d3f07",
+            "name": "Normalize Consent Reply",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                780,
+                360
+            ]
+        },
+        {
+            "parameters": {
+                "conditions": {
+                    "options": {
+                        "caseSensitive": false,
+                        "leftValue": "",
+                        "typeValidation": "strict",
+                        "version": 2
+                    },
+                    "combinator": "and",
+                    "conditions": [
+                        {
+                            "leftValue": "={{ $json.consentAccepted }}",
+                            "rightValue": true,
+                            "operator": {
+                                "type": "boolean",
+                                "operation": "true"
+                            }
+                        }
+                    ]
+                }
+            },
+            "id": "26168a50-9f4b-43d3-b48e-cc1fa4d1e408",
+            "name": "Reply Accepted?",
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [
+                1020,
+                360
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $json.backendCallbackUrl }}",
+                "authentication": "none",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "X-N8N-SECRET",
+                            "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"event_type\": \"consent.reply.received\",\n  \"call_session_id\": $json.call_session_id,\n  \"voice_recording_id\": null,\n  \"provider_call_id\": null,\n  \"client_phone\": $json.client_phone,\n  \"caller_phone\": $json.caller_phone,\n  \"body\": $json.body,\n  \"status\": \"ready\"\n}",
+                "options": {
+                    "ignoreResponseCode": true
+                }
+            },
+            "id": "f2cf3d8a-7cc0-4f1f-8c73-8f0b6fd3f209",
+            "name": "Notify Backend Consent Accepted",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1260,
+                280
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $env.WHATSAPP_CALL_START_ENDPOINT }}",
+                "authentication": "none",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Authorization",
+                            "value": "={{ $env.WHATSAPP_CALL_START_AUTH_TOKEN ? `Bearer ${$env.WHATSAPP_CALL_START_AUTH_TOKEN}` : '' }}"
+                        },
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"call_session_id\": $json.call_session_id,\n  \"client_phone\": $json.client_phone,\n  \"caller_phone\": $json.caller_phone,\n  \"case_id\": $json.case_id\n}",
+                "options": {
+                    "ignoreResponseCode": true
+                }
+            },
+            "id": "d0bf774d-1cc2-4fa6-9f78-c53bd4f70a10",
+            "name": "Start Call Provider",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1500,
+                280
+            ]
+        },
+        {
+            "parameters": {
+                "responseCode": 200,
+                "responseBody": "={\n  \"success\": true,\n  \"message\": \"Consent accepted. Call start request was sent.\",\n  \"call_session_id\": $json.call_session_id,\n  \"accepted\": true\n}",
+                "options": {}
+            },
+            "id": "1be1cba6-d6ef-46ef-8c57-1d9b8f15db11",
+            "name": "Respond Consent Accepted",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1740,
+                280
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $json.backendCallbackUrl }}",
+                "authentication": "none",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "X-N8N-SECRET",
+                            "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"event_type\": \"consent.reply.received\",\n  \"call_session_id\": $json.call_session_id,\n  \"voice_recording_id\": null,\n  \"provider_call_id\": null,\n  \"client_phone\": $json.client_phone,\n  \"caller_phone\": $json.caller_phone,\n  \"body\": $json.body,\n  \"status\": \"consent_rejected\"\n}",
+                "options": {
+                    "ignoreResponseCode": true
+                }
+            },
+            "id": "3d9d68d5-86a1-4d50-8d53-48edc7f4de12",
+            "name": "Notify Backend Consent Rejected",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                1260,
+                500
+            ]
+        },
+        {
+            "parameters": {
+                "responseCode": 200,
+                "responseBody": "={\n  \"success\": true,\n  \"message\": \"Consent message was rejected or not recognized.\",\n  \"call_session_id\": $json.call_session_id,\n  \"accepted\": false\n}",
+                "options": {}
+            },
+            "id": "c3ff7cb1-8b5a-4d13-b90e-0d6aaf2d4e13",
+            "name": "Respond Consent Rejected",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1500,
+                500
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $json.backendCallbackUrl }}",
+                "authentication": "none",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "X-N8N-SECRET",
+                            "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"event_type\": \"transcription.completed\",\n  \"call_session_id\": $json.call_session_id,\n  \"voice_recording_id\": $json.voice_recording_id || null,\n  \"provider_call_id\": $json.provider_call_id || null,\n  \"client_phone\": $json.client_phone,\n  \"caller_phone\": $json.caller_phone,\n  \"transcript_text\": $json.transcript_text || null,\n  \"transcript_source\": $json.transcript_source || null,\n  \"transcript_language\": $json.transcript_language || null,\n  \"conversation_turns\": $json.conversation_turns || [],\n  \"status\": $json.status || \"completed\"\n}",
+                "options": {
+                    "ignoreResponseCode": true
+                }
+            },
+            "id": "a6d7f0d1-0d14-4d0c-9bb7-6f8bcbf9f414",
+            "name": "Forward Transcript Update",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                780,
+                580
+            ]
+        },
+        {
+            "parameters": {
+                "responseCode": 200,
+                "responseBody": "={\n  \"success\": true,\n  \"message\": \"Transcript forwarded to Legal AI backend.\",\n  \"call_session_id\": $json.call_session_id\n}",
+                "options": {}
+            },
+            "id": "1bc9f7cb-d3c2-49da-86ef-1dfbe8cbf515",
+            "name": "Respond Transcript Forwarded",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1020,
+                580
+            ]
+        }
+    ],
+    "connections": {
+        "Backend Consent Event": {
+            "main": [
+                [
+                    {
+                        "node": "Route Event",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Route Event": {
+            "main": [
+                [
+                    {
+                        "node": "Build Consent Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Normalize Consent Reply",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Forward Transcript Update",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Build Consent Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Send WhatsApp Consent",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Send WhatsApp Consent": {
+            "main": [
+                [
+                    {
+                        "node": "Notify Backend Consent Sent",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Notify Backend Consent Sent": {
+            "main": [
+                [
+                    {
+                        "node": "Respond Consent Sent",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalize Consent Reply": {
+            "main": [
+                [
+                    {
+                        "node": "Reply Accepted?",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Reply Accepted?": {
+            "main": [
+                [
+                    {
+                        "node": "Notify Backend Consent Accepted",
+                        "type": "main",
+                        "index": 0
+                    }
+                ],
+                [
+                    {
+                        "node": "Notify Backend Consent Rejected",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Notify Backend Consent Accepted": {
+            "main": [
+                [
+                    {
+                        "node": "Start Call Provider",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Start Call Provider": {
+            "main": [
+                [
+                    {
+                        "node": "Respond Consent Accepted",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Notify Backend Consent Rejected": {
+            "main": [
+                [
+                    {
+                        "node": "Respond Consent Rejected",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Forward Transcript Update": {
+            "main": [
+                [
+                    {
+                        "node": "Respond Transcript Forwarded",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {
+        "executionOrder": "v1",
+        "timezone": "UTC"
+    },
+    "tags": []
+}

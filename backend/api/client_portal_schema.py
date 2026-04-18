@@ -106,6 +106,36 @@ class ClientPortalActivityItem(BaseModel):
     case_id: Optional[int] = None
 
 
+class ClientPortalCalendarItem(BaseModel):
+    id: int
+    case_id: int
+    tenant_id: int
+    lawyer_id: Optional[int] = None
+    client_id: Optional[int] = None
+    consultation_request_id: Optional[int] = None
+    created_by_user_id: Optional[int] = None
+    title: str
+    description: Optional[str] = None
+    appointment_type: str
+    visibility_scope: str
+    status: str
+    scheduled_at: datetime
+    duration_minutes: int
+    location: Optional[str] = None
+    timezone_name: str
+    ai_summary: Optional[str] = None
+    ai_recommendation: Optional[str] = None
+    ai_confidence: Optional[str] = None
+    ai_source: Optional[str] = None
+    notes: Optional[str] = None
+    case_title: Optional[str] = None
+    client_name: Optional[str] = None
+    lawyer_name: Optional[str] = None
+    is_ai_suggested: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
 class ClientPortalDashboardMetrics(BaseModel):
     total_cases: int = 0
     active_cases: int = 0
@@ -113,6 +143,7 @@ class ClientPortalDashboardMetrics(BaseModel):
     pending_documents: int = 0
     consultation_requests: int = 0
     requests_under_review: int = 0
+    upcoming_appointments: int = 0
 
 
 class ClientPortalDashboardResponse(BaseModel):
@@ -120,6 +151,7 @@ class ClientPortalDashboardResponse(BaseModel):
     consultations: list[ClientPortalConsultationItem]
     cases: list[ClientPortalCaseItem] = Field(default_factory=list)
     documents: list[ClientPortalDocumentItem] = Field(default_factory=list)
+    calendar_events: list[ClientPortalCalendarItem] = Field(default_factory=list)
     activity: list[ClientPortalActivityItem] = Field(default_factory=list)
     metrics: ClientPortalDashboardMetrics = Field(default_factory=ClientPortalDashboardMetrics)
     jobs: list[dict] = Field(default_factory=list)

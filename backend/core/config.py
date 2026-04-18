@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     LOCAL_TRANSCRIPTION_PREFER_LOCAL_FILES: bool = True
     TRANSCRIPTION_PREWARM_ON_STARTUP: bool = True
     TRANSCRIPTION_REMOTE_ENABLED: bool = True
+    N8N_WORKFLOW_WEBHOOK_URL: Optional[str] = None
+    N8N_WEBHOOK_SECRET: Optional[str] = None
+    N8N_REQUEST_TIMEOUT_SECONDS: int = 15
+    WHATSAPP_SEND_ENDPOINT: Optional[str] = None
+    WHATSAPP_SEND_AUTH_TOKEN: Optional[str] = None
+    WHATSAPP_WEBHOOK_SECRET: Optional[str] = None
+    WHATSAPP_DEFAULT_COUNTRY_CODE: Optional[str] = "216"
+    WHATSAPP_AUTO_SEND_ENABLED: bool = False
     OPENROUTER_SITE_URL: Optional[str] = None
     OPENROUTER_APP_NAME: str = "legal-ai-platform"
     RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"

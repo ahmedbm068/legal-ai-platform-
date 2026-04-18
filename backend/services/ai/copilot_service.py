@@ -1,3 +1,4 @@
+# pyright: reportAssignmentType=false, reportArgumentType=false, reportOperatorIssue=false, reportAttributeAccessIssue=false, reportGeneralTypeIssues=false
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,12 +7,15 @@ import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.sql import func
 
+from backend.models.appointment import Appointment
 from backend.models.case import Case
 from backend.models.client import Client
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.document import Document
+from backend.models.prompt_library_entry import PromptLibraryEntry
 from backend.models.voice_recording import VoiceRecording
 from backend.services.ai.agents.booking_agent import booking_agent
 from backend.services.ai.agents.case_reasoning_agent import case_reasoning_agent
@@ -41,6 +45,7 @@ from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.copilot_risk_analysis_mixin import CopilotRiskAnalysisMixin
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
+from backend.services.calendar_service import build_ai_calendar_brief, normalize_appointment_type, normalize_scope, normalize_status, serialize_appointment
 
 
 class CopilotService(CopilotRiskAnalysisMixin):
@@ -72,9 +77,27 @@ class CopilotService(CopilotRiskAnalysisMixin):
         "ask_global",
         "summarize_global",
     }
+    CHAT_ASSISTANT_INTENTS = {"ask_global", "summarize_global"}
+    CHAT_GREETING_PATTERN = re.compile(
+        r"^(?:hi|hello|hey|good\s+morning|good\s+afternoon|good\s+evening|salam|salem|bonjour|bonsoir|yo)\b",
+        re.IGNORECASE,
+    )
+    CHAT_THANKS_PATTERN = re.compile(
+        r"\b(?:thanks?|thank\s+you|thx|much\s+appreciated)\b",
+        re.IGNORECASE,
+    )
     CRUD_INTENTS = {
         "create_case",
         "create_client",
+        "create_prompt_library_entry",
+        "update_case",
+        "update_client",
+        "delete_case",
+        "delete_client",
+        "update_case_appointment",
+        "delete_case_appointment",
+        "update_prompt_library_entry",
+        "delete_prompt_library_entry",
         "create_case_appointment",
         "update_case_status",
         "request_document_upload",
@@ -83,8 +106,18 @@ class CopilotService(CopilotRiskAnalysisMixin):
     ACTION_CATEGORY_BY_INTENT = {
         "create_case": "crud",
         "create_client": "crud",
+        "create_prompt_library_entry": "crud",
+        "update_case": "crud",
+        "update_client": "crud",
+        "delete_case": "crud",
+        "delete_client": "crud",
+        "update_case_appointment": "crud",
+        "delete_case_appointment": "crud",
+        "update_prompt_library_entry": "crud",
+        "delete_prompt_library_entry": "crud",
         "list_cases": "query",
         "list_clients": "query",
+        "list_prompt_library": "query",
         "list_case_documents": "query",
         "list_case_appointments": "query",
         "request_document_upload": "crud",
@@ -358,6 +391,157 @@ class CopilotService(CopilotRiskAnalysisMixin):
                 "action": action,
                 "requires_agent_mode": True,
             },
+        }
+
+    @staticmethod
+    def _looks_like_conversational_opening(message: str) -> bool:
+        lowered = str(message or "").strip().lower()
+        if not lowered:
+            return True
+
+        compact = re.sub(r"\s+", " ", lowered)
+        if CopilotService.CHAT_GREETING_PATTERN.search(compact):
+            return True
+        if compact in {
+            "how are you",
+            "who are you",
+            "what can you do",
+            "help",
+            "can you help me",
+            "i need help",
+        }:
+            return True
+        return False
+
+    @staticmethod
+    def _build_chat_greeting_answer(*, user_role: str) -> str:
+        role_hint = "lawyer" if user_role in {"admin", "lawyer", "assistant"} else "client"
+        if role_hint == "lawyer":
+            return (
+                "Hello. I am your Legal AI assistant. "
+                "I can support you with risk spotting, strategy options, drafting support, and clear next steps.\n"
+                "You can start with:\n"
+                "1. Analyze risks in this matter.\n"
+                "2. Draft a client update in professional tone.\n"
+                "3. Build a practical action plan for the next 7 days.\n\n"
+                "Note: I provide legal decision support and drafting assistance, but I do not replace professional legal judgment."
+            )
+        return (
+            "Hello. I am your Legal AI assistant. "
+            "I can explain legal points in clear language, help structure your concerns, and suggest practical next steps.\n"
+            "You can start with:\n"
+            "1. Explain this legal issue in simple terms.\n"
+            "2. Help me prepare questions for my lawyer.\n"
+            "3. Organize my facts into a clear timeline.\n\n"
+            "Note: I provide informational guidance and do not replace advice from a licensed lawyer."
+        )
+
+    @staticmethod
+    def _build_chat_fallback_answer(question: str) -> str:
+        cleaned = str(question or "").strip()
+        if not cleaned:
+            return CopilotService._build_chat_greeting_answer(user_role="assistant")
+        return (
+            "I can help with legal reasoning, issue spotting, strategy options, drafting guidance, and concise explanations. "
+            "Share your objective, jurisdiction, and key facts, and I will walk through it step by step.\n\n"
+            "Note: This is legal support content, not a substitute for advice from a licensed attorney."
+        )
+
+    def _respond_in_chat_mode(
+        self,
+        *,
+        question: str,
+        user_role: str,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        normalized_question = str(question or "").strip()
+        if not normalized_question or self._looks_like_conversational_opening(normalized_question):
+            return {
+                "answer": self._build_chat_greeting_answer(user_role=user_role),
+                "used_fallback": False,
+                "fallback_reason": None,
+                "confidence": "high",
+                "scope": "global",
+                "sources": [],
+                "citations": [],
+            }
+
+        if self.CHAT_THANKS_PATTERN.search(normalized_question):
+            return {
+                "answer": "You are welcome. If you want, I can also help you structure the next legal step.",
+                "used_fallback": False,
+                "fallback_reason": None,
+                "confidence": "high",
+                "scope": "global",
+                "sources": [],
+                "citations": [],
+            }
+
+        if not self.client:
+            return {
+                "answer": self._build_chat_fallback_answer(normalized_question),
+                "used_fallback": True,
+                "fallback_reason": "No LLM provider API key is configured",
+                "confidence": "medium",
+                "scope": "global",
+                "sources": [],
+                "citations": [],
+            }
+
+        history_lines: List[str] = []
+        for item in (conversation_history or [])[-8:]:
+            role = str(item.get("role") or "").strip().lower()
+            content = str(item.get("content") or "").strip()
+            if role in {"user", "assistant"} and content:
+                history_lines.append(f"{role}: {content[:500]}")
+
+        prompt = f"""
+You are Legal AI, a professional conversational legal assistant for lawyers.
+
+Default chat-mode behavior:
+- Be conversational, clear, and professional.
+    - Be concise by default, but add detail when the user asks.
+- Answer greetings and follow-up questions naturally.
+- Provide practical legal insights and structured reasoning.
+- Do not execute CRUD operations or workflow tasks in this mode.
+- If the user asks to execute actions, explain that Agent Mode is for execution and offer planning guidance.
+- Do not invent legal authorities, case law, or statutes.
+    - Include a brief legal-support disclaimer when the user asks for definitive legal advice or high-stakes decisions.
+
+Conversation so far:
+{chr(10).join(history_lines) or "No prior messages."}
+
+User message:
+{normalized_question}
+"""
+
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                input=prompt,
+            )
+            answer = llm_gateway.extract_output_text(response).strip()
+            if answer:
+                return {
+                    "answer": answer,
+                    "used_fallback": False,
+                    "fallback_reason": None,
+                    "confidence": "medium",
+                    "scope": "global",
+                    "sources": [],
+                    "citations": [],
+                }
+        except Exception:
+            pass
+
+        return {
+            "answer": self._build_chat_fallback_answer(normalized_question),
+            "used_fallback": True,
+            "fallback_reason": "chat_generation_failed",
+            "confidence": "medium",
+            "scope": "global",
+            "sources": [],
+            "citations": [],
         }
 
     @staticmethod
@@ -662,6 +846,15 @@ class CopilotService(CopilotRiskAnalysisMixin):
                 strong_case_intents = {
                     "create_case",
                     "create_client",
+                    "create_prompt_library_entry",
+                    "update_case",
+                    "update_client",
+                    "delete_case",
+                    "delete_client",
+                    "update_case_appointment",
+                    "delete_case_appointment",
+                    "update_prompt_library_entry",
+                    "delete_prompt_library_entry",
                     "summarize_and_analyze_risks_case",
                     "summarize_case",
                     "analyze_risks_case",
@@ -682,6 +875,7 @@ class CopilotService(CopilotRiskAnalysisMixin):
                     "update_case_status",
                     "list_cases",
                     "list_clients",
+                    "list_prompt_library",
                 }
                 if raw_parsed.get("intent") in strong_case_intents and parsed.get("intent") in {"ask_global", "summarize_global"}:
                     parsed = raw_parsed
@@ -764,6 +958,12 @@ class CopilotService(CopilotRiskAnalysisMixin):
             )
         elif intent in self.CRUD_INTENTS and not agent_mode:
             result = self._agent_mode_required_response(action=intent)
+        elif normalized_mode == "default" and not agent_mode and intent in self.CHAT_ASSISTANT_INTENTS:
+            result = self._respond_in_chat_mode(
+                question=resolved_query,
+                user_role=normalized_role,
+                conversation_history=conversation_history,
+            )
         else:
             result = self.intent_execution_agent.execute(
                 intent=intent,
@@ -855,6 +1055,119 @@ class CopilotService(CopilotRiskAnalysisMixin):
     @staticmethod
     def _normalize_lookup_text(value: str | None) -> str:
         return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+    @staticmethod
+    def _build_refresh_triggers(*types_to_refresh: str) -> list[Dict[str, str]]:
+        unique_types: list[str] = []
+        for item in types_to_refresh:
+            cleaned = str(item or "").strip().lower()
+            if cleaned and cleaned not in unique_types:
+                unique_types.append(cleaned)
+        return [{"type": f"refresh_{item}"} for item in unique_types]
+
+    @staticmethod
+    def _strip_extracted_value(value: str) -> str:
+        cleaned = str(value or "").splitlines()[0]
+        quoted = re.match(r"^\s*([\"'])(.*?)\1", cleaned)
+        if quoted:
+            cleaned = quoted.group(2)
+        else:
+            cleaned = re.split(
+                r"\s+\b(?:and|then)\b\s+(?=(?:set|update|change|modify|rename)\b)",
+                cleaned,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )[0]
+        cleaned = re.sub(r"\b(?:and|then)\s*$", "", cleaned, flags=re.IGNORECASE)
+        return cleaned.strip(" ,;:-\"'")
+
+    def _extract_field_value(
+        self,
+        message: str,
+        labels: list[str],
+        *,
+        stop_labels: list[str] | None = None,
+    ) -> Optional[str]:
+        text = str(message or "")
+        for label in labels:
+            label_pattern = re.escape(label).replace(r"\ ", r"\s+")
+            candidate: Optional[str] = None
+            for pattern in (
+                rf"(?<!\w)(?:set|update|change|modify|rename)\s+{label_pattern}(?!\w)\s*(?:is|=|:|to|as)?\s*",
+                rf"(?<!\w){label_pattern}(?!\w)\s*(?:is|=|:|to|as)?\s*",
+            ):
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    candidate = text[match.end():]
+                    break
+
+            if candidate is None:
+                continue
+
+            if stop_labels:
+                stop_pattern = "|".join(
+                    re.escape(stop_label).replace(r"\ ", r"\s+")
+                    for stop_label in stop_labels
+                )
+                stop_match = re.search(
+                    rf"(?:\b(?:and|then)\b\s+)?(?:(?:set|update|change|modify|rename)\s+)?(?:{stop_pattern})\s*(?:is|=|:|to|as)?\s*",
+                    candidate,
+                    re.IGNORECASE,
+                )
+                if stop_match:
+                    candidate = candidate[:stop_match.start()]
+
+            cleaned_candidate = self._strip_extracted_value(candidate)
+            if cleaned_candidate:
+                return cleaned_candidate[:4000]
+        return None
+
+    @staticmethod
+    def _extract_boolean_value(message: str, labels: list[str]) -> Optional[bool]:
+        lowered = str(message or "").lower()
+        for label in labels:
+            if label not in lowered:
+                continue
+            window = lowered[max(0, lowered.find(label) - 16) : lowered.find(label) + len(label) + 32]
+            if any(negative in window for negative in ["not favorite", "not fav", "remove favorite", "unfavorite", "unstar", "without favorite"]):
+                return False
+            return True
+        return None
+
+    @staticmethod
+    def _extract_datetime_value(message: str) -> Optional[datetime]:
+        text = str(message or "").strip()
+        if not text:
+            return None
+
+        iso_match = re.search(
+            r"\b\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2})?)?(?:Z|[+-]\d{2}:?\d{2})?\b",
+            text,
+        )
+        if iso_match:
+            candidate = iso_match.group(0).replace("Z", "+00:00")
+            try:
+                return datetime.fromisoformat(candidate)
+            except ValueError:
+                pass
+
+        patterns = [
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y/%m/%d %H:%M",
+            "%d/%m/%Y %H:%M",
+            "%m/%d/%Y %H:%M",
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+        ]
+        for pattern in patterns:
+            try:
+                return datetime.strptime(text[:32], pattern)
+            except ValueError:
+                continue
+
+        return None
 
     def _find_client_by_name(
         self,
@@ -1342,7 +1655,7 @@ class CopilotService(CopilotRiskAnalysisMixin):
                         "title": row.title,
                         "status": row.status,
                         "jurisdiction_country": row.jurisdiction_country,
-                        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+                        "updated_at": self._safe_isoformat(row.updated_at),
                     }
                     for row in rows[:12]
                 ]
@@ -1396,6 +1709,695 @@ class CopilotService(CopilotRiskAnalysisMixin):
             },
         }
 
+    def _list_prompt_library(self, *, db: Session, tenant_id: int) -> Dict[str, Any]:
+        rows = (
+            db.query(PromptLibraryEntry)
+            .filter(PromptLibraryEntry.tenant_id == tenant_id)
+            .order_by(
+                PromptLibraryEntry.is_favorite.desc(),
+                PromptLibraryEntry.updated_at.desc(),
+                PromptLibraryEntry.id.desc(),
+            )
+            .limit(80)
+            .all()
+        )
+
+        if not rows:
+            return {
+                "answer": "No prompt library entries were found in your workspace.",
+                "used_fallback": True,
+                "fallback_reason": "No prompt library entries found",
+                "confidence": "medium",
+                "scope": "tenant",
+                "sources": [],
+                "structured_result": {"entries": []},
+            }
+
+        lines = ["Prompt library entries:"]
+        for row in rows[:20]:
+            favorite_marker = "[favorite]" if bool(row.is_favorite) else ""
+            category = row.category or "uncategorized"
+            lines.append(f"- Prompt #{row.id}: {row.title} | {category} {favorite_marker}".rstrip())
+
+        return {
+            "answer": "\n".join(lines),
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "structured_result": {
+                "entries": [
+                    {
+                        "id": row.id,
+                        "title": row.title,
+                        "category": row.category,
+                        "description": row.description,
+                        "is_favorite": row.is_favorite,
+                        "updated_at": self._safe_isoformat(row.updated_at),
+                    }
+                    for row in rows[:20]
+                ],
+            },
+        }
+
+    def _get_client_or_404(self, *, db: Session, tenant_id: int, client_id: Optional[int]) -> Client:
+        if client_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Client id could not be detected from the message.")
+
+        client = (
+            db.query(Client)
+            .filter(
+                Client.id == client_id,
+                Client.tenant_id == tenant_id,
+                Client.deleted_at.is_(None),
+            )
+            .first()
+        )
+        if not client:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found.")
+        return client
+
+    def _get_appointment_or_404(self, *, db: Session, tenant_id: int, appointment_id: Optional[int]) -> Appointment:
+        if appointment_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Appointment id could not be detected from the message.")
+
+        appointment = (
+            db.query(Appointment)
+            .options(
+                selectinload(Appointment.case),
+                selectinload(Appointment.client),
+                selectinload(Appointment.lawyer),
+                selectinload(Appointment.consultation_request),
+            )
+            .filter(
+                Appointment.id == appointment_id,
+                Appointment.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not appointment:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found.")
+        return appointment
+
+    def _get_prompt_library_entry_or_404(self, *, db: Session, tenant_id: int, entry_id: Optional[int]) -> PromptLibraryEntry:
+        if entry_id is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Prompt library entry id could not be detected from the message.")
+
+        entry = (
+            db.query(PromptLibraryEntry)
+            .filter(
+                PromptLibraryEntry.id == entry_id,
+                PromptLibraryEntry.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not entry:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prompt library entry not found.")
+        return entry
+
+    def _update_case_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        user_role: str,
+        user_id: Optional[int],
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="update_case")
+
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        assigned_lawyer_id = self._coerce_optional_int(case.lawyer_id)
+        if user_role == "lawyer" and user_id and assigned_lawyer_id not in {None, user_id}:
+            return {
+                **self._permission_denied_response(user_role=user_role, action="update_case"),
+                "answer": f"Permission denied: you can only update cases assigned to you. Case #{case.id} is assigned to another lawyer.",
+            }
+
+        message = str(raw_message or "")
+        lowered = message.lower()
+        requested_title = self._extract_field_value(message, ["case title", "title"], stop_labels=["description", "status", "client", "jurisdiction", "country"])
+        requested_description = self._extract_field_value(message, ["description", "desc", "details"], stop_labels=["title", "status", "client", "jurisdiction", "country"])
+        requested_status = self._extract_field_value(message, ["status"], stop_labels=["title", "description", "client", "jurisdiction", "country"])
+        if requested_title is None:
+            rename_case_match = re.search(
+                r"\b(?:rename|retitle)\s+case(?:\s*#?\s*\d+)?\s+(?:to|as)\s+(.+?)(?:\b(?:description|status|client|jurisdiction|country)\b|$)",
+                message,
+                re.IGNORECASE,
+            )
+            if rename_case_match:
+                requested_title = self._strip_extracted_value(rename_case_match.group(1))
+        requested_client_name = self._extract_client_name_from_message_fallback(raw_message=message)
+        requested_jurisdiction_country = None
+        if any(keyword in lowered for keyword in ["germany", "deutschland", "german", "deutsch"]):
+            requested_jurisdiction_country = "germany"
+        elif any(keyword in lowered for keyword in ["tunisia", "tunisian", "tunisie", "tunis"]):
+            requested_jurisdiction_country = "tunisia"
+
+        requested_client_id = None
+        client_match = re.search(r"\bclient\s*#?\s*(\d+)\b", message, re.IGNORECASE)
+        if client_match:
+            requested_client_id = int(client_match.group(1))
+
+        if requested_title is None and requested_description is None and requested_status is None and requested_client_id is None and requested_client_name is None and requested_jurisdiction_country is None:
+            return {
+                "answer": f"I can update case #{case.id}, but I need at least one field such as title, description, status, client, or jurisdiction.",
+                "used_fallback": True,
+                "fallback_reason": "Missing update fields",
+                "confidence": "medium",
+                "scope": "case",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"action": "update_case", "case_id": case.id, "missing_fields": ["update_fields"]},
+            }
+
+        previous_state = {
+            "title": case.title,
+            "description": case.description,
+            "status": case.status,
+            "client_id": case.client_id,
+            "jurisdiction_country": case.jurisdiction_country,
+        }
+
+        if requested_title:
+            case.title = requested_title[:200]
+        if requested_description:
+            case.description = requested_description[:4000]
+        if requested_status:
+            normalized_status = self._normalize_status_value(requested_status)
+            if normalized_status:
+                case.status = normalized_status
+        if requested_client_id is not None:
+            client = self._get_client_or_404(db=db, tenant_id=tenant_id, client_id=requested_client_id)
+            case.client_id = client.id
+        elif requested_client_name:
+            client = self._find_client_by_name(db=db, tenant_id=tenant_id, requested_client_name=requested_client_name)
+            if client:
+                case.client_id = client.id
+        if requested_jurisdiction_country is not None:
+            case.jurisdiction_country = requested_jurisdiction_country
+
+        db.commit()
+        db.refresh(case)
+
+        return {
+            "answer": f"Updated case #{case.id}: {case.title}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "update_case",
+                "case": {
+                    "id": case.id,
+                    "title": case.title,
+                    "status": case.status,
+                    "client_id": case.client_id,
+                    "jurisdiction_country": case.jurisdiction_country,
+                    "previous": previous_state,
+                },
+                "ui_triggers": self._build_refresh_triggers("cases", "case_context"),
+            },
+        }
+
+    def _delete_case_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case_id: Optional[int],
+        user_role: str,
+        user_id: Optional[int],
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="delete_case")
+
+        case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
+        assigned_lawyer_id = self._coerce_optional_int(case.lawyer_id)
+        if user_role == "lawyer" and user_id and assigned_lawyer_id not in {None, user_id}:
+            return {
+                **self._permission_denied_response(user_role=user_role, action="delete_case"),
+                "answer": f"Permission denied: you can only delete cases assigned to you. Case #{case.id} is assigned to another lawyer.",
+            }
+
+        case.deleted_at = func.now()
+        db.commit()
+
+        return {
+            "answer": f"Archived case #{case.id}: {case.title}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "delete_case",
+                "case": {"id": case.id, "title": case.title, "archived": True},
+                "ui_triggers": self._build_refresh_triggers("cases", "clients", "case_context"),
+            },
+        }
+
+    def _update_client_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        client_id: Optional[int],
+        user_role: str,
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="update_client")
+
+        client = self._get_client_or_404(db=db, tenant_id=tenant_id, client_id=client_id)
+        message = str(raw_message or "")
+        email_match = re.search(r"\b[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}\b", message, re.IGNORECASE)
+        requested_name = self._extract_field_value(message, ["client name", "name"], stop_labels=["email", "phone", "address"])
+        requested_phone = self._extract_field_value(message, ["phone", "mobile", "telephone"], stop_labels=["name", "email", "address"])
+        requested_address = self._extract_field_value(message, ["address"], stop_labels=["name", "email", "phone"])
+        if requested_name is None:
+            rename_client_match = re.search(
+                r"\b(?:rename|retitle|change)\s+client(?:\s*#?\s*\d+)?\s+(?:name\s+)?(?:to|as)\s+(.+?)(?:\b(?:email|phone|mobile|telephone|address)\b|$)",
+                message,
+                re.IGNORECASE,
+            )
+            if rename_client_match:
+                requested_name = self._strip_extracted_value(rename_client_match.group(1))
+
+        if requested_name is None and email_match is None and requested_phone is None and requested_address is None:
+            return {
+                "answer": f"I can update client #{client.id}, but I need at least one field such as name, email, phone, or address.",
+                "used_fallback": True,
+                "fallback_reason": "Missing update fields",
+                "confidence": "medium",
+                "scope": "tenant",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"action": "update_client", "client_id": client.id, "missing_fields": ["update_fields"]},
+            }
+
+        previous_state = {
+            "name": client.name,
+            "email": client.email,
+            "phone": client.phone,
+            "address": client.address,
+        }
+
+        if requested_name:
+            client.name = requested_name[:160]
+        if email_match:
+            client.email = email_match.group(0)[:255]
+        if requested_phone:
+            client.phone = requested_phone[:40]
+        if requested_address:
+            client.address = requested_address[:255]
+
+        db.commit()
+        db.refresh(client)
+
+        return {
+            "answer": f"Updated client #{client.id}: {client.name}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "update_client",
+                "client": {
+                    "id": client.id,
+                    "name": client.name,
+                    "email": client.email,
+                    "phone": client.phone,
+                    "address": client.address,
+                    "previous": previous_state,
+                },
+                "ui_triggers": self._build_refresh_triggers("clients", "cases"),
+            },
+        }
+
+    def _delete_client_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        client_id: Optional[int],
+        user_role: str,
+    ) -> Dict[str, Any]:
+        if user_role != "admin":
+            return self._permission_denied_response(user_role=user_role, action="delete_client")
+
+        client = self._get_client_or_404(db=db, tenant_id=tenant_id, client_id=client_id)
+        client.deleted_at = func.now()
+        db.commit()
+
+        return {
+            "answer": f"Archived client #{client.id}: {client.name}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "delete_client",
+                "client": {"id": client.id, "name": client.name, "archived": True},
+                "ui_triggers": self._build_refresh_triggers("clients", "cases"),
+            },
+        }
+
+    def _create_prompt_library_entry_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        user_role: str,
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        if user_role == "client":
+            return self._permission_denied_response(user_role=user_role, action="create_prompt_library_entry")
+
+        message = str(raw_message or "")
+        title = self._extract_field_value(message, ["title", "prompt title", "prompt name", "template title"])
+        prompt_text = self._extract_field_value(message, ["prompt text", "text", "prompt", "content", "body"], stop_labels=["title", "description", "category", "favorite"])
+        description = self._extract_field_value(message, ["description", "desc"], stop_labels=["title", "text", "prompt", "category", "favorite"])
+        category = self._extract_field_value(message, ["category", "tag", "folder"], stop_labels=["title", "text", "description", "favorite"])
+        is_favorite = self._extract_boolean_value(message, ["favorite", "favourite", "star", "pin"])
+
+        if not title:
+            title = message[:120].strip() or "New prompt"
+        if not prompt_text:
+            prompt_text = message[:12000].strip()
+        if not prompt_text:
+            return {
+                "answer": "I can create a prompt library entry, but I need the prompt text.",
+                "used_fallback": True,
+                "fallback_reason": "Missing prompt text",
+                "confidence": "medium",
+                "scope": "tenant",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"action": "create_prompt_library_entry", "missing_fields": ["prompt_text"]},
+            }
+
+        entry = PromptLibraryEntry(
+            tenant_id=tenant_id,
+            created_by_user_id=None,
+            title=title[:120],
+            prompt_text=prompt_text[:12000],
+            description=description[:500] if description else None,
+            category=category[:80] if category else None,
+            is_favorite=bool(is_favorite) if is_favorite is not None else False,
+        )
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+
+        return {
+            "answer": f"Created prompt library entry #{entry.id}: {entry.title}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "create_prompt_library_entry",
+                "entry": {
+                    "id": entry.id,
+                    "title": entry.title,
+                    "category": entry.category,
+                    "is_favorite": entry.is_favorite,
+                },
+                "ui_triggers": self._build_refresh_triggers("prompt_library"),
+            },
+        }
+
+    def _update_prompt_library_entry_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        entry_id: Optional[int],
+        user_role: str,
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        if user_role == "client":
+            return self._permission_denied_response(user_role=user_role, action="update_prompt_library_entry")
+
+        entry = self._get_prompt_library_entry_or_404(db=db, tenant_id=tenant_id, entry_id=entry_id)
+        message = str(raw_message or "")
+        title = self._extract_field_value(message, ["title", "prompt title", "prompt name", "template title"], stop_labels=["text", "description", "category", "favorite"])
+        prompt_text = self._extract_field_value(message, ["prompt text", "text", "prompt", "content", "body"], stop_labels=["title", "description", "category", "favorite"])
+        description = self._extract_field_value(message, ["description", "desc"], stop_labels=["title", "text", "prompt", "category", "favorite"])
+        category = self._extract_field_value(message, ["category", "tag", "folder"], stop_labels=["title", "text", "description", "favorite"])
+        is_favorite = self._extract_boolean_value(message, ["favorite", "favourite", "star", "pin"])
+        if title is None:
+            rename_prompt_match = re.search(
+                r"\b(?:rename|retitle)\s+(?:prompt(?:\s+library\s+entry)?|template)(?:\s*#?\s*\d+)?\s+(?:to|as)\s+(.+?)(?:\b(?:text|description|category|favorite|favourite|star|pin)\b|$)",
+                message,
+                re.IGNORECASE,
+            )
+            if rename_prompt_match:
+                title = self._strip_extracted_value(rename_prompt_match.group(1))
+
+        if title is None and prompt_text is None and description is None and category is None and is_favorite is None:
+            return {
+                "answer": f"I can update prompt library entry #{entry.id}, but I need at least one field to change.",
+                "used_fallback": True,
+                "fallback_reason": "Missing update fields",
+                "confidence": "medium",
+                "scope": "tenant",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"action": "update_prompt_library_entry", "entry_id": entry.id, "missing_fields": ["update_fields"]},
+            }
+
+        previous_state = {
+            "title": entry.title,
+            "prompt_text": entry.prompt_text,
+            "description": entry.description,
+            "category": entry.category,
+            "is_favorite": entry.is_favorite,
+        }
+
+        if title:
+            entry.title = title[:120]
+        if prompt_text:
+            entry.prompt_text = prompt_text[:12000]
+        if description is not None:
+            entry.description = description[:500]
+        if category is not None:
+            entry.category = category[:80]
+        if is_favorite is not None:
+            entry.is_favorite = bool(is_favorite)
+
+        db.commit()
+        db.refresh(entry)
+
+        return {
+            "answer": f"Updated prompt library entry #{entry.id}: {entry.title}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "update_prompt_library_entry",
+                "entry": {
+                    "id": entry.id,
+                    "title": entry.title,
+                    "category": entry.category,
+                    "is_favorite": entry.is_favorite,
+                    "previous": previous_state,
+                },
+                "ui_triggers": self._build_refresh_triggers("prompt_library"),
+            },
+        }
+
+    def _delete_prompt_library_entry_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        entry_id: Optional[int],
+        user_role: str,
+    ) -> Dict[str, Any]:
+        if user_role == "client":
+            return self._permission_denied_response(user_role=user_role, action="delete_prompt_library_entry")
+
+        entry = self._get_prompt_library_entry_or_404(db=db, tenant_id=tenant_id, entry_id=entry_id)
+        db.delete(entry)
+        db.commit()
+
+        return {
+            "answer": f"Deleted prompt library entry #{entry.id}: {entry.title}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "tenant",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "delete_prompt_library_entry",
+                "entry": {"id": entry.id, "title": entry.title, "deleted": True},
+                "ui_triggers": self._build_refresh_triggers("prompt_library"),
+            },
+        }
+
+    def _update_case_appointment_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        appointment_id: Optional[int],
+        user_role: str,
+        user_id: Optional[int],
+        raw_message: str,
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="update_case_appointment")
+
+        appointment = self._get_appointment_or_404(db=db, tenant_id=tenant_id, appointment_id=appointment_id)
+        if user_role == "lawyer" and user_id and appointment.lawyer_id not in {None, user_id}:
+            return {
+                **self._permission_denied_response(user_role=user_role, action="update_case_appointment"),
+                "answer": f"Permission denied: you can only update your own calendar appointments. Appointment #{appointment.id} is assigned to another lawyer.",
+            }
+
+        message = str(raw_message or "")
+        lowered = message.lower()
+        requested_title = self._extract_field_value(message, ["title", "appointment title", "subject"], stop_labels=["description", "type", "visibility", "status", "date", "time", "duration", "location", "timezone", "notes"])
+        requested_description = self._extract_field_value(message, ["description", "details"], stop_labels=["title", "type", "visibility", "status", "date", "time", "duration", "location", "timezone", "notes"])
+        requested_location = self._extract_field_value(message, ["location", "place"], stop_labels=["title", "description", "type", "visibility", "status", "date", "time", "duration", "timezone", "notes"])
+        requested_timezone = self._extract_field_value(message, ["timezone", "time zone"], stop_labels=["title", "description", "type", "visibility", "status", "date", "time", "duration", "location", "notes"])
+        requested_notes = self._extract_field_value(message, ["notes", "note"], stop_labels=["title", "description", "type", "visibility", "status", "date", "time", "duration", "location", "timezone"])
+        requested_type = self._extract_field_value(message, ["type", "appointment type"], stop_labels=["title", "description", "visibility", "status", "date", "time", "duration", "location", "timezone", "notes"])
+        requested_scope = self._extract_field_value(message, ["scope", "visibility", "visibility scope"], stop_labels=["title", "description", "type", "status", "date", "time", "duration", "location", "timezone", "notes"])
+        requested_status = self._extract_field_value(message, ["status"], stop_labels=["title", "description", "type", "visibility", "date", "time", "duration", "location", "timezone", "notes"])
+        requested_duration = self._extract_field_value(message, ["duration", "minutes", "duration minutes"], stop_labels=["title", "description", "type", "visibility", "status", "date", "time", "location", "timezone", "notes"])
+        requested_date = self._extract_field_value(message, ["scheduled at", "scheduled", "date", "time", "when", "reschedule to", "move to"], stop_labels=["title", "description", "type", "visibility", "status", "duration", "location", "timezone", "notes"])
+        if requested_date is None:
+            reschedule_match = re.search(
+                r"\b(?:reschedule|move)\s+(?:appointment|consultation)(?:\s*#?\s*\d+)?\s+(?:to\s+)?(.+?)(?:\b(?:title|description|type|visibility|status|duration|location|timezone|notes)\b|$)",
+                message,
+                re.IGNORECASE,
+            )
+            if reschedule_match:
+                requested_date = self._strip_extracted_value(reschedule_match.group(1))
+
+        if requested_title is None and requested_description is None and requested_location is None and requested_timezone is None and requested_notes is None and requested_type is None and requested_scope is None and requested_status is None and requested_duration is None and requested_date is None:
+            return {
+                "answer": f"I can update appointment #{appointment.id}, but I need at least one field to change.",
+                "used_fallback": True,
+                "fallback_reason": "Missing update fields",
+                "confidence": "medium",
+                "scope": "case",
+                "sources": [],
+                "action_status": "failed",
+                "structured_result": {"action": "update_case_appointment", "appointment_id": appointment.id, "missing_fields": ["update_fields"]},
+            }
+
+        previous_state = serialize_appointment(appointment)
+
+        if requested_title:
+            appointment.title = requested_title[:240]
+        if requested_description is not None:
+            appointment.description = requested_description[:4000]
+        if requested_type:
+            appointment.appointment_type = normalize_appointment_type(requested_type)
+        if requested_scope:
+            appointment.visibility_scope = normalize_scope(requested_scope)
+        if requested_status:
+            appointment.status = normalize_status(requested_status)
+        if requested_date:
+            parsed_date = self._extract_datetime_value(requested_date) or self._extract_datetime_value(message)
+            if parsed_date is not None:
+                appointment.scheduled_at = parsed_date
+        if requested_duration:
+            duration_match = re.search(r"\d{1,4}", requested_duration)
+            if duration_match:
+                appointment.duration_minutes = max(5, min(24 * 60, int(duration_match.group(0))))
+        if requested_location is not None:
+            appointment.location = requested_location[:240]
+        if requested_timezone is not None:
+            appointment.timezone_name = (requested_timezone or "UTC").strip() or "UTC"
+        if requested_notes is not None:
+            appointment.notes = requested_notes[:4000]
+
+        brief = build_ai_calendar_brief(case=appointment.case, appointment=appointment)
+        appointment.ai_summary = brief["ai_summary"]
+        appointment.ai_recommendation = brief["ai_recommendation"]
+        appointment.ai_confidence = brief["ai_confidence"]
+        appointment.ai_source = brief["ai_source"]
+
+        db.commit()
+        db.refresh(appointment)
+        appointment = self._get_appointment_or_404(db=db, tenant_id=tenant_id, appointment_id=appointment.id)
+
+        return {
+            "answer": f"Updated appointment #{appointment.id}: {appointment.title}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "update_case_appointment",
+                "appointment": serialize_appointment(appointment),
+                "previous": previous_state,
+                "ui_triggers": self._build_refresh_triggers("case_context"),
+            },
+        }
+
+    def _delete_case_appointment_action(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        appointment_id: Optional[int],
+        user_role: str,
+        user_id: Optional[int],
+    ) -> Dict[str, Any]:
+        if user_role not in self.CASE_WRITE_ROLES:
+            return self._permission_denied_response(user_role=user_role, action="delete_case_appointment")
+
+        appointment = self._get_appointment_or_404(db=db, tenant_id=tenant_id, appointment_id=appointment_id)
+        if user_role == "lawyer" and user_id and appointment.lawyer_id not in {None, user_id}:
+            return {
+                **self._permission_denied_response(user_role=user_role, action="delete_case_appointment"),
+                "answer": f"Permission denied: you can only cancel your own calendar appointments. Appointment #{appointment.id} is assigned to another lawyer.",
+            }
+
+        appointment.status = normalize_status("cancelled")
+        db.commit()
+        db.refresh(appointment)
+        appointment = self._get_appointment_or_404(db=db, tenant_id=tenant_id, appointment_id=appointment.id)
+
+        return {
+            "answer": f"Cancelled appointment #{appointment.id}: {appointment.title}.",
+            "used_fallback": False,
+            "fallback_reason": None,
+            "confidence": "high",
+            "scope": "case",
+            "sources": [],
+            "action_status": "completed",
+            "structured_result": {
+                "action": "delete_case_appointment",
+                "appointment": serialize_appointment(appointment),
+                "ui_triggers": self._build_refresh_triggers("case_context"),
+            },
+        }
+
     def _list_case_documents(
         self,
         *,
@@ -1440,7 +2442,7 @@ class CopilotService(CopilotRiskAnalysisMixin):
                         "id": row.id,
                         "filename": row.filename,
                         "status": row.processing_status,
-                        "upload_timestamp": row.upload_timestamp.isoformat() if row.upload_timestamp else None,
+                        "upload_timestamp": self._safe_isoformat(row.upload_timestamp),
                     }
                     for row in documents[:15]
                 ],
@@ -1566,7 +2568,8 @@ class CopilotService(CopilotRiskAnalysisMixin):
             return self._permission_denied_response(user_role=user_role, action="update_case_status")
 
         case = self._get_case_or_404(db=db, tenant_id=tenant_id, case_id=case_id)
-        if user_role == "lawyer" and user_id and case.lawyer_id != user_id:
+        assigned_lawyer_id = self._coerce_optional_int(case.lawyer_id)
+        if user_role == "lawyer" and user_id and assigned_lawyer_id not in {None, user_id}:
             return {
                 **self._permission_denied_response(user_role=user_role, action="update_case_status"),
                 "answer": f"Permission denied: you can only update cases assigned to you. Case #{case.id} is assigned to another lawyer.",
@@ -2346,27 +3349,28 @@ External research snippets (JSON):
         )
 
     def _safe_load_insights(self, document: Document) -> Dict[str, Any]:
-        if not document.insights_json:
+        insights_blob = self._text_or_empty(document.insights_json)
+        if not insights_blob:
             return {}
 
         try:
-            payload = json.loads(document.insights_json)
+            payload = json.loads(insights_blob)
             return payload if isinstance(payload, dict) else {}
         except json.JSONDecodeError:
             return {}
 
     def _ensure_document_summary(self, db: Session, document: Document) -> Document:
-        if document.summary and document.summary.strip():
+        if self._text_or_empty(document.summary):
             return document
 
-        if not (document.redacted_text or document.extracted_text):
+        if not (self._text_or_empty(document.redacted_text) or self._text_or_empty(document.extracted_text)):
             try:
                 self.document_pipeline.process_document(document=document, db=db)
                 db.refresh(document)
             except Exception:
                 return document
 
-        if not (document.redacted_text or document.extracted_text):
+        if not (self._text_or_empty(document.redacted_text) or self._text_or_empty(document.extracted_text)):
             return document
 
         try:
@@ -2385,7 +3389,7 @@ External research snippets (JSON):
             notes.append(f"processing error: {processing_error[:180]}")
         if summary_error:
             notes.append(f"summary error: {summary_error[:180]}")
-        if not (document.redacted_text or document.extracted_text):
+        if not (self._text_or_empty(document.redacted_text) or self._text_or_empty(document.extracted_text)):
             notes.append("no extractable text detected")
 
         details = "; ".join(notes) if notes else "summary generation is pending"
@@ -2396,6 +3400,34 @@ External research snippets (JSON):
     @staticmethod
     def _normalize_text(value: Optional[str]) -> str:
         return (value or "").strip()
+
+    @staticmethod
+    def _text_or_empty(value: Any) -> str:
+        if value is None:
+            return ""
+        text = str(value)
+        return "" if text.lower() == "none" else text.strip()
+
+    @staticmethod
+    def _coerce_optional_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _safe_isoformat(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        iso_method = getattr(value, "isoformat", None)
+        if not callable(iso_method):
+            return None
+        try:
+            return str(iso_method())
+        except Exception:
+            return None
 
     def _append_unique(self, items: List[str], value: Optional[str]) -> None:
         cleaned = self._normalize_text(value)
@@ -3604,7 +4636,7 @@ External research snippets (JSON):
             ),
             "used_fallback": False,
             "fallback_reason": None,
-            "confidence": "high" if document.summary else "medium",
+            "confidence": "high" if self._text_or_empty(document.summary) else "medium",
             "scope": "document",
             "sources": [
                 self._build_source(
@@ -3696,7 +4728,7 @@ External research snippets (JSON):
         fallback_sources: List[Dict[str, Any]] = []
 
         for document in documents:
-            source_text = document.summary or document.summary_short
+            source_text = self._text_or_empty(document.summary) or self._text_or_empty(document.summary_short)
             if source_text:
                 fallback_sources.append(self._build_source(document=document, snippet=source_text))
             else:
@@ -4488,7 +5520,7 @@ External research snippets (JSON):
 
         fallback_sources: List[Dict[str, Any]] = []
         for document in documents:
-            source_text = document.summary_short or document.summary
+            source_text = self._text_or_empty(document.summary_short) or self._text_or_empty(document.summary)
             if source_text:
                 fallback_sources.append(self._build_source(document=document, snippet=source_text))
 
@@ -4661,7 +5693,7 @@ External research snippets (JSON):
 
         fallback_sources: List[Dict[str, Any]] = []
         for document in documents:
-            source_text = document.summary_short or document.summary
+            source_text = self._text_or_empty(document.summary_short) or self._text_or_empty(document.summary)
             if source_text:
                 fallback_sources.append(self._build_source(document=document, snippet=source_text))
 
@@ -4797,7 +5829,7 @@ External research snippets (JSON):
 
         fallback_sources: List[Dict[str, Any]] = []
         for document in documents:
-            source_text = document.summary_short or document.summary
+            source_text = self._text_or_empty(document.summary_short) or self._text_or_empty(document.summary)
             if source_text:
                 fallback_sources.append(self._build_source(document=document, snippet=source_text))
 
@@ -4844,12 +5876,14 @@ External research snippets (JSON):
 
         if document_id is not None and focus_document_name is None:
             focus_document = self._get_document_or_404(db=db, tenant_id=tenant_id, document_id=document_id)
-            if focus_document.case_id != case.id:
+            focus_document_case_id = self._coerce_optional_int(focus_document.case_id)
+            case_identity = self._coerce_optional_int(case.id)
+            if focus_document_case_id != case_identity:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Document not found in the selected case.",
                 )
-            focus_document_name = focus_document.filename
+            focus_document_name = self._text_or_empty(focus_document.filename) or None
 
         if not documents and not consultations:
             return {
@@ -4879,7 +5913,7 @@ External research snippets (JSON):
             consultations=consultations,
             reasoning_payload=reasoning_payload,
             objective=(objective or "Monitor deadlines, notice windows, cure periods, and live obligations.")
-            + (f" Focus on document: {focus_document_name}." if focus_document_name else ""),
+            + (f" Focus on document: {focus_document_name}." if str(focus_document_name or "").strip() else ""),
         )
 
         if not monitor_result.success:
@@ -4949,7 +5983,7 @@ External research snippets (JSON):
 
         fallback_sources: List[Dict[str, Any]] = []
         for document in documents:
-            source_text = document.summary_short or document.summary
+            source_text = self._text_or_empty(document.summary_short) or self._text_or_empty(document.summary)
             if source_text:
                 fallback_sources.append(self._build_source(document=document, snippet=source_text))
 
@@ -4993,13 +6027,20 @@ External research snippets (JSON):
 
         if document_id is not None:
             focused_document = self._get_document_or_404(db=db, tenant_id=tenant_id, document_id=document_id)
-            if focused_document.case_id != case.id:
+            focused_document_case_id = self._coerce_optional_int(focused_document.case_id)
+            case_identity = self._coerce_optional_int(case.id)
+            if focused_document_case_id != case_identity:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Document not found in the selected case.",
                 )
-            documents = [focused_document] + [document for document in case_documents if document.id != focused_document.id]
-            focus_document_name = focused_document.filename
+            focused_document_id = self._coerce_optional_int(focused_document.id)
+            documents = [focused_document] + [
+                document
+                for document in case_documents
+                if self._coerce_optional_int(document.id) != focused_document_id
+            ]
+            focus_document_name = self._text_or_empty(focused_document.filename) or None
         else:
             documents = case_documents
             focus_document_name = None
@@ -5097,7 +6138,7 @@ External research snippets (JSON):
 
         fallback_sources: List[Dict[str, Any]] = []
         for document in documents:
-            source_text = document.summary_short or document.summary
+            source_text = self._text_or_empty(document.summary_short) or self._text_or_empty(document.summary)
             if source_text:
                 fallback_sources.append(self._build_source(document=document, snippet=source_text))
 

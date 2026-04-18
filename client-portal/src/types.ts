@@ -88,6 +88,36 @@ export interface ClientPortalActivity {
   case_id: number | null;
 }
 
+export interface ClientPortalCalendarItem {
+  id: number;
+  case_id: number;
+  tenant_id: number;
+  lawyer_id?: number | null;
+  client_id?: number | null;
+  consultation_request_id?: number | null;
+  created_by_user_id?: number | null;
+  title: string;
+  description?: string | null;
+  appointment_type: string;
+  visibility_scope: string;
+  status: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  location?: string | null;
+  timezone_name: string;
+  ai_summary?: string | null;
+  ai_recommendation?: string | null;
+  ai_confidence?: string | null;
+  ai_source?: string | null;
+  notes?: string | null;
+  case_title?: string | null;
+  client_name?: string | null;
+  lawyer_name?: string | null;
+  is_ai_suggested: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ClientPortalDashboardMetrics {
   total_cases: number;
   active_cases: number;
@@ -95,6 +125,7 @@ export interface ClientPortalDashboardMetrics {
   pending_documents: number;
   consultation_requests: number;
   requests_under_review: number;
+  upcoming_appointments: number;
 }
 
 export interface ClientPortalDashboard {
@@ -102,6 +133,7 @@ export interface ClientPortalDashboard {
   consultations: ClientPortalConsultation[];
   cases: ClientPortalCase[];
   documents: ClientPortalDocument[];
+  calendar_events: ClientPortalCalendarItem[];
   activity: ClientPortalActivity[];
   metrics: ClientPortalDashboardMetrics;
   jobs: BackgroundJobItem[];

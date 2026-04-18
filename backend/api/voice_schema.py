@@ -15,8 +15,11 @@ class VoiceRecordingOut(BaseModel):
     transcription_status: str
     transcription_error: Optional[str] = None
     transcript_text: Optional[str] = None
+    conversation_transcript_text: Optional[str] = None
     transcript_source: Optional[str] = None
     transcript_language: Optional[str] = None
+    recording_kind: Optional[str] = None
+    call_session_id: Optional[int] = None
     case_id: int
     tenant_id: int
     uploaded_by_user_id: Optional[int] = None
@@ -33,6 +36,7 @@ class VoiceUploadResponse(BaseModel):
 class VoiceTranscriptionResponse(BaseModel):
     success: bool
     transcript_text: str = ""
+    conversation_transcript_text: Optional[str] = None
     transcript_source: Optional[str] = None
     transcript_language: Optional[str] = None
     error: Optional[str] = None

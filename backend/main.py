@@ -10,10 +10,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.api import auth, cases, clients, users
+from backend.api.appointments import router as appointments_router
+from backend.api.calls import router as calls_router
 from backend.api.client_portal import router as client_portal_router
 from backend.api.consultations import router as consultations_router
 from backend.api.document_router import router as document_router
 from backend.api.evidence_reviews import router as evidence_reviews_router
+from backend.api.integrations import router as integrations_router
 from backend.api.intelligence import router as intelligence_router
 from backend.api.public import router as public_router
 from backend.api.prompt_library import router as prompt_library_router
@@ -25,6 +28,8 @@ from backend.database.database import Base, engine
 from backend.database.schema_sync import apply_legacy_schema_patches
 from backend.models.background_job import BackgroundJob
 from backend.models.case import Case
+from backend.models.appointment import Appointment
+from backend.models.call_session import CallSession
 from backend.models.case_context_snapshot import CaseContextSnapshot
 from backend.models.case_image_asset import CaseImageAsset
 from backend.models.case_memory_entry import CaseMemoryEntry
@@ -75,7 +80,10 @@ app.include_router(client_portal_router)
 app.include_router(users.router)
 app.include_router(clients.router)
 app.include_router(cases.router)
+app.include_router(appointments_router)
+app.include_router(calls_router)
 app.include_router(consultations_router)
+app.include_router(integrations_router)
 app.include_router(public_router)
 app.include_router(prompt_library_router)
 app.include_router(document_router)

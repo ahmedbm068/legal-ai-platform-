@@ -5,13 +5,14 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from backend.core.config import settings
 from backend.api.voice_schema import VoiceRecordingOut, VoiceTranscriptionResponse, VoiceUploadResponse
 from backend.core.deps import get_current_user, get_db
 from backend.core.permissions import apply_tenant_scope
+from backend.models.call_session import CallSession
 from backend.models.case import Case
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
@@ -160,6 +161,8 @@ def get_recording_file(
 def upload_voice_recording(
     background_tasks: BackgroundTasks,
     case_id: int,
+    recording_kind: str = Form(default="voice_note"),
+    call_session_id: int | None = Form(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -204,9 +207,15 @@ def upload_voice_recording(
         case=case,
         file=file,
         uploaded_by_user_id=current_user.id,
+        call_session_id=call_session_id,
+        recording_kind=recording_kind,
         background_tasks=background_tasks,
     )
-    message = "Voice recording uploaded. Transcription is queued and will continue in the background."
+    message = (
+        "Call recording uploaded. Transcription is queued and will continue in the background."
+        if recording.recording_kind == "call_recording"
+        else "Voice recording uploaded. Transcription is queued and will continue in the background."
+    )
 
     return {
         "recording": recording,
@@ -269,6 +278,7 @@ def transcribe_voice_input(
         return {
             "success": bool(result.get("success")) and bool(transcript_text),
             "transcript_text": transcript_text,
+            "conversation_transcript_text": str(result.get("conversation_text") or "").strip() or None,
             "transcript_source": result.get("source"),
             "transcript_language": result.get("language"),
             "error": transcript_error,

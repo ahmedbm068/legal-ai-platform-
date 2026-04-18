@@ -11,6 +11,7 @@ import {
     uploadPortalCaseMaterials,
     verifyPortalLoginCode,
 } from "./lib/api";
+import PortalCalendarPanel from "./components/PortalCalendarPanel";
 import type {
     ClientPortalAssistantResponse,
     ClientPortalCase,
@@ -25,7 +26,7 @@ const PASSWORD_POLICY_REGEX = /^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{10,}$/;
 const PASSWORD_HINT =
     "Password must be at least 10 characters and include one uppercase letter and one symbol.";
 
-type PortalView = "dashboard" | "cases" | "documents" | "requests" | "assistant" | "profile";
+type PortalView = "dashboard" | "cases" | "documents" | "requests" | "assistant" | "calendar" | "profile";
 type ThemeMode = "light" | "dark";
 
 const NAV_ITEMS: Array<{ id: PortalView; title: string; subtitle: string }> = [
@@ -34,6 +35,7 @@ const NAV_ITEMS: Array<{ id: PortalView; title: string; subtitle: string }> = [
     { id: "documents", title: "Document viewer", subtitle: "Files, highlights, and insights" },
     { id: "requests", title: "Intake requests", subtitle: "Submit updates and materials" },
     { id: "assistant", title: "AI assistant", subtitle: "Structured legal guidance" },
+    { id: "calendar", title: "Calendar", subtitle: "Appointments and AI planning" },
     { id: "profile", title: "Profile", subtitle: "Account and workspace" },
 ];
 
@@ -162,6 +164,7 @@ function sectionTitle(view: PortalView) {
     if (view === "documents") return "Document intelligence";
     if (view === "requests") return "Consultation requests";
     if (view === "assistant") return "AI assistant";
+    if (view === "calendar") return "Calendar";
     return "Profile";
 }
 
@@ -1062,6 +1065,11 @@ export default function App() {
                     <strong>{highRiskCount}</strong>
                     <small>Cases flagged high risk</small>
                 </article>
+                <article className="card metric-card">
+                    <span>Calendar items</span>
+                    <strong>{dashboard.metrics.upcoming_appointments}</strong>
+                    <small>Shared or AI-planned appointments</small>
+                </article>
             </section>
 
             <section className="workspace-grid">
@@ -1730,6 +1738,15 @@ export default function App() {
                                 {renderAssistantResponse(assistantResult, assistantAnswer)}
                             </article>
                         </div>
+                    ) : null}
+
+                    {view === "calendar" ? (
+                        <PortalCalendarPanel
+                            caseItem={selectedCase}
+                            calendarEvents={dashboard.calendar_events || []}
+                            consultations={dashboard.consultations}
+                            locale={theme === "dark" ? "en-US" : "en-US"}
+                        />
                     ) : null}
 
                     {view === "profile" ? (

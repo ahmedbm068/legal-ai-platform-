@@ -201,6 +201,10 @@ class TranscriptionService:
 
     @staticmethod
     def _speechmatics_extract_text_from_payload(payload: dict[str, Any]) -> str:
+        conversation_text = TranscriptionService._speechmatics_extract_conversation_text_from_payload(payload)
+        if conversation_text:
+            return conversation_text
+
         direct_text = str(payload.get("transcript") or payload.get("text") or "").strip()
         if direct_text:
             return direct_text
@@ -231,7 +235,66 @@ class TranscriptionService:
         text = " ".join(parts).strip()
         return text.replace(" ,", ",").replace(" .", ".").replace(" !", "!").replace(" ?", "?")
 
-    def _speechmatics_fetch_transcript(self, *, job_id: str) -> tuple[str, str | None]:
+    @staticmethod
+    def _speechmatics_extract_conversation_text_from_payload(payload: dict[str, Any]) -> str:
+        results = payload.get("results")
+        if not isinstance(results, list):
+            return ""
+
+        turns: list[dict[str, Any]] = []
+        current_speaker: str | None = None
+        current_text = ""
+
+        def flush_turn() -> None:
+            nonlocal current_speaker, current_text
+            text = current_text.strip()
+            if text:
+                turns.append({"speaker": current_speaker or "Speaker", "text": text})
+            current_speaker = None
+            current_text = ""
+
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+
+            alternatives = item.get("alternatives") or []
+            first_alternative = alternatives[0] if alternatives and isinstance(alternatives[0], dict) else {}
+            token = str(first_alternative.get("content") or "").strip()
+            if not token:
+                continue
+
+            token_type = str(item.get("type") or "").lower()
+            if token_type in {"punctuation", "punct"}:
+                current_text = f"{current_text}{token}" if current_text else token
+                continue
+
+            speaker = (
+                str(item.get("speaker") or item.get("speaker_label") or item.get("speaker_name") or "").strip()
+                or None
+            )
+            if current_speaker is None:
+                current_speaker = speaker
+            elif speaker and speaker != current_speaker:
+                flush_turn()
+                current_speaker = speaker
+
+            current_text = f"{current_text} {token}".strip() if current_text else token
+
+        flush_turn()
+
+        if not turns:
+            return ""
+
+        lines: list[str] = []
+        for turn in turns:
+            speaker = str(turn.get("speaker") or "Speaker").strip() or "Speaker"
+            text = str(turn.get("text") or "").strip()
+            if text:
+                lines.append(f"{speaker}: {text}")
+
+        return "\n".join(lines).strip()
+
+    def _speechmatics_fetch_transcript(self, *, job_id: str) -> tuple[str, str | None, str | None]:
         base_url = self._speechmatics_base_url()
         language = (settings.SPEECHMATICS_LANGUAGE or "").strip() or None
         headers = self._speechmatics_headers()
@@ -242,7 +305,7 @@ class TranscriptionService:
             with urlopen(text_request, timeout=self._speechmatics_request_timeout_seconds()) as response:
                 transcript_text = response.read().decode("utf-8", errors="ignore").strip()
             if transcript_text:
-                return transcript_text, language
+                return transcript_text, language, None
         except Exception:
             pass
 
@@ -256,12 +319,13 @@ class TranscriptionService:
                 )
                 transcript_text = self._speechmatics_extract_text_from_payload(payload)
                 if transcript_text:
+                    conversation_text = self._speechmatics_extract_conversation_text_from_payload(payload)
                     language = (
                         self._extract_nested_string(payload, "metadata", "transcription_config", "language")
                         or self._extract_nested_string(payload, "language")
                         or language
                     )
-                    return transcript_text, language
+                    return transcript_text, language, conversation_text or None
             except Exception:
                 continue
 
@@ -280,10 +344,11 @@ class TranscriptionService:
         try:
             job_id = self._speechmatics_create_job(file_path=file_path, filename=filename)
             self._speechmatics_wait_for_job(job_id=job_id)
-            transcript_text, language = self._speechmatics_fetch_transcript(job_id=job_id)
+            transcript_text, language, conversation_text = self._speechmatics_fetch_transcript(job_id=job_id)
             return {
                 "success": True,
                 "text": transcript_text,
+                "conversation_text": conversation_text,
                 "language": language,
                 "source": "speechmatics",
                 "error": None,
@@ -560,6 +625,7 @@ class TranscriptionService:
             return {
                 "success": True,
                 "text": text,
+                "conversation_text": None,
                 "language": None,
                 "source": settings.LOCAL_TRANSCRIPTION_MODEL,
                 "error": None,
@@ -661,6 +727,7 @@ class TranscriptionService:
             return {
                 "success": True,
                 "text": transcript_text.strip(),
+                "conversation_text": None,
                 "language": language,
                 "source": model,
                 "error": None,

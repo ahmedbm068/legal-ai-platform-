@@ -7,6 +7,7 @@ from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.core.config import settings
+from backend.models.call_session import CallSession
 from backend.models.case import Case
 from backend.models.document import Document
 from backend.models.voice_recording import VoiceRecording
@@ -78,6 +79,8 @@ class IngestionUseCase:
         file,
         uploaded_by_user_id: int | None,
         consultation_request_id: int | None = None,
+        call_session_id: int | None = None,
+        recording_kind: str = "voice_note",
         background_tasks: BackgroundTasks | None = None,
     ) -> tuple[VoiceRecording, dict[str, Any]]:
         filename = (file.filename or "").strip()
@@ -107,6 +110,17 @@ class IngestionUseCase:
                 ".m4a": "audio/x-m4a",
             }.get(extension, "application/octet-stream")
 
+        normalized_recording_kind = (recording_kind or "voice_note").strip().lower() or "voice_note"
+        if normalized_recording_kind not in {"voice_note", "call_recording"}:
+            raise HTTPException(status_code=400, detail="Unsupported recording kind")
+
+        call_session = None
+        if call_session_id is not None:
+            call_session = db.query(CallSession).filter(CallSession.id == call_session_id).first()
+            if not call_session or call_session.case_id != case.id or call_session.tenant_id != case.tenant_id:
+                raise HTTPException(status_code=404, detail="Call session not found")
+            normalized_recording_kind = "call_recording"
+
         storage_path = upload_file(file.file, filename, prefix="voice")
         recording = VoiceRecording(
             filename=filename,
@@ -117,8 +131,19 @@ class IngestionUseCase:
             case_id=case.id,
             tenant_id=case.tenant_id,
             uploaded_by_user_id=uploaded_by_user_id,
+            recording_kind=normalized_recording_kind,
+            call_session_id=call_session_id,
         )
         db.add(recording)
+
+        if call_session:
+            call_session.recording_status = "queued"
+            call_session.call_status = "recording"
+            call_session.summary_status = "pending"
+            call_session.transcription_error = None
+            call_session.transcript_text = None
+            call_session.transcript_source = None
+
         db.commit()
         db.refresh(recording)
 

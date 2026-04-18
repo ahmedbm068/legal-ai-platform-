@@ -1,0 +1,125 @@
+{
+    "name": "Legal AI - WhatsApp Inbound Reply",
+    "nodes": [
+        {
+            "parameters": {
+                "path": "legal-ai/whatsapp/inbound",
+                "httpMethod": "POST",
+                "responseMode": "responseNode",
+                "options": {}
+            },
+            "id": "d9c7c5df-9d0d-4b96-8a1d-2c3d8d6f0001",
+            "name": "Inbound WhatsApp Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2,
+            "position": [
+                320,
+                300
+            ],
+            "webhookId": "legal-ai-whatsapp-inbound"
+        },
+        {
+            "parameters": {
+                "jsCode": "const backendBaseUrl = ($env.LEGAL_AI_BACKEND_URL || 'http://host.docker.internal:8000').replace(/\/$/, '');\nconst payload = $json.body || $json;\nconst messageText = String(payload.text || payload.body || payload.message || '').trim();\nconst fromPhone = String(payload.from || payload.from_phone || payload.sender || payload.phone || '').trim();\nconst clientPhone = String(payload.client_phone || payload.to || payload.whatsapp_number || '').trim();\nconst callSessionId = Number(payload.call_session_id || payload.metadata?.call_session_id || payload.metadata?.callSessionId || payload.case_call_session_id || 0) || null;\nconst messageId = String(payload.message_id || payload.id || payload.sid || '').trim() || null;\n\nreturn [{\n  json: {\n    backendBaseUrl,\n    backendCallbackUrl: `${backendBaseUrl}/integrations/n8n/events`,\n    body: messageText,\n    from_phone: fromPhone,\n    client_phone: clientPhone || null,\n    call_session_id: callSessionId,\n    message_id: messageId,\n    consent_message: payload.consent_message || null,\n    raw_provider_payload: payload,\n  },\n}];"
+            },
+            "id": "d9c7c5df-9d0d-4b96-8a1d-2c3d8d6f0002",
+            "name": "Normalize Inbound Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                560,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "={{ $json.backendCallbackUrl }}",
+                "authentication": "none",
+                "sendHeaders": true,
+                "headerParameters": {
+                    "parameters": [
+                        {
+                            "name": "Content-Type",
+                            "value": "application/json"
+                        },
+                        {
+                            "name": "X-N8N-SECRET",
+                            "value": "={{ $env.N8N_WEBHOOK_SECRET || '' }}"
+                        }
+                    ]
+                },
+                "sendBody": true,
+                "contentType": "json",
+                "jsonBody": "={\n  \"event_type\": \"consent.reply.received\",\n  \"call_session_id\": $json.call_session_id,\n  \"voice_recording_id\": null,\n  \"provider_call_id\": null,\n  \"client_phone\": $json.client_phone,\n  \"caller_phone\": $json.from_phone,\n  \"body\": $json.body,\n  \"consent_message\": $json.consent_message,\n  \"status\": \"received\"\n}",
+                "options": {
+                    "ignoreResponseCode": true
+                }
+            },
+            "id": "d9c7c5df-9d0d-4b96-8a1d-2c3d8d6f0003",
+            "name": "Forward Consent Reply to Backend",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4,
+            "position": [
+                820,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "responseCode": 200,
+                "responseBody": "={\n  \"success\": true,\n  \"message\": \"Inbound WhatsApp reply forwarded to Legal AI.\",\n  \"call_session_id\": $json.call_session_id,\n  \"from_phone\": $json.from_phone\n}",
+                "options": {}
+            },
+            "id": "d9c7c5df-9d0d-4b96-8a1d-2c3d8d6f0004",
+            "name": "Respond Inbound Forwarded",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1,
+            "position": [
+                1080,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Inbound WhatsApp Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Normalize Inbound Payload",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Normalize Inbound Payload": {
+            "main": [
+                [
+                    {
+                        "node": "Forward Consent Reply to Backend",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Forward Consent Reply to Backend": {
+            "main": [
+                [
+                    {
+                        "node": "Respond Inbound Forwarded",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "active": false,
+    "settings": {
+        "executionOrder": "v1",
+        "timezone": "UTC"
+    },
+    "tags": []
+}

@@ -6,6 +6,7 @@ export interface User {
   id: number;
   name: string;
   email: string;
+  phone?: string | null;
   role: UserRole;
   tenant_id: number;
   created_at: string;
@@ -107,6 +108,7 @@ export interface VoiceRecording {
   transcription_status: string;
   transcription_error: string | null;
   transcript_text: string | null;
+  conversation_transcript_text: string | null;
   transcript_source: string | null;
   transcript_language: string | null;
   case_id: number;
@@ -114,8 +116,86 @@ export interface VoiceRecording {
   uploaded_by_user_id: number | null;
   created_at: string;
   updated_at: string;
+  recording_kind?: string | null;
+  call_session_id?: number | null;
 }
 
+export interface CallSession {
+  id: number;
+  case_id: number;
+  tenant_id: number;
+  client_id: number;
+  started_by_user_id?: number | null;
+  provider_name?: string | null;
+  provider_call_id?: string | null;
+  caller_phone?: string | null;
+  client_phone?: string | null;
+  call_status: string;
+  recording_status: string;
+  summary_status: string;
+  consent_accepted: boolean;
+  consent_accepted_at?: string | null;
+  consent_request_status?: string | null;
+  consent_requested_at?: string | null;
+  consent_message?: string | null;
+  consent_response_text?: string | null;
+  consent_responded_at?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_seconds?: number | null;
+  summary_text?: string | null;
+  transcript_text?: string | null;
+  conversation_transcript_text?: string | null;
+  transcript_source?: string | null;
+  transcription_error?: string | null;
+  notes?: string | null;
+  voice_recording?: VoiceRecording | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CallSessionCreateResponse {
+  call_session: CallSession;
+  message: string;
+  consent_message?: string | null;
+  whatsapp_chat_url?: string | null;
+  consent_delivery_mode?: string | null;
+}
+
+export interface CalendarAppointment {
+  id: number;
+  case_id: number;
+  tenant_id: number;
+  lawyer_id?: number | null;
+  client_id?: number | null;
+  consultation_request_id?: number | null;
+  created_by_user_id?: number | null;
+  title: string;
+  description?: string | null;
+  appointment_type: string;
+  visibility_scope: string;
+  status: string;
+  scheduled_at: string;
+  duration_minutes: number;
+  location?: string | null;
+  timezone_name: string;
+  ai_summary?: string | null;
+  ai_recommendation?: string | null;
+  ai_confidence?: string | null;
+  ai_source?: string | null;
+  notes?: string | null;
+  case_title?: string | null;
+  client_name?: string | null;
+  lawyer_name?: string | null;
+  is_ai_suggested: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CalendarAppointmentActionResponse {
+  message: string;
+  appointment: CalendarAppointment;
+}
 export interface ConsultationRequest {
   id: number;
   case_id: number;

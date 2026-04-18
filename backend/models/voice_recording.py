@@ -18,8 +18,11 @@ class VoiceRecording(Base):
     transcription_status = Column(String, nullable=False, default="pending")
     transcription_error = Column(Text, nullable=True)
     transcript_text = Column(Text, nullable=True)
+    conversation_transcript_text = Column(Text, nullable=True)
     transcript_source = Column(String, nullable=True)
     transcript_language = Column(String, nullable=True)
+    recording_kind = Column(String, nullable=False, default="voice_note")
+    call_session_id = Column(Integer, ForeignKey("call_sessions.id", ondelete="SET NULL"), nullable=True, unique=True, index=True)
 
     case_id = Column(Integer, ForeignKey("cases.id", ondelete="CASCADE"), nullable=False, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -36,3 +39,4 @@ class VoiceRecording(Base):
     case = relationship("Case", back_populates="voice_recordings")
     tenant = relationship("Tenant")
     uploaded_by = relationship("User")
+    call_session = relationship("CallSession", back_populates="voice_recording")

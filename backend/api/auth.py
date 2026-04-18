@@ -13,7 +13,7 @@ from backend.core.tenants import slugify_tenant_name
 from backend.models.staff_invite import StaffInvite
 from backend.models.user import User
 from backend.models.tenant import Tenant
-from backend.api.user_schema import StaffInviteCreate, StaffInviteOut, UserRegister, UserLogin, UserOut, Token
+from backend.api.user_schema import StaffInviteCreate, StaffInviteOut, UserRegister, UserLogin, UserOut, Token, UserPhoneUpdate
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -124,6 +124,7 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
     new_user = User(
         name=user_data.name.strip(),
         email=normalized_email,
+        phone=user_data.phone.strip() if user_data.phone else None,
         hashed_password=hash_password(user_data.password),
         role=resolved_role,
         tenant_id=tenant.id
@@ -188,4 +189,20 @@ def create_staff_invite(
 
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+@router.put("/me", response_model=UserOut)
+def update_me(
+    payload: UserPhoneUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    normalized_phone = payload.phone.strip()
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail="Phone number is required")
+
+    current_user.phone = normalized_phone
+    db.commit()
+    db.refresh(current_user)
     return current_user

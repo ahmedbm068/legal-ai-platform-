@@ -56,12 +56,22 @@ class CopilotIntentExecutionAgent:
                 requested_client_name=ctx.parsed.get("requested_client_name"),
                 raw_message=ctx.parsed.get("raw_message") or ctx.message,
             ),
+            "create_prompt_library_entry": lambda: runtime._create_prompt_library_entry_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                user_role=ctx.user_role,
+                raw_message=ctx.parsed.get("raw_message") or ctx.message,
+            ),
             "list_cases": lambda: runtime._list_cases(
                 db=ctx.db,
                 tenant_id=ctx.tenant_id,
                 allowed_case_ids=ctx.normalized_allowed_case_ids,
             ),
             "list_clients": lambda: runtime._list_clients(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+            ),
+            "list_prompt_library": lambda: runtime._list_prompt_library(
                 db=ctx.db,
                 tenant_id=ctx.tenant_id,
             ),
@@ -91,6 +101,62 @@ class CopilotIntentExecutionAgent:
                 case_id=ctx.parsed["case_id"],
                 user_role=ctx.user_role,
                 message=ctx.parsed.get("clean_query") or ctx.parsed.get("raw_message") or ctx.message,
+            ),
+            "update_case": lambda: runtime._update_case_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                case_id=ctx.parsed.get("case_id") or ctx.parsed.get("target_id"),
+                user_role=ctx.user_role,
+                user_id=ctx.user_id,
+                raw_message=ctx.parsed.get("raw_message") or ctx.message,
+            ),
+            "delete_case": lambda: runtime._delete_case_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                case_id=ctx.parsed.get("case_id") or ctx.parsed.get("target_id"),
+                user_role=ctx.user_role,
+                user_id=ctx.user_id,
+            ),
+            "update_client": lambda: runtime._update_client_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                client_id=ctx.parsed.get("client_id") or ctx.parsed.get("target_id"),
+                user_role=ctx.user_role,
+                raw_message=ctx.parsed.get("raw_message") or ctx.message,
+            ),
+            "delete_client": lambda: runtime._delete_client_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                client_id=ctx.parsed.get("client_id") or ctx.parsed.get("target_id"),
+                user_role=ctx.user_role,
+            ),
+            "update_case_appointment": lambda: runtime._update_case_appointment_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                appointment_id=ctx.parsed.get("appointment_id") or ctx.parsed.get("target_id"),
+                user_role=ctx.user_role,
+                user_id=ctx.user_id,
+                raw_message=ctx.parsed.get("raw_message") or ctx.message,
+            ),
+            "delete_case_appointment": lambda: runtime._delete_case_appointment_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                appointment_id=ctx.parsed.get("appointment_id") or ctx.parsed.get("target_id"),
+                user_role=ctx.user_role,
+                user_id=ctx.user_id,
+            ),
+            "update_prompt_library_entry": lambda: runtime._update_prompt_library_entry_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                entry_id=ctx.parsed.get("prompt_library_entry_id") or ctx.parsed.get("target_id"),
+                user_role=ctx.user_role,
+                raw_message=ctx.parsed.get("raw_message") or ctx.message,
+            ),
+            "delete_prompt_library_entry": lambda: runtime._delete_prompt_library_entry_action(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                entry_id=ctx.parsed.get("prompt_library_entry_id") or ctx.parsed.get("target_id"),
+                user_role=ctx.user_role,
             ),
             "update_case_status": lambda: runtime._update_case_status(
                 db=ctx.db,
@@ -260,7 +326,10 @@ class CopilotIntentExecutionAgent:
             ),
         }
 
-        return handlers.get(intent, runtime._unsupported_intent_response)()
+        handler = handlers.get(intent)
+        if handler is None:
+            return runtime._unsupported_intent_response()
+        return handler()
 
 
 copilot_intent_execution_agent = CopilotIntentExecutionAgent()

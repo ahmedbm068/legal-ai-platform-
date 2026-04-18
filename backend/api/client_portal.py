@@ -34,6 +34,7 @@ from backend.core.jwt_handler import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SEC
 from backend.core.config import settings
 from backend.database.database import SessionLocal
 from backend.models.case import Case
+from backend.models.appointment import Appointment
 from backend.models.client import Client
 from backend.models.client_portal_account import ClientPortalAccount
 from backend.models.client_portal_login_code import ClientPortalLoginCode
@@ -43,6 +44,11 @@ from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
 from backend.services.auth_rate_limiter import RateLimitConfig, auth_rate_limiter
+from backend.services.calendar_service import (
+    appointment_visible_to_client,
+    build_case_calendar_entries,
+    serialize_appointment,
+)
 from backend.services.ai.runtime_services import copilot_orchestration_service
 from backend.services.jobs.job_queue_service import background_job_service
 from backend.services.client_portal_mail_service import client_portal_mail_service
@@ -335,22 +341,26 @@ def build_dashboard_response(
 ) -> dict:
     db.refresh(account)
     consultations = build_consultation_items(db, account)
-    case_items, _ = build_case_items(db, account)
+    case_items, case_models = build_case_items(db, account)
     document_items = build_document_items(db, account)
+    calendar_items = build_calendar_items(db, account, case_models)
     return {
         "account": build_account_out(account),
         "consultations": consultations,
         "cases": case_items,
         "documents": document_items,
+        "calendar_events": calendar_items,
         "activity": build_activity_feed(
             consultations=consultations,
             documents=document_items,
             cases=case_items,
+            calendar_events=calendar_items,
         ),
         "metrics": build_dashboard_metrics(
             consultations=consultations,
             cases=case_items,
             documents=document_items,
+            calendar_events=calendar_items,
         ),
         "jobs": jobs or [],
     }
@@ -543,10 +553,75 @@ def build_document_items(db: Session, account: ClientPortalAccount) -> list[dict
     ]
 
 
+def build_calendar_items(
+    db: Session,
+    account: ClientPortalAccount,
+    cases: list[Case],
+) -> list[dict]:
+    if not account.client_id or not cases:
+        return []
+
+    case_ids = [case.id for case in cases]
+
+    appointments = (
+        db.query(Appointment)
+        .join(Case, Case.id == Appointment.case_id)
+        .filter(
+            Appointment.tenant_id == account.tenant_id,
+            Appointment.case_id.in_(case_ids),
+            Case.client_id == account.client_id,
+            Case.deleted_at.is_(None),
+        )
+        .order_by(Appointment.scheduled_at.asc(), Appointment.id.asc())
+        .all()
+    )
+    appointments_by_case: dict[int, list[Appointment]] = {}
+    for appointment in appointments:
+        if appointment_visible_to_client(appointment, account.client_id):
+            appointments_by_case.setdefault(appointment.case_id, []).append(appointment)
+
+    consultations = (
+        db.query(ConsultationRequest, Case)
+        .join(Case, Case.id == ConsultationRequest.case_id)
+        .filter(
+            ConsultationRequest.tenant_id == account.tenant_id,
+            ConsultationRequest.case_id.in_(case_ids),
+            Case.client_id == account.client_id,
+            Case.deleted_at.is_(None),
+        )
+        .order_by(ConsultationRequest.created_at.desc(), ConsultationRequest.id.desc())
+        .all()
+    )
+    consultations_by_case: dict[int, list[ConsultationRequest]] = {}
+    cases_by_id = {case.id: case for case in cases}
+    for consultation, case in consultations:
+        consultations_by_case.setdefault(consultation.case_id, []).append(consultation)
+        cases_by_id.setdefault(case.id, case)
+
+    calendar_items: list[dict] = []
+    for case in cases:
+        case_appointments = appointments_by_case.get(case.id, [])
+        case_consultations = consultations_by_case.get(case.id, [])
+        if case_appointments:
+            calendar_items.extend(serialize_appointment(appointment) for appointment in case_appointments)
+        elif case_consultations:
+            calendar_items.extend(
+                build_case_calendar_entries(
+                    case=cases_by_id[case.id],
+                    appointments=[],
+                    consultations=case_consultations,
+                )
+            )
+
+    calendar_items.sort(key=lambda item: item.get("scheduled_at") or datetime.min.replace(tzinfo=timezone.utc))
+    return calendar_items
+
+
 def build_dashboard_metrics(
     consultations: list[dict],
     cases: list[dict],
     documents: list[dict],
+    calendar_events: list[dict],
 ) -> dict:
     active_cases = sum(1 for case in cases if (case.get("status") or "").lower() in {"open", "in_progress"})
     pending_documents = sum(1 for document in documents if not is_document_done(document.get("processing_status")))
@@ -555,6 +630,11 @@ def build_dashboard_metrics(
         for consultation in consultations
         if (consultation.get("status") or "").lower() in {"submitted", "new", "ready_for_review"}
     )
+    upcoming_appointments = sum(
+        1
+        for event in calendar_events
+        if (event.get("status") or "").lower() in {"scheduled", "confirmed", "tentative"}
+    )
     return {
         "total_cases": len(cases),
         "active_cases": active_cases,
@@ -562,6 +642,7 @@ def build_dashboard_metrics(
         "pending_documents": pending_documents,
         "consultation_requests": len(consultations),
         "requests_under_review": requests_under_review,
+        "upcoming_appointments": upcoming_appointments,
     }
 
 
@@ -569,6 +650,7 @@ def build_activity_feed(
     consultations: list[dict],
     documents: list[dict],
     cases: list[dict],
+    calendar_events: list[dict],
 ) -> list[dict]:
     activity: list[dict] = []
 
@@ -607,6 +689,20 @@ def build_activity_feed(
                 "description": case["title"],
                 "created_at": case["updated_at"],
                 "case_id": case["id"],
+            }
+        )
+
+    for event in calendar_events[:10]:
+        if event.get("is_ai_suggested"):
+            continue
+        activity.append(
+            {
+                "id": f"calendar-{event['id']}",
+                "event_type": "calendar_update",
+                "title": f"Calendar item: {event['title']}",
+                "description": event.get("ai_summary") or event.get("notes") or event.get("description") or "Appointment updated.",
+                "created_at": event.get("created_at") or event.get("scheduled_at"),
+                "case_id": event.get("case_id"),
             }
         )
 

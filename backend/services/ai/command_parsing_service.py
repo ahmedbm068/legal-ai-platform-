@@ -9,6 +9,11 @@ class CommandParsingService:
     CASE_PATTERN = re.compile(r"\bcase\s*#?\s*(\d+)\b", re.IGNORECASE)
     DOCUMENT_PATTERN = re.compile(r"\bdocument\s*#?\s*(\d+)\b", re.IGNORECASE)
     CLIENT_ID_PATTERN = re.compile(r"\bclient\s*#?\s*(\d+)\b", re.IGNORECASE)
+    APPOINTMENT_ID_PATTERN = re.compile(r"\b(?:appointment|consultation|meeting|calendar)\s*#?\s*(\d+)\b", re.IGNORECASE)
+    PROMPT_LIBRARY_ENTRY_ID_PATTERN = re.compile(
+        r"\b(?:prompt(?:\s+library)?(?:\s+entry)?|template)\s*#?\s*(\d+)\b",
+        re.IGNORECASE,
+    )
     RISK_COUNT_PATTERN = re.compile(
         r"\b(?:top\s+|only\s+|just\s+)?(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+risks?\b",
         re.IGNORECASE,
@@ -184,6 +189,14 @@ class CommandParsingService:
         r"\bclient\b(?:\s*(?:is|=|named|called))?\s*[:\-]?\s*['\"]?([^\"'\n,]{2,160})",
         re.IGNORECASE,
     )
+    APPOINTMENT_TITLE_PATTERN = re.compile(
+        r"\b(?:appointment|consultation|meeting)\s*(?:title|subject|called|named)?\s*[:\-]?\s*['\"]?([^\"'\n,]{2,240})",
+        re.IGNORECASE,
+    )
+    PROMPT_TITLE_PATTERN = re.compile(
+        r"\b(?:prompt(?:\s+library)?(?:\s+entry)?|template)\s*(?:title|named|called)?\s*[:\-]?\s*['\"]?([^\"'\n,]{2,120})",
+        re.IGNORECASE,
+    )
     CASE_DESCRIPTION_PATTERN = re.compile(
         r"\b(?:description|desc)\b(?:\s*(?:is|=|:))?\s*['\"]?([^\"'\n]{4,1200})",
         re.IGNORECASE,
@@ -237,6 +250,83 @@ class CommandParsingService:
         "new client",
         "register client",
     ]
+    CREATE_PROMPT_LIBRARY_KEYWORDS = [
+        "create prompt",
+        "create prompt library entry",
+        "add prompt",
+        "add prompt library entry",
+        "new prompt",
+        "save prompt",
+        "store prompt",
+    ]
+    UPDATE_CASE_KEYWORDS = [
+        "update case",
+        "edit case",
+        "modify case",
+        "change case",
+        "rename case",
+        "set case",
+    ]
+    DELETE_CASE_KEYWORDS = [
+        "delete case",
+        "remove case",
+        "trash case",
+    ]
+    UPDATE_CLIENT_KEYWORDS = [
+        "update client",
+        "edit client",
+        "modify client",
+        "change client",
+        "rename client",
+        "set client",
+    ]
+    DELETE_CLIENT_KEYWORDS = [
+        "delete client",
+        "remove client",
+        "archive client",
+        "trash client",
+    ]
+    UPDATE_APPOINTMENT_KEYWORDS = [
+        "update appointment",
+        "edit appointment",
+        "modify appointment",
+        "change appointment",
+        "reschedule appointment",
+        "move appointment",
+        "update consultation",
+        "edit consultation",
+        "modify consultation",
+        "change consultation",
+    ]
+    DELETE_APPOINTMENT_KEYWORDS = [
+        "delete appointment",
+        "remove appointment",
+        "cancel appointment",
+        "archive appointment",
+        "delete consultation",
+        "cancel consultation",
+    ]
+    LIST_PROMPT_LIBRARY_KEYWORDS = [
+        "list prompts",
+        "show prompts",
+        "prompt library",
+        "my prompts",
+        "all prompts",
+    ]
+    UPDATE_PROMPT_LIBRARY_KEYWORDS = [
+        "update prompt",
+        "edit prompt",
+        "modify prompt",
+        "change prompt",
+        "rename prompt",
+        "set prompt",
+    ]
+    DELETE_PROMPT_LIBRARY_KEYWORDS = [
+        "delete prompt",
+        "remove prompt",
+        "archive prompt",
+        "trash prompt",
+    ]
     DOCUMENT_UPLOAD_KEYWORDS = [
         "upload document",
         "add document",
@@ -272,6 +362,63 @@ class CommandParsingService:
         "archive case",
         "reopen case",
     ]
+    UPDATE_VERB_KEYWORDS = [
+        "update",
+        "edit",
+        "modify",
+        "change",
+        "rename",
+        "set",
+        "reschedule",
+        "move",
+    ]
+    CASE_UPDATE_FIELD_HINTS = [
+        "title",
+        "description",
+        "status",
+        "client",
+        "jurisdiction",
+        "country",
+    ]
+    CLIENT_UPDATE_FIELD_HINTS = [
+        "name",
+        "email",
+        "phone",
+        "mobile",
+        "telephone",
+        "address",
+    ]
+    APPOINTMENT_UPDATE_FIELD_HINTS = [
+        "title",
+        "description",
+        "status",
+        "reschedule",
+        "scheduled",
+        "date",
+        "time",
+        "duration",
+        "location",
+        "timezone",
+        "notes",
+        "type",
+        "visibility",
+        "scope",
+    ]
+    PROMPT_UPDATE_FIELD_HINTS = [
+        "title",
+        "prompt text",
+        "text",
+        "content",
+        "body",
+        "description",
+        "category",
+        "tag",
+        "folder",
+        "favorite",
+        "favourite",
+        "star",
+        "pin",
+    ]
 
     def parse(self, message: str) -> Dict[str, Any]:
         original_message = (message or "").strip()
@@ -280,10 +427,14 @@ class CommandParsingService:
         case_match = self.CASE_PATTERN.search(original_message)
         document_match = self.DOCUMENT_PATTERN.search(original_message)
         client_id_match = self.CLIENT_ID_PATTERN.search(original_message)
+        appointment_id_match = self.APPOINTMENT_ID_PATTERN.search(original_message)
+        prompt_library_entry_id_match = self.PROMPT_LIBRARY_ENTRY_ID_PATTERN.search(original_message)
 
         case_id = int(case_match.group(1)) if case_match else None
         document_id = int(document_match.group(1)) if document_match else None
         requested_client_id = int(client_id_match.group(1)) if client_id_match else None
+        requested_appointment_id = int(appointment_id_match.group(1)) if appointment_id_match else None
+        requested_prompt_library_entry_id = int(prompt_library_entry_id_match.group(1)) if prompt_library_entry_id_match else None
 
         target_type: Optional[str] = None
         target_id: Optional[int] = None
@@ -291,9 +442,24 @@ class CommandParsingService:
         if document_id is not None:
             target_type = "document"
             target_id = document_id
+        elif requested_appointment_id is not None:
+            target_type = "appointment"
+            target_id = requested_appointment_id
+        elif requested_prompt_library_entry_id is not None:
+            target_type = "prompt_library"
+            target_id = requested_prompt_library_entry_id
+        elif requested_client_id is not None:
+            target_type = "client"
+            target_id = requested_client_id
         elif case_id is not None:
             target_type = "case"
             target_id = case_id
+        elif self._contains_any(lowered, ["appointment", "consultation", "meeting", "calendar"]):
+            target_type = "appointment"
+        elif self._contains_any(lowered, ["client"]):
+            target_type = "client"
+        elif self._contains_any(lowered, ["prompt library", "prompt", "template"]):
+            target_type = "prompt_library"
 
         intent, confidence = self._detect_intent(lowered=lowered, target_type=target_type)
         clean_query = self._clean_query(original_message)
@@ -319,6 +485,9 @@ class CommandParsingService:
             "target_id": target_id,
             "case_id": case_id,
             "document_id": document_id,
+            "client_id": requested_client_id,
+            "appointment_id": requested_appointment_id,
+            "prompt_library_entry_id": requested_prompt_library_entry_id,
             "clean_query": clean_query,
             "requested_case_status": requested_case_status,
             "requested_case_title": requested_case_title,
@@ -339,6 +508,9 @@ class CommandParsingService:
         if self._contains_any(lowered, self.CREATE_CLIENT_KEYWORDS):
             return "create_client", "high"
 
+        if self._contains_any(lowered, self.CREATE_PROMPT_LIBRARY_KEYWORDS):
+            return "create_prompt_library_entry", "high"
+
         if self._contains_any(lowered, self.DOCUMENT_UPLOAD_KEYWORDS):
             return "request_document_upload", "high"
 
@@ -350,6 +522,64 @@ class CommandParsingService:
 
         if self._contains_any(lowered, self.LIST_CASE_KEYWORDS):
             return "list_cases", "high"
+
+        if target_type == "appointment" and self._contains_any(lowered, self.DELETE_APPOINTMENT_KEYWORDS):
+            return "delete_case_appointment", "high"
+
+        if target_type == "appointment" and self._contains_any(lowered, self.UPDATE_APPOINTMENT_KEYWORDS):
+            return "update_case_appointment", "high"
+
+        if target_type == "appointment" and self._looks_like_field_update(
+            lowered,
+            field_hints=self.APPOINTMENT_UPDATE_FIELD_HINTS,
+        ):
+            return "update_case_appointment", "medium"
+
+        if target_type == "client" and self._contains_any(lowered, self.DELETE_CLIENT_KEYWORDS):
+            return "delete_client", "high"
+
+        if target_type == "client" and self._contains_any(lowered, self.UPDATE_CLIENT_KEYWORDS):
+            return "update_client", "high"
+
+        if target_type == "client" and self._looks_like_field_update(
+            lowered,
+            field_hints=self.CLIENT_UPDATE_FIELD_HINTS,
+        ):
+            return "update_client", "medium"
+
+        if target_type == "prompt_library" and self._contains_any(lowered, self.DELETE_PROMPT_LIBRARY_KEYWORDS):
+            return "delete_prompt_library_entry", "high"
+
+        if target_type == "prompt_library" and self._contains_any(lowered, self.UPDATE_PROMPT_LIBRARY_KEYWORDS):
+            return "update_prompt_library_entry", "high"
+
+        if target_type == "prompt_library" and self._looks_like_field_update(
+            lowered,
+            field_hints=self.PROMPT_UPDATE_FIELD_HINTS,
+        ):
+            return "update_prompt_library_entry", "medium"
+
+        if target_type == "prompt_library" and self._contains_any(lowered, self.CREATE_PROMPT_LIBRARY_KEYWORDS):
+            return "create_prompt_library_entry", "high"
+
+        if self._contains_any(lowered, self.LIST_PROMPT_LIBRARY_KEYWORDS):
+            return "list_prompt_library", "high"
+
+        if target_type == "case" and self._contains_any(lowered, self.DELETE_CASE_KEYWORDS):
+            return "delete_case", "high"
+
+        if target_type == "case" and self._contains_any(lowered, self.UPDATE_CASE_KEYWORDS):
+            if self._contains_any(lowered, self.UPDATE_STATUS_KEYWORDS):
+                return "update_case_status", "high"
+            return "update_case", "high"
+
+        if target_type == "case" and self._looks_like_field_update(
+            lowered,
+            field_hints=self.CASE_UPDATE_FIELD_HINTS,
+        ):
+            if self._contains_any(lowered, self.UPDATE_STATUS_KEYWORDS):
+                return "update_case_status", "high"
+            return "update_case", "medium"
 
         if target_type == "case" and self._contains_any(lowered, self.UPDATE_STATUS_KEYWORDS):
             return "update_case_status", "high"
@@ -507,6 +737,9 @@ class CommandParsingService:
     @staticmethod
     def _contains_any(text: str, keywords: list[str]) -> bool:
         return any(keyword in text for keyword in keywords)
+
+    def _looks_like_field_update(self, lowered: str, *, field_hints: list[str]) -> bool:
+        return self._contains_any(lowered, self.UPDATE_VERB_KEYWORDS) and self._contains_any(lowered, field_hints)
 
     @staticmethod
     def _normalize_for_intent(value: str) -> str:
