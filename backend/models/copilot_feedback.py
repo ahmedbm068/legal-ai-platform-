@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -24,6 +24,9 @@ class CopilotFeedback(Base):
     prompt_text = Column(Text, nullable=False)
     response_text = Column(Text, nullable=False)
     comment = Column(Text, nullable=True)
+    root_cause = Column(String, nullable=True, index=True)
+    legal_domain = Column(Boolean, nullable=True, index=True)
+    jurisdiction = Column(String, nullable=True, index=True)
     source_count = Column(Integer, nullable=False, default=0)
     metadata_json = Column(Text, nullable=True)
 

@@ -11,6 +11,7 @@ import type {
   CopilotFeedbackWeeklySummaryResponse,
   DocumentItem,
   FullDocumentAnalysis,
+  FeedbackRootCause,
   LLMTestResponse,
   PromptOptimizationResponse,
   ProviderStatusResponse,
@@ -226,6 +227,7 @@ export const api = {
       useExternalResearch?: boolean;
       mode?: "default" | "legal_search";
       legalSearchMultilingualOutput?: boolean;
+      legalSearchCodeScope?: string[];
       agentMode?: boolean;
       workspaceCaseId?: number | null;
       workspaceDocumentId?: number | null;
@@ -247,6 +249,7 @@ export const api = {
         use_external_research: options?.useExternalResearch ?? false,
         mode: options?.mode ?? "default",
         legal_search_multilingual_output: options?.legalSearchMultilingualOutput ?? false,
+        legal_search_code_scope: options?.legalSearchCodeScope ?? [],
         agent_mode: options?.agentMode ?? false,
         workspace_case_id: options?.workspaceCaseId ?? null,
         workspace_document_id: options?.workspaceDocumentId ?? null,
@@ -273,6 +276,9 @@ export const api = {
       confidence?: string | null;
       feedback_value: "up" | "down";
       comment?: string | null;
+      root_cause?: FeedbackRootCause | null;
+      legal_domain?: boolean | null;
+      jurisdiction?: JurisdictionCountry | null;
       source_count?: number;
       metadata?: Record<string, unknown>;
     }

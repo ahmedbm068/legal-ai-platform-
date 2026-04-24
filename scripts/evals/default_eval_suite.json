@@ -476,5 +476,58 @@
     ],
     "use_external_research": false,
     "top_k": 5
+  },
+  {
+    "id": "trust_unsupported_claim_gate_01",
+    "prompt": "For case #{{case_id}}, does the file prove that Nova paid a 50,000 TND penalty? If not found, say it is not found in provided documents.",
+    "expected_intent": "ask_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Issue Identification",
+      "Evidence Mapping",
+      "Not found in provided documents"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "trust_contradiction_detection_01",
+    "prompt": "Find contradictions across documents in case #{{case_id}} and explain the evidence status.",
+    "expected_intent": "compare_case_documents",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Contradictions",
+      "Evidence"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "trust_missing_information_01",
+    "prompt": "Run a civil dispute analysis for case #{{case_id}} and list missing facts that the lawyer should request.",
+    "expected_intent": "ask_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Uncertainty / Missing Information",
+      "Recommended Next Steps"
+    ],
+    "use_external_research": false,
+    "top_k": 5
+  },
+  {
+    "id": "trust_article_applicability_01",
+    "prompt": "Run an article applicability review for case #{{case_id}}: identify whether the relevant article may apply, may not apply, and what facts are missing.",
+    "expected_intent": "ask_case",
+    "expected_target_type": "case",
+    "expected_scope": "case",
+    "required_substrings": [
+      "Applicable Rule / Law",
+      "Counter-Arguments / Alternative Interpretations"
+    ],
+    "use_external_research": false,
+    "top_k": 5
   }
 ]

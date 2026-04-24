@@ -26,6 +26,8 @@ def main() -> int:
     parser.add_argument("--eval-base-url", default="http://127.0.0.1:8000", help="Base URL for eval checks.")
     parser.add_argument("--eval-suite", default="scripts/evals/default_eval_suite.json", help="Eval suite path.")
     parser.add_argument("--eval-min-pass-rate", type=float, default=0.9, help="Required eval pass rate.")
+    parser.add_argument("--eval-min-citation-coverage", type=float, default=0.95, help="Required average citation coverage.")
+    parser.add_argument("--eval-max-hallucination-rate", type=float, default=0.05, help="Allowed average hallucination rate.")
     args = parser.parse_args()
 
     failures = 0
@@ -40,7 +42,13 @@ def main() -> int:
             "backend/main.py",
             "backend/api/rag.py",
             "backend/services/ai/copilot_service.py",
+            "backend/services/ai/legal_trust_service.py",
+            "backend/services/ai/output_contract_validator.py",
             "backend/services/ai/agent_workflow_service.py",
+            "backend/services/ai/agents/claim_validation_agent.py",
+            "backend/services/ai/agents/contradiction_detection_agent.py",
+            "backend/services/ai/agents/strict_verifier_agent.py",
+            "backend/services/ai/agents/article_applicability_agent.py",
             "backend/services/ai/agents/case_reasoning_agent.py",
             "backend/services/ai/agents/retrieval_agent.py",
             "scripts/run_agent_evals.py",
@@ -63,6 +71,10 @@ def main() -> int:
             args.eval_suite,
             "--min-pass-rate",
             str(args.eval_min_pass_rate),
+            "--min-citation-coverage",
+            str(args.eval_min_citation_coverage),
+            "--max-hallucination-rate",
+            str(args.eval_max_hallucination_rate),
         ]
         failures += int(run_step("agent-evals", eval_command) != 0)
 

@@ -241,6 +241,63 @@ BASE_SCHEMA_PATCHES = [
     CREATE INDEX IF NOT EXISTS ix_prompt_library_entries_tenant_category
     ON prompt_library_entries (tenant_id, category, updated_at DESC);
     """,
+    """
+    ALTER TABLE IF EXISTS copilot_feedback
+    ADD COLUMN IF NOT EXISTS root_cause VARCHAR;
+    """,
+    """
+    ALTER TABLE IF EXISTS copilot_feedback
+    ADD COLUMN IF NOT EXISTS legal_domain BOOLEAN;
+    """,
+    """
+    ALTER TABLE IF EXISTS copilot_feedback
+    ADD COLUMN IF NOT EXISTS jurisdiction VARCHAR;
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_copilot_feedback_root_cause
+    ON copilot_feedback (root_cause);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_copilot_feedback_legal_domain
+    ON copilot_feedback (legal_domain);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_copilot_feedback_jurisdiction
+    ON copilot_feedback (jurisdiction);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ai_response_audit_logs (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+        document_id INTEGER REFERENCES documents(id) ON DELETE CASCADE,
+        endpoint VARCHAR NOT NULL,
+        parsed_intent VARCHAR,
+        response_version VARCHAR NOT NULL DEFAULT 'legal_trust_response_v1',
+        model_name VARCHAR,
+        prompt_version VARCHAR,
+        question_text TEXT NOT NULL,
+        answer_text TEXT NOT NULL,
+        sources_json TEXT,
+        trust_panel_json TEXT,
+        validation_json TEXT,
+        metadata_json TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_ai_response_audit_logs_tenant_created
+    ON ai_response_audit_logs (tenant_id, created_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_ai_response_audit_logs_case_created
+    ON ai_response_audit_logs (case_id, created_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_ai_response_audit_logs_intent
+    ON ai_response_audit_logs (parsed_intent);
+    """,
 ]
 
 VECTOR_SCHEMA_PATCHES = [

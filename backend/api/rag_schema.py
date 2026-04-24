@@ -51,6 +51,8 @@ class CopilotRequest(BaseModel):
     use_external_research: bool = True
     mode: Literal["default", "legal_search"] = "default"
     legal_search_multilingual_output: bool = False
+    legal_search_code_scope: List[str] = Field(default_factory=list, max_length=6)
+    reasoning_level: Literal["low", "medium", "high"] = "medium"
     agent_mode: bool = False
     workspace_case_id: Optional[int] = Field(default=None, ge=1)
     workspace_document_id: Optional[int] = Field(default=None, ge=1)
@@ -96,6 +98,8 @@ class PromptOptimizationResponse(BaseModel):
     notes: Optional[str] = None
     strategy: str = "heuristic"
     used_llm: bool = False
+    applied_improvements: List[str] = Field(default_factory=list)
+    unchanged: bool = False
     target_type: Optional[str] = None
     target_id: Optional[int] = None
 
@@ -135,6 +139,7 @@ class CitationItem(BaseModel):
     document_id: Optional[int] = None
     case_id: Optional[int] = None
     snippet: str = ""
+    url: Optional[str] = None
 
 
 class CacheMetadata(BaseModel):
@@ -235,6 +240,7 @@ class AskResponse(BaseModel):
     scope: str
     sources: List[SourceItem]
     citations: List[CitationItem] = Field(default_factory=list)
+    trust_panel: Optional[Dict[str, Any]] = None
     cache: CacheMetadata = Field(default_factory=CacheMetadata)
 
 
@@ -257,6 +263,7 @@ class CopilotResponse(BaseModel):
     scope: str
     sources: List[SourceItem]
     citations: List[CitationItem] = Field(default_factory=list)
+    trust_panel: Optional[Dict[str, Any]] = None
     execution_trace: List[Dict[str, Any]] = Field(default_factory=list)
     cache: CacheMetadata = Field(default_factory=CacheMetadata)
     job_id: Optional[str] = None
@@ -264,8 +271,36 @@ class CopilotResponse(BaseModel):
     artifact: Optional[ArtifactContext] = None
     jurisdiction: Optional[JurisdictionContext] = None
     vision_result: Optional[VisionResult] = None
+    reasoning_result: Optional[Dict[str, Any]] = None
     saved_asset_ids: List[int] = Field(default_factory=list)
     review_record_id: Optional[int] = None
+
+
+class ReasoningCandidateScore(BaseModel):
+    grounding_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    citation_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    factual_consistency_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    legal_usefulness_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    actionability_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    clarity_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    overall_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    decision_reason: str = ""
+
+
+class ReasoningCandidateResult(BaseModel):
+    rank: int = Field(default=1, ge=1)
+    style: str
+    answer: str
+    score: ReasoningCandidateScore
+
+
+class HighReasoningResult(BaseModel):
+    reasoning_level: Literal["low", "medium", "high"] = "medium"
+    activated: bool = False
+    winner_index: Optional[int] = None
+    second_best_index: Optional[int] = None
+    winner_reason: Optional[str] = None
+    candidates: List[ReasoningCandidateResult] = Field(default_factory=list)
 
 
 class CopilotFeedbackCreateRequest(BaseModel):
@@ -280,6 +315,21 @@ class CopilotFeedbackCreateRequest(BaseModel):
     confidence: Optional[str] = Field(default=None, max_length=24)
     feedback_value: Literal["up", "down"]
     comment: Optional[str] = Field(default=None, max_length=2000)
+    lawyer_correction: Optional[str] = Field(default=None, max_length=4000)
+    preferred_reasoning_path: Optional[str] = Field(default=None, max_length=500)
+    root_cause: Optional[
+        Literal[
+            "unclear_prompt",
+            "wrong_jurisdiction",
+            "missing_evidence",
+            "generic_answer",
+            "wrong_legal_area",
+            "ungrounded",
+            "other",
+        ]
+    ] = None
+    legal_domain: Optional[bool] = None
+    jurisdiction: Optional[str] = Field(default=None, max_length=64)
     source_count: int = Field(default=0, ge=0)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -297,6 +347,11 @@ class CopilotFeedbackOut(BaseModel):
     prompt_text: str
     response_text: str
     comment: Optional[str] = None
+    lawyer_correction: Optional[str] = None
+    preferred_reasoning_path: Optional[str] = None
+    root_cause: Optional[str] = None
+    legal_domain: Optional[bool] = None
+    jurisdiction: Optional[str] = None
     source_count: int
     metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -314,6 +369,31 @@ class CopilotFeedbackWeeklyItem(BaseModel):
 class CopilotFeedbackWeeklySummaryResponse(BaseModel):
     weeks: int
     rows: List[CopilotFeedbackWeeklyItem] = Field(default_factory=list)
+
+
+class AIResponseAuditLogOut(BaseModel):
+    id: int
+    tenant_id: int
+    user_id: Optional[int] = None
+    case_id: Optional[int] = None
+    document_id: Optional[int] = None
+    endpoint: str
+    parsed_intent: Optional[str] = None
+    response_version: str
+    model_name: Optional[str] = None
+    prompt_version: Optional[str] = None
+    question_text: str
+    answer_preview: str
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    trust_panel: Dict[str, Any] = Field(default_factory=dict)
+    validation: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class AIResponseAuditLogListResponse(BaseModel):
+    total: int
+    rows: List[AIResponseAuditLogOut] = Field(default_factory=list)
 
 
 class WorkflowStage(BaseModel):

@@ -29,6 +29,8 @@ class CopilotPipelineRequest(BaseModel):
     use_external_research: bool = True
     mode: str = "default"
     legal_search_multilingual_output: bool = False
+    legal_search_code_scope: list[str] = Field(default_factory=list)
+    reasoning_level: str = "medium"
     agent_mode: bool = False
     workspace_case_id: int | None = None
     workspace_document_id: int | None = None
@@ -45,3 +47,7 @@ class CopilotExecutionContext(BaseModel):
     parsed_intent: str = "ask_global"
     target_type: str | None = None
     target_id: int | None = None
+    planned_matter_type: str | None = None
+    planned_workflow: str | None = None
+    planned_output_format: str | None = None
+    requested_user_goal: str | None = None

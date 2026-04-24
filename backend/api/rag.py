@@ -10,6 +10,7 @@ from backend.core.deps import get_db, get_current_user
 from backend.core.enums import UserRole
 from backend.core.permissions import require_roles
 from backend.models.case import Case
+from backend.models.ai_response_audit_log import AIResponseAuditLog
 from backend.models.copilot_feedback import CopilotFeedback
 from backend.models.document import Document
 from backend.models.generated_artifact_version import GeneratedArtifactVersion
@@ -48,6 +49,7 @@ from backend.api.rag_schema import (
     ArtifactVersionManualEditRequest,
     ArtifactVersionAgentReviseRequest,
     ArtifactVersionMutationResponse,
+    AIResponseAuditLogListResponse,
 )
 
 
@@ -105,6 +107,49 @@ def _resolve_case_country(db: Session, tenant_id: int, case_id: int | None) -> s
     if not case:
         return None
     return (case.jurisdiction_country or "tunisia").strip().lower()
+
+
+def _loads_json_object(raw_value: str | None) -> dict:
+    if not raw_value:
+        return {}
+    try:
+        payload = json.loads(raw_value)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _loads_json_list(raw_value: str | None) -> list:
+    if not raw_value:
+        return []
+    try:
+        payload = json.loads(raw_value)
+        return payload if isinstance(payload, list) else []
+    except Exception:
+        return []
+
+
+def _audit_log_to_public(row: AIResponseAuditLog) -> dict:
+    answer = str(row.answer_text or "")
+    return {
+        "id": row.id,
+        "tenant_id": row.tenant_id,
+        "user_id": row.user_id,
+        "case_id": row.case_id,
+        "document_id": row.document_id,
+        "endpoint": row.endpoint,
+        "parsed_intent": row.parsed_intent,
+        "response_version": row.response_version,
+        "model_name": row.model_name,
+        "prompt_version": row.prompt_version,
+        "question_text": row.question_text,
+        "answer_preview": answer[:800],
+        "sources": _loads_json_list(row.sources_json),
+        "trust_panel": _loads_json_object(row.trust_panel_json),
+        "validation": _loads_json_object(row.validation_json),
+        "metadata": _loads_json_object(row.metadata_json),
+        "created_at": row.created_at,
+    }
 
 
 @router.post("/process-document/{document_id}")
@@ -201,6 +246,7 @@ def ask_question(
     return rag_service.answer_question(
         db=db,
         tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
         question=data.question,
         top_k=data.top_k,
         case_id=data.case_id,
@@ -224,6 +270,8 @@ def copilot(
         use_external_research=data.use_external_research,
         mode=data.mode,
         legal_search_multilingual_output=data.legal_search_multilingual_output,
+        legal_search_code_scope=data.legal_search_code_scope,
+        reasoning_level=data.reasoning_level,
         agent_mode=data.agent_mode,
         workspace_case_id=data.workspace_case_id,
         workspace_document_id=data.workspace_document_id,
@@ -276,22 +324,32 @@ def optimize_prompt(
         intent="optimize_prompt",
         target_type=target_type,
         target_id=target_id,
-        allow_llm=False,
+        allow_llm=True,
     )
 
+    original_prompt = data.prompt.strip()
     optimized_prompt = (
         str(optimized.payload.get("optimized_query") or "").strip()
         if optimized.success
         else ""
     )
     if not optimized_prompt:
-        optimized_prompt = data.prompt.strip()
+        optimized_prompt = original_prompt
+
+    unchanged = optimized_prompt == original_prompt
+    applied_improvements = (
+        [str(item).strip() for item in (optimized.payload.get("applied_improvements") or []) if str(item).strip()]
+        if optimized.success
+        else []
+    )
 
     return {
         "optimized_prompt": optimized_prompt,
         "notes": optimized.payload.get("notes") if optimized.success else (optimized.error or "Prompt optimization failed."),
         "strategy": str(optimized.payload.get("strategy") or "heuristic") if optimized.success else "fallback",
         "used_llm": bool(optimized.payload.get("used_llm")) if optimized.success else False,
+        "applied_improvements": applied_improvements,
+        "unchanged": unchanged,
         "target_type": target_type,
         "target_id": target_id,
     }
@@ -303,6 +361,22 @@ def create_copilot_feedback(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    inferred_jurisdiction = data.jurisdiction
+    if not inferred_jurisdiction:
+        inferred_jurisdiction = _resolve_case_country(db, current_user.tenant_id, data.case_id)
+
+    metadata_payload = dict(data.metadata or {})
+    if data.lawyer_correction and "lawyer_correction" not in metadata_payload:
+        metadata_payload["lawyer_correction"] = data.lawyer_correction
+    if data.preferred_reasoning_path and "preferred_reasoning_path" not in metadata_payload:
+        metadata_payload["preferred_reasoning_path"] = data.preferred_reasoning_path
+    if data.root_cause and not metadata_payload.get("root_cause"):
+        metadata_payload["root_cause"] = data.root_cause
+    if data.legal_domain is not None and "legal_domain" not in metadata_payload:
+        metadata_payload["legal_domain"] = data.legal_domain
+    if inferred_jurisdiction and not metadata_payload.get("jurisdiction"):
+        metadata_payload["jurisdiction"] = inferred_jurisdiction
+
     feedback = CopilotFeedback(
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
@@ -315,8 +389,11 @@ def create_copilot_feedback(
         prompt_text=data.prompt_text,
         response_text=data.response_text,
         comment=data.comment,
+        root_cause=data.root_cause,
+        legal_domain=data.legal_domain,
+        jurisdiction=inferred_jurisdiction,
         source_count=int(data.source_count),
-        metadata_json=json.dumps(data.metadata or {}, ensure_ascii=False),
+        metadata_json=json.dumps(metadata_payload, ensure_ascii=False),
     )
     db.add(feedback)
     db.commit()
@@ -334,6 +411,11 @@ def create_copilot_feedback(
         "prompt_text": feedback.prompt_text,
         "response_text": feedback.response_text,
         "comment": feedback.comment,
+        "lawyer_correction": metadata_payload.get("lawyer_correction"),
+        "preferred_reasoning_path": metadata_payload.get("preferred_reasoning_path"),
+        "root_cause": feedback.root_cause,
+        "legal_domain": feedback.legal_domain,
+        "jurisdiction": feedback.jurisdiction,
         "source_count": feedback.source_count,
         "metadata": json.loads(feedback.metadata_json) if feedback.metadata_json else {},
         "created_at": feedback.created_at,
@@ -399,6 +481,33 @@ def copilot_feedback_weekly_summary(
     return {
         "weeks": weeks,
         "rows": summary_rows,
+    }
+
+
+@router.get("/audit-logs", response_model=AIResponseAuditLogListResponse)
+def list_ai_response_audit_logs(
+    case_id: int | None = Query(default=None, ge=1),
+    document_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    require_roles(current_user, [UserRole.lawyer])
+    query = db.query(AIResponseAuditLog).filter(AIResponseAuditLog.tenant_id == current_user.tenant_id)
+    if case_id is not None:
+        query = query.filter(AIResponseAuditLog.case_id == case_id)
+    if document_id is not None:
+        query = query.filter(AIResponseAuditLog.document_id == document_id)
+
+    total = query.count()
+    rows = (
+        query.order_by(AIResponseAuditLog.created_at.desc(), AIResponseAuditLog.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "total": total,
+        "rows": [_audit_log_to_public(row) for row in rows],
     }
 
 

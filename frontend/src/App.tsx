@@ -13,6 +13,7 @@ import { workspaceApi as api } from "./workspaceApi";
 import ChatMessageBubble, { type MessageFeedbackState } from "./components/ChatMessageBubble";
 import CaseCalendarPanel from "./components/CaseCalendarPanel";
 import type {
+  AIResponseAuditLog,
   CaseItem,
   ChatMessage,
   CallSession,
@@ -21,6 +22,7 @@ import type {
   ConsultationRequest,
   DocumentItem,
   EvidenceAnalysisReview,
+  FeedbackRootCause,
   ImageBatchDetailResponse,
   ImageDocumentBatch,
   PromptLibraryEntry,
@@ -754,6 +756,9 @@ export default function App() {
   const [chatState, setChatState] = useState<StoredChatSessionsState>(() => parseStoredChatState());
   const [chatInput, setChatInput] = useState("");
   const [chatFeedback, setChatFeedback] = useState<Record<string, MessageFeedbackState>>({});
+  const [auditLogs, setAuditLogs] = useState<AIResponseAuditLog[]>([]);
+  const [auditPanelOpen, setAuditPanelOpen] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authBusy, setAuthBusy] = useState(false);
@@ -877,6 +882,13 @@ export default function App() {
       "Create a deadline checklist and missing-information list for this matter.",
     ];
   }, [selectedCase]);
+  const workflowPackPrompts = useMemo(() => ([
+    "Run a civil dispute analysis: identify issue, articles, application, weaknesses, contradictions, and next steps.",
+    "Run a succession analysis: identify heirs, relevant succession rules, missing documents, and preliminary distribution logic.",
+    "Run an international private law screening: identify connecting factors, governing-law questions, and missing jurisdiction facts.",
+    "Create a structured internal legal memo draft with evidence mapping and lawyer-review caveats.",
+    "Run an article applicability review: explain whether the selected article may apply, may not apply, and what facts are missing.",
+  ]), []);
   const visionUnavailableReason = useMemo(() => {
     if (providerStatus?.vision_available) return null;
     return (
@@ -1701,6 +1713,24 @@ export default function App() {
     }
   }, [bootstrapWorkspace, loadCaseContext, selectedCaseId, token]);
 
+  const loadAuditLogs = useCallback(async () => {
+    if (!token) return;
+    setAuditLoading(true);
+    try {
+      const response = await api.listAiAuditLogs(token, {
+        caseId: selectedCaseId,
+        documentId: selectedDocumentId,
+        limit: 20,
+      });
+      setAuditLogs(response.rows || []);
+      setAuditPanelOpen(true);
+    } catch (caught) {
+      setError(normalizeError(caught, "Unable to load AI audit logs."));
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [selectedCaseId, selectedDocumentId, token]);
+
   const sendMessage = useCallback(
     async (promptText: string) => {
       if (!token) return;
@@ -1724,6 +1754,7 @@ export default function App() {
       try {
         const response = await api.copilot(token, outboundPrompt, {
           topK: REASONING_TOP_K[reasoningLevel],
+          reasoningLevel,
           useExternalResearch: externalModeEnabled || workspaceMode === "legal_search",
           mode: workspaceMode === "legal_search" ? "legal_search" : "default",
           legalSearchMultilingualOutput: workspaceMode === "legal_search",
@@ -1751,6 +1782,7 @@ export default function App() {
           permissionDenied: response.permission_denied,
           steps: response.steps,
           structuredResult: response.structured_result,
+          trustPanel: response.trust_panel,
           sources: response.sources,
           citations: response.citations,
           executionTrace: response.execution_trace,
@@ -1759,6 +1791,7 @@ export default function App() {
           caseSnapshotVersion: response.case_snapshot_version,
           artifact: response.artifact,
           jurisdiction: response.jurisdiction,
+          reasoningResult: response.reasoning_result,
           rawAnswer: response.answer,
         });
 
@@ -1798,7 +1831,81 @@ export default function App() {
     ]
   );
   const handleFeedback = useCallback(
-    async (message: ChatMessage, value: FeedbackValue) => {
+    async (message: ChatMessage, value: FeedbackValue, rootCause?: FeedbackRootCause | null) => {
+      if (!token || !selectedCaseId) return;
+      if (value === "down" && !rootCause) {
+        setNotice("Select a downvote reason before submitting feedback.");
+        return;
+      }
+      const caseMessages = activeMessages;
+      const messageIndex = caseMessages.findIndex((row) => row.id === message.id);
+      if (messageIndex < 0) return;
+
+      let promptText = "No prompt context";
+      for (let index = messageIndex - 1; index >= 0; index -= 1) {
+        if (caseMessages[index].role === "user") {
+          promptText = caseMessages[index].content;
+          break;
+        }
+      }
+
+      setChatFeedback((current) => ({
+        ...current,
+        [message.id]: { value, status: "saving", rootCause: value === "down" ? (rootCause || null) : null },
+      }));
+
+      try {
+        await api.createCopilotFeedback(token, {
+          message_id: message.id,
+          case_id: selectedCaseId,
+          document_id: selectedDocumentId,
+          prompt_text: promptText,
+          response_text: message.content,
+          parsed_intent: message.meta?.parsedIntent || null,
+          confidence: message.meta?.confidence || null,
+          feedback_value: value,
+          root_cause: value === "down" ? (rootCause || null) : null,
+          legal_domain: true,
+          jurisdiction: selectedCase?.jurisdiction_country || null,
+          source_count: message.meta?.sources?.length || 0,
+          metadata: {
+            mode: workspaceMode,
+            action_category: message.meta?.actionCategory || null,
+            action_status: message.meta?.actionStatus || null,
+            root_cause: value === "down" ? (rootCause || null) : null,
+            legal_domain: true,
+            jurisdiction: selectedCase?.jurisdiction_country || null,
+          },
+        });
+        setChatFeedback((current) => ({
+          ...current,
+          [message.id]: { value, status: "submitted", rootCause: value === "down" ? (rootCause || null) : null },
+        }));
+      } catch {
+        setChatFeedback((current) => ({
+          ...current,
+          [message.id]: { value, status: "error", rootCause: value === "down" ? (rootCause || null) : null },
+        }));
+      }
+    },
+    [activeMessages, selectedCase?.jurisdiction_country, selectedCaseId, selectedDocumentId, token, workspaceMode]
+  );
+
+  const handleAskMissingInfo = useCallback(
+    (_message: ChatMessage, missingInfo: string) => {
+      const prompt = [
+        "Missing information follow-up:",
+        missingInfo,
+        "",
+        "Explain why this missing fact matters, what document or fact the lawyer should request, and how it could change the analysis.",
+      ].join("\n");
+      void sendMessage(prompt);
+    },
+    [sendMessage]
+  );
+
+  const handleTrustReview = useCallback(
+    async (message: ChatMessage, decision: "approved" | "needs_revision") => {
       if (!token || !selectedCaseId) return;
       const caseMessages = activeMessages;
       const messageIndex = caseMessages.findIndex((row) => row.id === message.id);
@@ -1814,7 +1921,11 @@ export default function App() {
 
       setChatFeedback((current) => ({
         ...current,
-        [message.id]: { value, status: "saving" },
+        [message.id]: {
+          value: decision === "approved" ? "up" : "down",
+          status: "saving",
+          rootCause: decision === "needs_revision" ? "other" : null,
+        },
       }));
 
       try {
@@ -1826,26 +1937,39 @@ export default function App() {
           response_text: message.content,
           parsed_intent: message.meta?.parsedIntent || null,
           confidence: message.meta?.confidence || null,
-          feedback_value: value,
+          feedback_value: decision === "approved" ? "up" : "down",
+          root_cause: decision === "needs_revision" ? "other" : null,
+          legal_domain: true,
+          jurisdiction: selectedCase?.jurisdiction_country || null,
           source_count: message.meta?.sources?.length || 0,
           metadata: {
+            review_decision: decision,
+            review_surface: "trust_panel",
+            trust_panel: message.meta?.trustPanel || null,
             mode: workspaceMode,
-            action_category: message.meta?.actionCategory || null,
-            action_status: message.meta?.actionStatus || null,
           },
         });
         setChatFeedback((current) => ({
           ...current,
-          [message.id]: { value, status: "submitted" },
+          [message.id]: {
+            value: decision === "approved" ? "up" : "down",
+            status: "submitted",
+            rootCause: decision === "needs_revision" ? "other" : null,
+          },
         }));
+        setNotice(decision === "approved" ? "AI output marked reviewed." : "AI output marked for correction.");
       } catch {
         setChatFeedback((current) => ({
           ...current,
-          [message.id]: { value, status: "error" },
+          [message.id]: {
+            value: decision === "approved" ? "up" : "down",
+            status: "error",
+            rootCause: decision === "needs_revision" ? "other" : null,
+          },
         }));
       }
     },
-    [activeMessages, selectedCaseId, selectedDocumentId, token, workspaceMode]
+    [activeMessages, selectedCase?.jurisdiction_country, selectedCaseId, selectedDocumentId, token, workspaceMode]
   );
 
   const stopCopilotRequest = useCallback(() => {
@@ -2270,8 +2394,26 @@ export default function App() {
         workspaceCaseId: selectedCaseId,
         workspaceDocumentId: selectedDocumentId,
       });
-      setChatInput(response.optimized_prompt || trimmed);
-      setNotice(t("promptOptimizedNotice", "Prompt optimized for clearer legal reasoning."));
+
+      const optimizedPrompt = String(response.optimized_prompt || trimmed).trim() || trimmed;
+      const unchanged = Boolean(response.unchanged) || optimizedPrompt === trimmed;
+
+      if (unchanged) {
+        const strongerHint = response.notes?.trim()
+          || "Prompt already strong. Add specific output format, constraints, or priority focus for a stronger rewrite.";
+        setNotice(strongerHint);
+        focusComposer();
+        return;
+      }
+
+      setChatInput(optimizedPrompt);
+      const strategyLabel = response.used_llm
+        ? "LLM"
+        : String(response.strategy || "heuristic").toUpperCase();
+      const note = response.notes?.trim() || "Prompt optimized for clearer legal reasoning.";
+      const improvements = (response.applied_improvements || []).slice(0, 2);
+      const improvementText = improvements.length ? ` ${improvements.join(" ")}` : "";
+      setNotice(`[${strategyLabel}] ${note}${improvementText}`);
       focusComposer();
     } catch (caught) {
       setError(normalizeError(caught, t("promptOptimizeFailed", "Unable to optimize the prompt.")));
@@ -3400,6 +3542,20 @@ export default function App() {
             </label>
             <button
               className="secondary-button"
+              disabled={!token || auditLoading}
+              onClick={() => {
+                if (auditPanelOpen) {
+                  setAuditPanelOpen(false);
+                } else {
+                  void loadAuditLogs();
+                }
+              }}
+              type="button"
+            >
+              {auditLoading ? "Loading audit..." : auditPanelOpen ? "Hide audit" : "Trust audit"}
+            </button>
+            <button
+              className="secondary-button"
               onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
               type="button"
             >
@@ -3411,6 +3567,47 @@ export default function App() {
         <section className="copilot-shell chat-only-shell">
           {notice ? <div className="notice-banner">{notice}</div> : null}
           {error ? <div className="error-banner">{error}</div> : null}
+
+          {auditPanelOpen ? (
+            <section className="trust-audit-panel">
+              <div className="trust-audit-head">
+                <div>
+                  <h3>AI Response Audit</h3>
+                  <p>Recent model outputs, validation status, sources, and trust metadata for this scope.</p>
+                </div>
+                <button type="button" onClick={() => void loadAuditLogs()} disabled={auditLoading}>
+                  Refresh
+                </button>
+              </div>
+              {auditLogs.length ? (
+                <div className="trust-audit-list">
+                  {auditLogs.map((row) => {
+                    const validation = row.validation || {};
+                    const trustPanel = row.trust_panel || {};
+                    const metrics = (trustPanel.metrics || {}) as Record<string, unknown>;
+                    const confidenceScore = Number(trustPanel.confidence_score || 0);
+                    return (
+                      <article className="trust-audit-item" key={row.id}>
+                        <div>
+                          <strong>{row.endpoint} · {row.parsed_intent || "unknown"}</strong>
+                          <small>{new Date(row.created_at).toLocaleString()}</small>
+                        </div>
+                        <p>{row.question_text}</p>
+                        <small>Validation: {String(validation.is_valid ?? "unknown")} · Confidence: {Math.round(confidenceScore * 100)}% · Citation coverage: {Math.round(Number(metrics.citation_coverage || 0) * 100)}%</small>
+                        <details>
+                          <summary>Answer preview and sources</summary>
+                          <p>{row.answer_preview}</p>
+                          <small>Model: {row.model_name || "unknown"} · Prompt: {row.prompt_version || "n/a"} · Response: {row.response_version}</small>
+                        </details>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="muted">No audit logs found for this scope yet.</p>
+              )}
+            </section>
+          ) : null}
 
           <div className={`chat-surface ${showMinimalSearchOnly ? "chat-surface-minimal" : ""}`}>
             <details
@@ -3446,6 +3643,22 @@ export default function App() {
                             </button>
                           ))}
                         </div>
+                        <p className="starter-prompt-note">
+                          Workflow packs
+                        </p>
+                        <div className="empty-chat-actions starter-prompt-actions workflow-pack-actions">
+                          {workflowPackPrompts.map((prompt) => (
+                            <button
+                              key={prompt}
+                              className="starter-prompt-chip"
+                              disabled={copilotLoading}
+                              onClick={() => void sendMessage(prompt)}
+                              type="button"
+                            >
+                              {prompt.split(":")[0]}
+                            </button>
+                          ))}
+                        </div>
                       </>
                     ) : null}
                   </div>
@@ -3459,7 +3672,9 @@ export default function App() {
                     message={message}
                     onCopy={handleCopy}
                     onFeedback={handleFeedback}
+                    onAskMissingInfo={handleAskMissingInfo}
                     onRegenerate={handleRegenerate}
+                    onTrustReview={handleTrustReview}
                   />
                 ))}
 
@@ -3532,11 +3747,13 @@ export default function App() {
                 }}
               >
                 <button
+                  aria-label={attachmentMenuOpen ? t("closeMenu", "Close menu") : t("openMenu", "Open menu")}
                   className="composer-plus"
                   onClick={() => setAttachmentMenuOpen((current) => !current)}
+                  title={attachmentMenuOpen ? t("closeMenu", "Close menu") : t("openMenu", "Open menu")}
                   type="button"
                 >
-                  +
+                  {attachmentMenuOpen ? "-" : "+"}
                 </button>
 
                 <textarea
@@ -3560,18 +3777,6 @@ export default function App() {
                       <path d="M10 2.8 11.3 6l3.2 1.3-3.2 1.3L10 11.8 8.7 8.6 5.5 7.3 8.7 6 10 2.8Z" />
                       <path d="M15.5 11.2 16.2 13l1.8.7-1.8.7-0.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z" />
                       <path d="M5.1 11.8 5.7 13.3l1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6.6-1.5Z" />
-                    </svg>
-                  </button>
-                  <button
-                    aria-label={t("stopRequest", "Stop request")}
-                    className="composer-stop"
-                    disabled={!copilotLoading}
-                    onClick={() => stopCopilotRequest()}
-                    title={t("stopRequest", "Stop request")}
-                    type="button"
-                  >
-                    <svg aria-hidden="true" viewBox="0 0 20 20">
-                      <rect x="5.2" y="5.2" width="9.6" height="9.6" rx="2.2" />
                     </svg>
                   </button>
                   <button
@@ -3599,12 +3804,23 @@ export default function App() {
                     </svg>
                   </button>
                   <button
-                    aria-label={t("send", "Send")}
-                    className="composer-send"
-                    disabled={!chatInput.trim() || copilotLoading || composerRecording || composerTranscribing || optimizingPrompt}
-                    type="submit"
+                    aria-label={copilotLoading ? t("stopRequest", "Stop request") : t("send", "Send")}
+                    className={`composer-send ${copilotLoading ? "is-stop" : ""}`}
+                    disabled={!copilotLoading && (!chatInput.trim() || composerRecording || composerTranscribing || optimizingPrompt)}
+                    onClick={copilotLoading ? () => stopCopilotRequest() : undefined}
+                    title={copilotLoading ? t("stopRequest", "Stop request") : t("send", "Send")}
+                    type={copilotLoading ? "button" : "submit"}
                   >
-                    {t("askHarvey", "Ask Legal AI")}
+                    {copilotLoading ? (
+                      <svg aria-hidden="true" viewBox="0 0 20 20">
+                        <rect x="5.5" y="5.5" width="9" height="9" rx="1.6" />
+                      </svg>
+                    ) : (
+                      <svg aria-hidden="true" viewBox="0 0 20 20">
+                        <path d="M4.5 10h9.8" />
+                        <path d="m10.2 5.2 4.8 4.8-4.8 4.8" />
+                      </svg>
+                    )}
                   </button>
                 </div>
               </form>

@@ -50,6 +50,12 @@ class WeeklyIntentStats:
     up_rate: float = 0.0
 
 
+@dataclass
+class RootCauseStats:
+    root_cause: str
+    count: int = 0
+
+
 def _week_start_iso(value: datetime | None) -> str:
     if value is None:
         return "unknown"
@@ -121,6 +127,27 @@ def _build_weekly_summary(rows: list[CopilotFeedback]) -> list[WeeklyIntentStats
     return summary
 
 
+def _build_root_cause_summary(rows: list[CopilotFeedback]) -> list[RootCauseStats]:
+    grouped: dict[str, RootCauseStats] = {}
+    for row in rows:
+        if row.feedback_value != "down":
+            continue
+
+        root_cause = (getattr(row, "root_cause", None) or "").strip()
+        if not root_cause:
+            metadata = _safe_parse_metadata(row.metadata_json)
+            root_cause = str(metadata.get("root_cause") or "").strip()
+        if not root_cause:
+            root_cause = "unspecified"
+
+        bucket = grouped.setdefault(root_cause, RootCauseStats(root_cause=root_cause))
+        bucket.count += 1
+
+    summary = list(grouped.values())
+    summary.sort(key=lambda item: item.count, reverse=True)
+    return summary
+
+
 def _collect_negative_samples(rows: list[CopilotFeedback], limit_per_intent: int = 3) -> dict[str, list[dict[str, str]]]:
     output: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in rows:
@@ -133,6 +160,11 @@ def _collect_negative_samples(rows: list[CopilotFeedback], limit_per_intent: int
             continue
 
         metadata = _safe_parse_metadata(row.metadata_json)
+        root_cause = (getattr(row, "root_cause", None) or "").strip() or str(metadata.get("root_cause") or "")
+        jurisdiction = (getattr(row, "jurisdiction", None) or "").strip() or str(metadata.get("jurisdiction") or "")
+        legal_domain = getattr(row, "legal_domain", None)
+        if legal_domain is None:
+            legal_domain = metadata.get("legal_domain")
         bucket.append(
             {
                 "prompt_text": (row.prompt_text or "").strip(),
@@ -140,6 +172,9 @@ def _collect_negative_samples(rows: list[CopilotFeedback], limit_per_intent: int
                 "comment": (row.comment or "").strip(),
                 "created_at": row.created_at.isoformat() if row.created_at else "",
                 "ui_language": str(metadata.get("ui_language") or ""),
+                "root_cause": str(root_cause or ""),
+                "jurisdiction": str(jurisdiction or ""),
+                "legal_domain": "true" if legal_domain is True else "false" if legal_domain is False else "",
             }
         )
     return output
@@ -165,6 +200,7 @@ def _write_reports(
     rows: list[CopilotFeedback],
     intent_stats: list[IntentStats],
     weekly_stats: list[WeeklyIntentStats],
+    root_cause_stats: list[RootCauseStats],
     negative_samples: dict[str, list[dict[str, str]]],
 ) -> tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -186,6 +222,7 @@ def _write_reports(
         "metrics": metrics,
         "intent_stats": [asdict(item) for item in intent_stats],
         "weekly_stats": [asdict(item) for item in weekly_stats],
+        "root_cause_stats": [asdict(item) for item in root_cause_stats],
         "weak_intents": [asdict(item) for item in weak_intents],
         "negative_samples": negative_samples,
     }
@@ -211,6 +248,21 @@ def _write_reports(
         lines.append(
             f"| `{item.intent}` | {item.total} | {item.up} | {item.down} | {item.up_rate:.1%} |"
         )
+
+    lines.extend(
+        [
+            "",
+            "## Downvote Root Causes",
+            "",
+            "| Root Cause | Count |",
+            "|---|---:|",
+        ]
+    )
+    if not root_cause_stats:
+        lines.append("| `none` | 0 |")
+    else:
+        for item in root_cause_stats:
+            lines.append(f"| `{item.root_cause}` | {item.count} |")
 
     lines.extend(
         [
@@ -254,6 +306,12 @@ def _write_reports(
                     lines.append(f"- Comment: `{comment_preview}`")
                 if sample["ui_language"]:
                     lines.append(f"- UI language: `{sample['ui_language']}`")
+                if sample["root_cause"]:
+                    lines.append(f"- Root cause: `{sample['root_cause']}`")
+                if sample["jurisdiction"]:
+                    lines.append(f"- Jurisdiction: `{sample['jurisdiction']}`")
+                if sample["legal_domain"]:
+                    lines.append(f"- Legal domain: `{sample['legal_domain']}`")
                 lines.append("")
 
     md_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
@@ -277,6 +335,7 @@ def main() -> int:
         rows = _load_feedback_rows(db, weeks=args.weeks, tenant_id=args.tenant_id)
         intent_stats = _build_intent_summary(rows)
         weekly_stats = _build_weekly_summary(rows)
+        root_cause_stats = _build_root_cause_summary(rows)
         negative_samples = _collect_negative_samples(rows)
         json_path, md_path = _write_reports(
             output_dir=Path(args.output_dir),
@@ -285,6 +344,7 @@ def main() -> int:
             rows=rows,
             intent_stats=intent_stats,
             weekly_stats=weekly_stats,
+            root_cause_stats=root_cause_stats,
             negative_samples=negative_samples,
         )
         print(f"Feedback JSON report: {json_path}")

@@ -1,6 +1,14 @@
 ﻿export type UserRole = "admin" | "lawyer" | "assistant";
 export type CaseStatus = "open" | "in_progress" | "closed" | "archived";
 export type JurisdictionCountry = "tunisia" | "germany";
+export type FeedbackRootCause =
+  | "unclear_prompt"
+  | "wrong_jurisdiction"
+  | "missing_evidence"
+  | "generic_answer"
+  | "wrong_legal_area"
+  | "ungrounded"
+  | "other";
 
 export interface User {
   id: number;
@@ -232,6 +240,7 @@ export interface CitationItem {
   document_id?: number | null;
   case_id?: number | null;
   snippet: string;
+  url?: string | null;
 }
 
 export interface CacheMetadata {
@@ -443,6 +452,33 @@ export interface JurisdictionContext {
   risk_focus_areas: string[];
 }
 
+export interface HighReasoningScore {
+  grounding_score: number;
+  citation_score: number;
+  factual_consistency_score: number;
+  legal_usefulness_score: number;
+  actionability_score: number;
+  clarity_score: number;
+  overall_score: number;
+  decision_reason: string;
+}
+
+export interface HighReasoningCandidate {
+  rank: number;
+  style: string;
+  answer: string;
+  score: HighReasoningScore;
+}
+
+export interface HighReasoningResult {
+  reasoning_level: "low" | "medium" | "high";
+  activated: boolean;
+  winner_index?: number | null;
+  second_best_index?: number | null;
+  winner_reason?: string | null;
+  candidates: HighReasoningCandidate[];
+}
+
 export interface CopilotResponse {
   message: string;
   parsed_intent: string;
@@ -462,12 +498,14 @@ export interface CopilotResponse {
   scope: string;
   sources: SourceItem[];
   citations?: CitationItem[];
+  trust_panel?: Record<string, unknown> | null;
   execution_trace?: Array<Record<string, unknown>>;
   cache?: CacheMetadata;
   job_id?: string | null;
   case_snapshot_version?: number | null;
   artifact?: ArtifactContext | null;
   jurisdiction?: JurisdictionContext | null;
+  reasoning_result?: HighReasoningResult | null;
   vision_result?: VisionResult | null;
   saved_asset_ids?: number[];
   review_record_id?: number | null;
@@ -486,6 +524,9 @@ export interface CopilotFeedback {
   prompt_text: string;
   response_text: string;
   comment: string | null;
+  root_cause?: FeedbackRootCause | null;
+  legal_domain?: boolean | null;
+  jurisdiction?: JurisdictionCountry | null;
   source_count: number;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -503,6 +544,31 @@ export interface CopilotFeedbackWeeklyItem {
 export interface CopilotFeedbackWeeklySummaryResponse {
   weeks: number;
   rows: CopilotFeedbackWeeklyItem[];
+}
+
+export interface AIResponseAuditLog {
+  id: number;
+  tenant_id: number;
+  user_id?: number | null;
+  case_id?: number | null;
+  document_id?: number | null;
+  endpoint: string;
+  parsed_intent?: string | null;
+  response_version: string;
+  model_name?: string | null;
+  prompt_version?: string | null;
+  question_text: string;
+  answer_preview: string;
+  sources: Array<Record<string, unknown>>;
+  trust_panel: Record<string, unknown>;
+  validation: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface AIResponseAuditLogListResponse {
+  total: number;
+  rows: AIResponseAuditLog[];
 }
 
 export interface ArtifactVersionListResponse {
@@ -577,6 +643,8 @@ export interface PromptOptimizationResponse {
   notes?: string | null;
   strategy: string;
   used_llm: boolean;
+  applied_improvements?: string[];
+  unchanged?: boolean;
   target_type?: string | null;
   target_id?: number | null;
 }
@@ -629,6 +697,7 @@ export interface ChatMessage {
     permissionDenied?: boolean;
     steps?: string[];
     structuredResult?: Record<string, unknown>;
+    trustPanel?: Record<string, unknown> | null;
     sources?: SourceItem[];
     citations?: CitationItem[];
     executionTrace?: Array<Record<string, unknown>>;
@@ -637,6 +706,7 @@ export interface ChatMessage {
     caseSnapshotVersion?: number | null;
     artifact?: ArtifactContext | null;
     jurisdiction?: JurisdictionContext | null;
+    reasoningResult?: HighReasoningResult | null;
     visionResult?: VisionResult | null;
     savedAssetIds?: number[];
     reviewRecordId?: number | null;

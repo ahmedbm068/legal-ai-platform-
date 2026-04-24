@@ -8,9 +8,11 @@ from sqlalchemy.orm import Session
 
 from backend.core.config import settings
 from backend.services.cache_service import cache_service
+from backend.services.ai.ai_response_audit_service import ai_response_audit_service
 from backend.services.ai.agents.retrieval_agent import RetrievalAgent
 from backend.services.ai.agents.verifier_agent import verifier_agent
 from backend.services.ai.embedding_service import EmbeddingService
+from backend.services.ai.legal_trust_service import legal_trust_service
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.vector_store import VectorStore
 
@@ -189,6 +191,107 @@ class RagService:
         }
         return response
 
+    @staticmethod
+    def _build_ask_output_contract(
+        *,
+        question: str,
+        confidence: str,
+        scope: str,
+        sources: list[dict[str, Any]],
+        citations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        source_labels = [
+            str(item.get("filename") or item.get("label") or "").strip()
+            for item in [*sources, *citations]
+            if isinstance(item, dict) and str(item.get("filename") or item.get("label") or "").strip()
+        ]
+        return {
+            "matter_type": "legal question",
+            "user_intent": "ask",
+            "jurisdiction": "",
+            "confirmed_facts": [],
+            "inferred_facts": [],
+            "missing_facts": ["Additional facts may be required for a lawyer-grade conclusion."],
+            "legal_issue": question,
+            "relevant_sources": [*sources, *citations],
+            "governing_rule": "",
+            "application": "",
+            "counter_analysis": "",
+            "contradictions": [],
+            "position_strength": {
+                "score": 0,
+                "label": "weak",
+                "reason": "Direct position strength is not assigned in the lightweight ask endpoint.",
+            },
+            "recommended_strategy": {
+                "type": "gather_evidence",
+                "reason": "Use verified document evidence before taking legal action.",
+                "risk_level": "medium",
+            },
+            "evidence_strength": {"strong": source_labels[:6], "medium": [], "weak": []},
+            "client_risk_summary": {
+                "financial_risk": "Not found in provided documents",
+                "legal_risk": "Legal risk depends on verified facts and applicable law.",
+                "urgency": "medium",
+                "summary": "Risk assessment requires lawyer review.",
+            },
+            "confidence": confidence,
+            "verification_status": "partial" if sources else "unverified",
+            "next_steps": ["Review sentence-to-source mappings and gather missing supporting documents."],
+            "lawyer_review_note": "This output is legal-assistance material for professional review.",
+            "scope": scope,
+        }
+
+    def _apply_trust_layer_to_ask(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        user_id: int | None,
+        question: str,
+        payload: dict[str, Any],
+        case_id: int | None,
+        document_id: int | None,
+        cache_hit: bool = False,
+    ) -> dict[str, Any]:
+        if not settings.LEGAL_TRUST_ENGINE_ENABLED or settings.LEGAL_AGENT_KILL_SWITCH:
+            return payload
+
+        output_contract = self._build_ask_output_contract(
+            question=question,
+            confidence=str(payload.get("confidence") or "low"),
+            scope=str(payload.get("scope") or self._get_scope(case_id=case_id, document_id=document_id)),
+            sources=payload.get("sources") if isinstance(payload.get("sources"), list) else [],
+            citations=payload.get("citations") if isinstance(payload.get("citations"), list) else [],
+        )
+        output_contract["application"] = str(payload.get("answer") or "").strip()
+        trust_result = legal_trust_service.enforce_response(
+            result=payload,
+            output_contract=output_contract,
+            case_context={},
+            force_structured_answer=settings.LEGAL_TRUST_STRICT_OUTPUTS,
+        )
+        trusted_payload = dict(payload)
+        trusted_payload["answer"] = trust_result.answer
+        trusted_payload["trust_panel"] = trust_result.trust_panel
+        trusted_payload["trust_validation"] = trust_result.validation
+        ai_response_audit_service.record(
+            db=db,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            endpoint="/ai/ask",
+            question=question,
+            answer=trust_result.answer,
+            parsed_intent="ask",
+            case_id=case_id,
+            document_id=document_id,
+            sources=trusted_payload.get("sources") if isinstance(trusted_payload.get("sources"), list) else [],
+            trust_panel=trust_result.trust_panel,
+            validation=trust_result.validation,
+            metadata={"cache_hit": cache_hit, "scope": trusted_payload.get("scope")},
+        )
+        return trusted_payload
+
     def search_chunks(
         self,
         db: Session,
@@ -222,7 +325,8 @@ class RagService:
         question: str,
         top_k: int = 5,
         case_id: Optional[int] = None,
-        document_id: Optional[int] = None
+        document_id: Optional[int] = None,
+        user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         safe_question = (question or "").strip()
         safe_top_k = self._sanitize_top_k(top_k)
@@ -235,7 +339,17 @@ class RagService:
         )
         cached_payload = cache_service.get_json(cache_key)
         if isinstance(cached_payload, dict):
-            return self._with_cache_metadata(cached_payload, key=cache_key, hit=True)
+            trusted_cached = self._apply_trust_layer_to_ask(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                question=safe_question,
+                payload=cached_payload,
+                case_id=case_id,
+                document_id=document_id,
+                cache_hit=True,
+            )
+            return self._with_cache_metadata(trusted_cached, key=cache_key, hit=True)
 
         results = self.retrieve_context(
             db=db,
@@ -258,6 +372,15 @@ class RagService:
                 "sources": [],
                 "citations": [],
             }
+            response = self._apply_trust_layer_to_ask(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                question=safe_question,
+                payload=response,
+                case_id=case_id,
+                document_id=document_id,
+            )
             cache_service.set_json(cache_key, response, ttl_seconds=settings.CACHE_TTL_SECONDS)
             return self._with_cache_metadata(response, key=cache_key, hit=False)
 
@@ -275,6 +398,15 @@ class RagService:
                 "sources": formatted_sources,
                 "citations": citations,
             }
+            response = self._apply_trust_layer_to_ask(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                question=safe_question,
+                payload=response,
+                case_id=case_id,
+                document_id=document_id,
+            )
             cache_service.set_json(cache_key, response, ttl_seconds=settings.CACHE_TTL_SECONDS)
             return self._with_cache_metadata(response, key=cache_key, hit=False)
 
@@ -307,6 +439,15 @@ Context:
                 "sources": formatted_sources,
                 "citations": citations,
             }
+            response = self._apply_trust_layer_to_ask(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                question=safe_question,
+                payload=response,
+                case_id=case_id,
+                document_id=document_id,
+            )
             cache_service.set_json(cache_key, response, ttl_seconds=settings.CACHE_TTL_SECONDS)
             return self._with_cache_metadata(response, key=cache_key, hit=False)
 
@@ -350,6 +491,15 @@ Context:
                 "sources": formatted_sources,
                 "citations": citations,
             }
+            payload = self._apply_trust_layer_to_ask(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                question=safe_question,
+                payload=payload,
+                case_id=case_id,
+                document_id=document_id,
+            )
             cache_service.set_json(cache_key, payload, ttl_seconds=settings.CACHE_TTL_SECONDS)
             return self._with_cache_metadata(payload, key=cache_key, hit=False)
 
@@ -364,6 +514,15 @@ Context:
                 "sources": formatted_sources,
                 "citations": citations,
             }
+            payload = self._apply_trust_layer_to_ask(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                question=safe_question,
+                payload=payload,
+                case_id=case_id,
+                document_id=document_id,
+            )
             cache_service.set_json(cache_key, payload, ttl_seconds=settings.CACHE_TTL_SECONDS)
             return self._with_cache_metadata(payload, key=cache_key, hit=False)
 
@@ -378,5 +537,14 @@ Context:
                 "sources": formatted_sources,
                 "citations": citations,
             }
+            payload = self._apply_trust_layer_to_ask(
+                db=db,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                question=safe_question,
+                payload=payload,
+                case_id=case_id,
+                document_id=document_id,
+            )
             cache_service.set_json(cache_key, payload, ttl_seconds=settings.CACHE_TTL_SECONDS)
             return self._with_cache_metadata(payload, key=cache_key, hit=False)

@@ -15,6 +15,7 @@ class CopilotIntentExecutionContext:
     message: str
     top_k: int
     use_external_research: bool
+    reasoning_level: str
     workspace_case_id: Optional[int]
     resolved_query: str
     parsed: Dict[str, Any]
@@ -280,6 +281,7 @@ class CopilotIntentExecutionAgent:
                 case_id=None,
                 document_id=ctx.parsed["document_id"],
                 use_external_research=ctx.use_external_research,
+                reasoning_level=ctx.reasoning_level,
                 intent="ask_document",
                 target_type="document",
                 target_id=ctx.parsed["document_id"],
@@ -293,6 +295,7 @@ class CopilotIntentExecutionAgent:
                 case_id=ctx.parsed["case_id"],
                 document_id=None,
                 use_external_research=ctx.use_external_research,
+                reasoning_level=ctx.reasoning_level,
                 intent="ask_case",
                 target_type="case",
                 target_id=ctx.parsed["case_id"],
@@ -306,6 +309,7 @@ class CopilotIntentExecutionAgent:
                 case_id=None,
                 document_id=None,
                 use_external_research=ctx.use_external_research,
+                reasoning_level=ctx.reasoning_level,
                 intent="ask_global",
                 target_type="global",
                 target_id=None,
@@ -319,6 +323,7 @@ class CopilotIntentExecutionAgent:
                 case_id=None,
                 document_id=None,
                 use_external_research=ctx.use_external_research,
+                reasoning_level=ctx.reasoning_level,
                 intent="summarize_global",
                 target_type="global",
                 target_id=None,

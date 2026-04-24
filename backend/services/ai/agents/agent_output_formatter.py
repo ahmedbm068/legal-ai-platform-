@@ -74,6 +74,17 @@ class AgentOutputFormatter:
         return normalized
 
     @staticmethod
+    def build_legal_copilot_guardrails() -> list[str]:
+        return [
+            "- Act as legal decision-support for lawyers, not as a final decision-maker.",
+            "- Keep legal method order: issue, legal basis, rule, application, uncertainty, counter-analysis, next steps.",
+            "- Separate confirmed facts, inferred facts, missing facts, and assumptions requiring validation.",
+            "- Ground legal statements in supplied sources only; never fabricate authority or article content.",
+            "- Use cautious language and flag points that require verification or lawyer review.",
+            "- Treat output as draft work product subject to professional legal review.",
+        ]
+
+    @staticmethod
     def build_quality_guidance(*, task: str, structured_json: bool = False) -> str:
         lines = [
             f"Task: {task}",
@@ -84,6 +95,7 @@ class AgentOutputFormatter:
             "- Prefer bullet points, named issues, dates, amounts, and clause-level references when available.",
             "- If something is uncertain, say so plainly instead of guessing.",
         ]
+        lines.extend(AgentOutputFormatter.build_legal_copilot_guardrails())
         if structured_json:
             lines.insert(1, "- Return valid JSON only.")
             lines.append("- Do not wrap the JSON in markdown fences unless explicitly requested.")

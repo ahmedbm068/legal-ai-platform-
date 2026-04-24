@@ -152,6 +152,7 @@ class RetrievalAgent(BaseAgent):
                 item["retrieval_method"] = "semantic"
 
         preliminary_results = sorted(merged.values(), key=lambda x: x["score"], reverse=True)
+        preliminary_results = self._prioritize_evidence_sources(preliminary_results)
         min_score = max(0.0, float(settings.RETRIEVAL_MIN_SCORE))
         if min_score > 0:
             preliminary_results = [item for item in preliminary_results if float(item.get("score", 0.0)) >= min_score]
@@ -194,6 +195,7 @@ class RetrievalAgent(BaseAgent):
         if min_score > 0 and ranked_results:
             ranked_results = [item for item in ranked_results if float(item.get("score", 0.0)) >= min_score]
 
+        ranked_results = self._prioritize_evidence_sources(ranked_results)
         ranked_results = ranked_results[:safe_top_k]
         trace.append(f"Final retrieval returned {len(ranked_results)} chunks.")
 
@@ -252,6 +254,51 @@ class RetrievalAgent(BaseAgent):
         if total <= 0:
             return 0.4, 0.6
         return lexical_weight / total, semantic_weight / total
+
+    @classmethod
+    def _prioritize_evidence_sources(cls, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        ranked: list[dict[str, Any]] = []
+        for item in chunks:
+            row = dict(item)
+            priority = cls._evidence_priority(row)
+            row["evidence_priority"] = priority
+            ranked.append(row)
+        return sorted(
+            ranked,
+            key=lambda item: (
+                int(item.get("evidence_priority") or 4),
+                -float(item.get("score") or 0.0),
+            ),
+        )
+
+    @staticmethod
+    def _evidence_priority(item: dict[str, Any]) -> int:
+        filename = str(item.get("filename") or "").strip().lower()
+        text = str(item.get("chunk_text") or "").strip().lower()
+        combined = f"{filename}\n{text}"
+
+        legal_code_markers = (
+            "code civil",
+            "code des obligations",
+            "code_succession",
+            "code_international",
+            "article ",
+            "legal code",
+            "law corpus",
+        )
+        timeline_markers = ("timeline", "chronology", "event", "notice date", "effective date", "deadline")
+        financial_markers = ("invoice", "payment", "amount", "fee", "price", "kpi", "sla", "damages", "penalty")
+        case_doc_markers = ("contract", "agreement", "notice", "email", "correspondence", "letter", "breach")
+
+        if any(marker in combined for marker in case_doc_markers) and not any(marker in filename for marker in legal_code_markers):
+            return 1
+        if any(marker in combined for marker in timeline_markers):
+            return 2
+        if any(marker in combined for marker in financial_markers):
+            return 3
+        if any(marker in combined for marker in legal_code_markers):
+            return 4
+        return 2 if item.get("case_id") is not None else 4
 
     @classmethod
     def _filter_non_legal_test_chunks(

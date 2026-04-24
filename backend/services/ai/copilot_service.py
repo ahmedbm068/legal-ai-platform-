@@ -2,14 +2,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
+import logging
 import json
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql import func
 
+from backend.core.config import settings
 from backend.models.appointment import Appointment
 from backend.models.case import Case
 from backend.models.client import Client
@@ -46,6 +50,9 @@ from backend.services.ai.copilot_risk_analysis_mixin import CopilotRiskAnalysisM
 from backend.services.ai.rag_service import RagService
 from backend.services.ai.summarization_service import summarization_service
 from backend.services.calendar_service import build_ai_calendar_brief, normalize_appointment_type, normalize_scope, normalize_status, serialize_appointment
+
+
+logger = logging.getLogger(__name__)
 
 
 class CopilotService(CopilotRiskAnalysisMixin):
@@ -333,6 +340,26 @@ class CopilotService(CopilotRiskAnalysisMixin):
         "under",
         "with",
     }
+    HIGH_REASONING_ELIGIBLE_INTENTS = {
+        "ask_document",
+        "ask_case",
+        "ask_global",
+        "summarize_global",
+    }
+    HIGH_REASONING_STYLES = (
+        (
+            "strict_factual_legal",
+            "Use a strict factual legal tone. Prioritize legal facts, direct citations, and explicit uncertainty statements when evidence is missing.",
+        ),
+        (
+            "risk_focused",
+            "Prioritize legal and operational risk identification. Emphasize exposure, uncertainty, and risk severity with citation-backed justification.",
+        ),
+        (
+            "strategic_actionable",
+            "Prioritize practical legal strategy and next actions. Recommend concrete steps anchored in cited evidence and avoid uncited assumptions.",
+        ),
+    )
 
     def __init__(
         self,
@@ -357,6 +384,266 @@ class CopilotService(CopilotRiskAnalysisMixin):
     def _normalize_mode(value: str | None) -> str:
         normalized = str(value or "default").strip().lower()
         return normalized or "default"
+
+    @staticmethod
+    def _normalize_reasoning_level(value: str | None) -> str:
+        normalized = str(value or "medium").strip().lower()
+        if normalized not in {"low", "medium", "high"}:
+            return "medium"
+        return normalized
+
+    def _should_use_trust_engine(self, *, normalized_mode: str, intent: str, agent_mode: bool) -> bool:
+        normalized = str(normalized_mode or "default").strip().lower()
+        parsed_intent = str(intent or "").strip()
+        if normalized == "legal_search" and parsed_intent in self.LEGAL_SEARCH_ELIGIBLE_INTENTS:
+            return True
+        if normalized == "external" and parsed_intent in self.LEGAL_SEARCH_ELIGIBLE_INTENTS:
+            return True
+        return False
+
+    @staticmethod
+    def _chat_mode_needs_rag(
+        *,
+        question: str,
+        intent: str,
+        case_id: Optional[int],
+        document_id: Optional[int],
+    ) -> bool:
+        lowered = str(question or "").strip().lower()
+        if not lowered:
+            return False
+        if CopilotService._looks_like_conversational_opening(lowered):
+            return False
+        if CopilotService.CHAT_THANKS_PATTERN.search(lowered):
+            return False
+        if any(token in lowered for token in ("joke", "funny", "make me laugh")) and not any(
+            token in lowered for token in ("case", "document", "contract", "clause", "evidence")
+        ):
+            return False
+        document_action_intents = {
+            "summarize_document",
+            "list_deadlines_case",
+            "list_case_documents",
+            "list_case_appointments",
+            "trace_case_evidence",
+            "compare_case_documents",
+            "monitor_deadlines_case",
+        }
+        if intent in document_action_intents and (case_id is not None or document_id is not None):
+            return True
+
+        workspace_signals = [
+            "case #",
+            "this case",
+            "current case",
+            "document #",
+            "this document",
+            "uploaded",
+            "file",
+            "contract",
+            "clause",
+            "deadline",
+            "notice",
+            "invoice",
+            "sla",
+            "kpi",
+            "summarize case",
+            "summarize document",
+            "what does the document say",
+            "according to the document",
+            "nova",
+            "response",
+            "counterparty",
+        ]
+        if not any(signal in lowered for signal in workspace_signals):
+            return False
+
+        explicit_workspace_anchors = [
+            "case #",
+            "this case",
+            "current case",
+            "document #",
+            "this document",
+            "uploaded",
+            "file",
+            "summarize case",
+            "summarize document",
+            "what does the document say",
+            "according to the document",
+            "in the document",
+            "in this contract",
+            "in the contract",
+            "find the",
+            "show me the",
+            "extract",
+            "deadlines in this case",
+            "notice in this case",
+            "what did",
+            "what was said",
+        ]
+        if any(anchor in lowered for anchor in explicit_workspace_anchors):
+            return True
+
+        educational_starters = (
+            "what is ",
+            "what are ",
+            "what does ",
+            "explain ",
+            "how do ",
+            "how does ",
+            "give me ",
+            "tell me ",
+            "write ",
+            "make this ",
+        )
+        if lowered.startswith(educational_starters):
+            return False
+
+        return True
+
+    @staticmethod
+    def _strip_trust_artifacts(result: Dict[str, Any]) -> Dict[str, Any]:
+        stripped = dict(result or {})
+        for key in (
+            "trust_panel",
+            "trust_validation",
+            "claim_validation",
+            "contradiction_detection",
+            "unsupported_claims",
+            "verified_claims",
+            "sentence_to_source_evidence",
+            "sentence_to_source_mapping",
+            "strict_verification",
+            "article_applicability",
+            "global_output_contract",
+            "legal_workflow_agents",
+            "final_answer_source",
+            "original_answer_before_final_composer",
+        ):
+            stripped.pop(key, None)
+
+        structured = stripped.get("structured_result")
+        if isinstance(structured, dict):
+            structured = dict(structured)
+            for key in (
+                "trust_panel",
+                "trust_validation",
+                "claim_validation",
+                "contradiction_detection",
+                "unsupported_claims",
+                "verified_claims",
+                "sentence_to_source_evidence",
+                "sentence_to_source_mapping",
+                "strict_verification",
+                "article_applicability",
+                "global_output_contract",
+                "legal_workflow_agents",
+                "final_answer_source",
+                "original_answer_before_final_composer",
+            ):
+                structured.pop(key, None)
+            stripped["structured_result"] = structured
+        return stripped
+
+    def _strip_heavy_trust_diagnostics(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        stripped = self._strip_trust_artifacts(result)
+        for key in (
+            "contradictions",
+            "legal_audit",
+            "verification_details",
+            "risk_panel",
+        ):
+            stripped.pop(key, None)
+
+        structured = stripped.get("structured_result")
+        if isinstance(structured, dict):
+            structured = dict(structured)
+            for key in (
+                "contradictions",
+                "legal_audit",
+                "verification_details",
+                "risk_panel",
+            ):
+                structured.pop(key, None)
+            stripped["structured_result"] = structured
+        return stripped
+
+    @staticmethod
+    def _result_indicates_insufficient_evidence(result: Dict[str, Any]) -> bool:
+        trust_panel = result.get("trust_panel") if isinstance(result.get("trust_panel"), dict) else {}
+        status = str((trust_panel or {}).get("status") or result.get("status") or "").strip().lower()
+        fallback_reason = str(result.get("fallback_reason") or "").strip().lower()
+        answer = str(result.get("answer") or "").strip().lower()
+        return (
+            status == "insufficient_evidence"
+            or fallback_reason in {"no_direct_legal_source", "insufficient_evidence"}
+            or "not enough grounded evidence" in answer
+            or "insufficient evidence" in answer
+        )
+
+    def _normalize_trust_state(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        normalized = dict(result or {})
+        if not self._result_indicates_insufficient_evidence(normalized):
+            trust_panel = normalized.get("trust_panel")
+            if isinstance(trust_panel, dict):
+                strength = str(trust_panel.get("evidence_strength") or "").strip().lower()
+                confidence = str(normalized.get("confidence") or trust_panel.get("confidence") or "").strip().lower()
+                status = str(trust_panel.get("status") or "").strip().lower()
+                if "insufficient" in strength or status == "insufficient_evidence":
+                    normalized["confidence"] = "low"
+            return normalized
+
+        message = "Not enough grounded evidence to produce a reliable legal analysis."
+        normalized["status"] = "INSUFFICIENT_EVIDENCE"
+        normalized["answer"] = message
+        normalized["confidence"] = "low"
+        normalized["verification_status"] = "failed"
+        normalized["evidence_strength"] = "insufficient"
+        normalized["position_strength"] = "not_assessable"
+        normalized["citation_coverage"] = 0
+        normalized["unsupported_rate"] = 100
+        normalized["recommended_strategy"] = "gather_missing_evidence"
+        normalized["risk_summary"] = "Risk cannot be assessed reliably from available evidence."
+        normalized["used_fallback"] = True
+        normalized["fallback_reason"] = "insufficient_evidence"
+
+        trust_panel = normalized.get("trust_panel") if isinstance(normalized.get("trust_panel"), dict) else {}
+        trust_panel = dict(trust_panel)
+        metrics = trust_panel.get("metrics") if isinstance(trust_panel.get("metrics"), dict) else {}
+        metrics = {
+            **metrics,
+            "citation_coverage": 0,
+            "unsupported_rate": 100,
+            "hallucination_rate": 1.0,
+        }
+        trust_panel.update(
+            {
+                "status": "INSUFFICIENT_EVIDENCE",
+                "message": message,
+                "answer": message,
+                "confidence": "low",
+                "confidence_score": 0.0,
+                "verification_status": "failed",
+                "evidence_strength": "insufficient",
+                "position_strength": "not_assessable",
+                "citation_coverage": 0,
+                "unsupported_rate": 100,
+                "recommended_strategy": "gather_missing_evidence",
+                "risk_summary": {
+                    "client": "Risk cannot be assessed reliably from available evidence.",
+                    "opposing_party": "Risk cannot be assessed reliably from available evidence.",
+                },
+                "metrics": metrics,
+            }
+        )
+        normalized["trust_panel"] = trust_panel
+
+        structured = normalized.get("structured_result")
+        if isinstance(structured, dict):
+            structured = dict(structured)
+            structured["trust_panel"] = trust_panel
+            normalized["structured_result"] = structured
+        return normalized
 
     def _permission_denied_response(self, *, user_role: str, action: str) -> Dict[str, Any]:
         return {
@@ -418,33 +705,50 @@ class CopilotService(CopilotRiskAnalysisMixin):
         role_hint = "lawyer" if user_role in {"admin", "lawyer", "assistant"} else "client"
         if role_hint == "lawyer":
             return (
-                "Hello. I am your Legal AI assistant. "
-                "I can support you with risk spotting, strategy options, drafting support, and clear next steps.\n"
+                "Hey. I am your legal copilot, but we can talk normally too. "
+                "I can help with jokes, explanations, brainstorming, writing, legal drafting, case strategy, and document questions.\n"
                 "You can start with:\n"
-                "1. Analyze risks in this matter.\n"
-                "2. Draft a client update in professional tone.\n"
-                "3. Build a practical action plan for the next 7 days.\n\n"
-                "Note: I provide legal decision support and drafting assistance, but I do not replace professional legal judgment."
+                "1. Tell me a joke.\n"
+                "2. Make this email more professional.\n"
+                "3. Explain arbitration simply.\n"
+                "4. Find the SLA clause in this document."
             )
         return (
-            "Hello. I am your Legal AI assistant. "
-            "I can explain legal points in clear language, help structure your concerns, and suggest practical next steps.\n"
+            "Hey. I can chat normally and help with legal questions in plain language. "
+            "Ask me for explanations, drafting help, brainstorming, or questions about your documents.\n"
             "You can start with:\n"
-            "1. Explain this legal issue in simple terms.\n"
+            "1. Explain this simply.\n"
             "2. Help me prepare questions for my lawyer.\n"
-            "3. Organize my facts into a clear timeline.\n\n"
-            "Note: I provide informational guidance and do not replace advice from a licensed lawyer."
+            "3. Summarize this document."
         )
 
     @staticmethod
     def _build_chat_fallback_answer(question: str) -> str:
         cleaned = str(question or "").strip()
+        lowered = cleaned.lower()
         if not cleaned:
             return CopilotService._build_chat_greeting_answer(user_role="assistant")
+        if any(token in lowered for token in ("joke", "funny", "make me laugh")):
+            return (
+                "Sure. Why did the lawyer bring a ladder to court?\n\n"
+                "Because they wanted to take the case to a higher level."
+            )
+        if lowered in {"yo", "hi", "hello", "hey"}:
+            return "Yo. What are we working on today?"
+        if lowered.startswith(("write ", "draft ", "make this ", "rewrite ")):
+            return (
+                "Absolutely. Send me the text or the goal, and I can make it clearer, more professional, "
+                "more persuasive, shorter, warmer, or more lawyerly."
+            )
+        if lowered.startswith(("explain ", "what is ", "what are ", "how do ", "how does ")):
+            return (
+                "I can explain that clearly. If you want a general explanation, ask normally; if you want me "
+                "to use your case documents, mention the case, document, clause, or file."
+            )
         return (
-            "I can help with legal reasoning, issue spotting, strategy options, drafting guidance, and concise explanations. "
-            "Share your objective, jurisdiction, and key facts, and I will walk through it step by step.\n\n"
-            "Note: This is legal support content, not a substitute for advice from a licensed attorney."
+            "I can help with that. Chat Mode works like a normal assistant: we can brainstorm, draft, explain, joke, "
+            "plan, or talk through legal work. If you want me to use uploaded documents, just point me to the case, "
+            "document, clause, or file."
         )
 
     def _respond_in_chat_mode(
@@ -455,20 +759,9 @@ class CopilotService(CopilotRiskAnalysisMixin):
         conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         normalized_question = str(question or "").strip()
-        if not normalized_question or self._looks_like_conversational_opening(normalized_question):
+        if not normalized_question:
             return {
                 "answer": self._build_chat_greeting_answer(user_role=user_role),
-                "used_fallback": False,
-                "fallback_reason": None,
-                "confidence": "high",
-                "scope": "global",
-                "sources": [],
-                "citations": [],
-            }
-
-        if self.CHAT_THANKS_PATTERN.search(normalized_question):
-            return {
-                "answer": "You are welcome. If you want, I can also help you structure the next legal step.",
                 "used_fallback": False,
                 "fallback_reason": None,
                 "confidence": "high",
@@ -499,14 +792,19 @@ class CopilotService(CopilotRiskAnalysisMixin):
 You are Legal AI, a professional conversational legal assistant for lawyers.
 
 Default chat-mode behavior:
+- Act like a normal ChatGPT-style assistant with legal productivity strengths.
 - Be conversational, clear, and professional.
-    - Be concise by default, but add detail when the user asks.
+- You may answer jokes, general knowledge, writing, brainstorming, productivity, and everyday questions.
+- Be concise by default, but add detail when the user asks.
 - Answer greetings and follow-up questions naturally.
-- Provide practical legal insights and structured reasoning.
+- If the user says "another one", "more", "again", or similar, infer what they want from the recent conversation.
+- Provide practical legal insights when relevant.
 - Do not execute CRUD operations or workflow tasks in this mode.
 - If the user asks to execute actions, explain that Agent Mode is for execution and offer planning guidance.
 - Do not invent legal authorities, case law, or statutes.
-    - Include a brief legal-support disclaimer when the user asks for definitive legal advice or high-stakes decisions.
+- Include a brief legal-support disclaimer only when the user asks for definitive legal advice or high-stakes decisions.
+- Do not use courtroom-style verification, trust panels, or audit language in Chat Mode.
+- Do not answer with "insufficient evidence" unless the user explicitly asked you to inspect case files/documents and they are unavailable.
 
 Conversation so far:
 {chr(10).join(history_lines) or "No prior messages."}
@@ -816,6 +1114,8 @@ User message:
         use_external_research: bool = True,
         mode: Optional[str] = None,
         legal_search_multilingual_output: bool = False,
+        legal_search_code_scope: Optional[List[str]] = None,
+        reasoning_level: str | None = None,
         agent_mode: bool = False,
         workspace_case_id: Optional[int] = None,
         workspace_document_id: Optional[int] = None,
@@ -896,6 +1196,7 @@ User message:
         intent = parsed["intent"]
         normalized_role = self._normalize_role(user_role)
         normalized_mode = self._normalize_mode(mode)
+        normalized_reasoning_level = self._normalize_reasoning_level(reasoning_level)
         normalized_allowed_case_ids = self._normalize_allowed_ids(allowed_case_ids)
         normalized_allowed_document_ids = self._normalize_allowed_ids(allowed_document_ids)
         resolved_query = str(preoptimized_query or parsed.get("clean_query") or parsed.get("raw_message") or message).strip()
@@ -907,6 +1208,7 @@ User message:
             f"Target: {parsed.get('target_type') or 'global'}",
             f"Role: {normalized_role}",
             f"Mode: {normalized_mode}",
+            f"Reasoning: {normalized_reasoning_level}",
         ]
 
         if normalized_role == "client" and intent not in self.CLIENT_ALLOWED_INTENTS:
@@ -928,6 +1230,7 @@ User message:
             message=message,
             top_k=top_k,
             use_external_research=use_external_research,
+            reasoning_level=normalized_reasoning_level,
             workspace_case_id=workspace_case_id,
             resolved_query=resolved_query,
             parsed=parsed,
@@ -938,9 +1241,13 @@ User message:
             case_snapshot=case_snapshot,
         )
 
-        is_legal_search_mode = normalized_mode == "legal_search" and intent in self.LEGAL_SEARCH_ELIGIBLE_INTENTS
+        use_trust_engine = self._should_use_trust_engine(
+            normalized_mode=normalized_mode,
+            intent=intent,
+            agent_mode=agent_mode,
+        )
 
-        if is_legal_search_mode:
+        if use_trust_engine:
             result = legal_search_mode_service.run(
                 db=db,
                 tenant_id=tenant_id,
@@ -955,22 +1262,41 @@ User message:
                 target_id=parsed.get("target_id"),
                 retrieval_agent=self.rag_service.retrieval_agent,
                 multilingual_output=legal_search_multilingual_output,
+                code_scope=legal_search_code_scope,
             )
+            result = self._normalize_trust_state(result)
         elif intent in self.CRUD_INTENTS and not agent_mode:
             result = self._agent_mode_required_response(action=intent)
-        elif normalized_mode == "default" and not agent_mode and intent in self.CHAT_ASSISTANT_INTENTS:
-            result = self._respond_in_chat_mode(
+        elif normalized_mode == "default" and not agent_mode:
+            if self._chat_mode_needs_rag(
                 question=resolved_query,
-                user_role=normalized_role,
-                conversation_history=conversation_history,
-            )
+                intent=intent,
+                case_id=parsed.get("case_id") if isinstance(parsed.get("case_id"), int) else workspace_case_id,
+                document_id=(
+                    parsed.get("document_id") if isinstance(parsed.get("document_id"), int) else workspace_document_id
+                ),
+            ):
+                result = self.intent_execution_agent.execute(
+                    intent=intent,
+                    runtime=self,
+                    ctx=execution_ctx,
+                )
+                result = self._strip_heavy_trust_diagnostics(result)
+            else:
+                result = self._respond_in_chat_mode(
+                    question=resolved_query,
+                    user_role=normalized_role,
+                    conversation_history=conversation_history,
+                )
         else:
             result = self.intent_execution_agent.execute(
                 intent=intent,
                 runtime=self,
                 ctx=execution_ctx,
             )
-        action_category = "legal_search" if is_legal_search_mode else self.ACTION_CATEGORY_BY_INTENT.get(intent, "analysis")
+        if not use_trust_engine:
+            result = self._strip_heavy_trust_diagnostics(result)
+        action_category = "legal_search" if use_trust_engine else self.ACTION_CATEGORY_BY_INTENT.get(intent, "analysis")
         action_status = str(result.pop("action_status", "")).strip() or ("fallback" if result.get("used_fallback") else "completed")
         permission_denied = bool(result.pop("permission_denied", False))
         structured_result = result.pop("structured_result", {})
@@ -984,6 +1310,7 @@ User message:
             "target_type": parsed["target_type"],
             "target_id": parsed["target_id"],
             "mode": normalized_mode,
+            "reasoning_level": normalized_reasoning_level,
             "agent_mode": bool(agent_mode),
             "action_category": action_category,
             "action_status": action_status,
@@ -2667,6 +2994,423 @@ User message:
         candidate = optimized.payload.get("optimized_query") if optimized.success else ""
         return str(candidate or question).strip()
 
+    @staticmethod
+    def _coerce_unit_score(value: Any) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if parsed > 1.0:
+            parsed = parsed / 100.0
+        return max(0.0, min(parsed, 1.0))
+
+    @staticmethod
+    def _parse_high_reasoning_allowlist(raw_allowlist: str | None) -> set[int]:
+        if not raw_allowlist:
+            return set()
+        values: set[int] = set()
+        for token in str(raw_allowlist).replace(";", ",").split(","):
+            normalized = token.strip()
+            if not normalized:
+                continue
+            if normalized.isdigit():
+                values.add(int(normalized))
+        return values
+
+    @staticmethod
+    def _stable_rollout_bucket(*, tenant_id: int, salt: str) -> int:
+        digest = hashlib.sha256(f"{salt}:{tenant_id}".encode("utf-8")).hexdigest()
+        return int(digest[:8], 16) % 100
+
+    def _is_high_reasoning_rollout_eligible(self, *, tenant_id: int | None) -> tuple[bool, str, int | None]:
+        allowlist = self._parse_high_reasoning_allowlist(settings.HIGH_REASONING_TENANT_ALLOWLIST)
+        rollout_percentage = int(settings.HIGH_REASONING_ROLLOUT_PERCENTAGE or 0)
+        rollout_percentage = max(0, min(rollout_percentage, 100))
+
+        if tenant_id is None:
+            if rollout_percentage >= 100 and not allowlist:
+                return True, "global_full_rollout", None
+            return False, "tenant_id_missing", None
+
+        if tenant_id in allowlist:
+            return True, "allowlist", None
+
+        if rollout_percentage <= 0:
+            return False, "rollout_percentage_zero", None
+        if rollout_percentage >= 100:
+            return True, "rollout_percentage_full", None
+
+        salt = str(settings.HIGH_REASONING_ROLLOUT_SALT or "legal-ai-high-reasoning-v1").strip() or "legal-ai-high-reasoning-v1"
+        bucket = self._stable_rollout_bucket(tenant_id=tenant_id, salt=salt)
+        return bucket < rollout_percentage, "rollout_percentage", bucket
+
+    @staticmethod
+    def _extract_json_object(text: str) -> dict[str, Any]:
+        raw = str(text or "").strip()
+        if not raw:
+            return {}
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE | re.DOTALL).strip()
+        try:
+            payload = json.loads(cleaned)
+            return payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if not match:
+                return {}
+            try:
+                payload = json.loads(match.group(0))
+                return payload if isinstance(payload, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+
+    @staticmethod
+    def _build_high_reasoning_evidence_block(
+        *,
+        sources: list[dict[str, Any]],
+        citations: list[dict[str, Any]],
+    ) -> str:
+        lines: list[str] = []
+        for citation in citations[:10]:
+            label = str(citation.get("label") or "Source").strip()
+            snippet = str(citation.get("snippet") or "").strip()
+            if label and snippet:
+                lines.append(f"- [{label}] {snippet[:260]}")
+
+        if not lines:
+            for source in sources[:10]:
+                filename = str(source.get("filename") or "Source").strip()
+                chunk_index = source.get("chunk_index")
+                snippet = str(source.get("snippet") or source.get("chunk_text") or "").strip()
+                label = f"{filename} - chunk {chunk_index}" if chunk_index is not None else filename
+                if snippet:
+                    lines.append(f"- [{label}] {snippet[:260]}")
+
+        return "\n".join(lines)
+
+    def _generate_high_reasoning_candidate(
+        self,
+        *,
+        question: str,
+        base_answer: str,
+        style_name: str,
+        style_instruction: str,
+        evidence_block: str,
+        timeout_seconds: float,
+    ) -> str:
+        if not self.client:
+            return ""
+
+        prompt = f"""
+You are a legal AI assistant generating one grounded candidate answer.
+
+Style profile: {style_name}
+Style instruction: {style_instruction}
+
+Rules:
+1) Use only evidence listed below.
+2) Do not invent facts.
+3) If evidence is missing, say so explicitly.
+4) Keep legal precision and practical usefulness.
+5) Include citation labels inline where relevant, e.g. [filename - chunk X].
+
+Question:
+{question}
+
+Existing grounded baseline answer:
+{base_answer}
+
+Evidence:
+{evidence_block}
+""".strip()
+
+        response = self.client.responses.create(
+            model=self.model,
+            input=prompt,
+            timeout=max(1.0, timeout_seconds),
+        )
+        return llm_gateway.extract_output_text(response).strip()
+
+    def _judge_high_reasoning_candidates(
+        self,
+        *,
+        question: str,
+        candidates: list[dict[str, Any]],
+        evidence_block: str,
+        timeout_seconds: float,
+    ) -> dict[str, Any]:
+        if not self.client:
+            return {}
+
+        candidates_block = "\n\n".join(
+            f"Candidate {item['index']} ({item['style']}):\n{item['answer']}"
+            for item in candidates
+        )
+        judge_prompt = f"""
+You are a legal quality judge. Score each candidate against this rubric from 0 to 1:
+- grounding_score
+- citation_score
+- factual_consistency_score
+- legal_usefulness_score
+- actionability_score
+- clarity_score
+
+Critical ranking rule:
+Grounding, factual consistency, and citation quality must dominate fluency/style.
+
+Compute overall_score with priority weighting:
+overall_score =
+  0.30*grounding_score +
+  0.25*factual_consistency_score +
+  0.20*citation_score +
+  0.10*legal_usefulness_score +
+  0.10*actionability_score +
+  0.05*clarity_score
+
+Question:
+{question}
+
+Evidence:
+{evidence_block}
+
+Candidates:
+{candidates_block}
+
+Return JSON only with this schema:
+{{
+  "winner_index": 0,
+  "decision_reason": "...",
+  "scores": [
+    {{
+      "index": 0,
+      "grounding_score": 0.0,
+      "citation_score": 0.0,
+      "factual_consistency_score": 0.0,
+      "legal_usefulness_score": 0.0,
+      "actionability_score": 0.0,
+      "clarity_score": 0.0,
+      "overall_score": 0.0,
+      "decision_reason": "..."
+    }}
+  ]
+}}
+""".strip()
+
+        response = self.client.responses.create(
+            model=self.model,
+            input=judge_prompt,
+            timeout=max(1.0, timeout_seconds),
+        )
+        return self._extract_json_object(llm_gateway.extract_output_text(response))
+
+    def _finalize_reasoning_payload(
+        self,
+        *,
+        payload: Dict[str, Any],
+        reasoning_level: str,
+        intent: str | None,
+        question: str,
+        tenant_id: int | None = None,
+    ) -> Dict[str, Any]:
+        normalized_level = self._normalize_reasoning_level(reasoning_level)
+        if normalized_level != "high":
+            return payload
+
+        fallback_payload = dict(payload)
+        if not settings.ENABLE_HIGH_REASONING_MULTI_ANSWER:
+            fallback_payload["reasoning_result"] = {
+                "reasoning_level": "high",
+                "activated": False,
+                "winner_reason": "high_reasoning_disabled",
+                "candidates": [],
+            }
+            return fallback_payload
+
+        rollout_eligible, rollout_reason, rollout_bucket = self._is_high_reasoning_rollout_eligible(tenant_id=tenant_id)
+        if not rollout_eligible:
+            fallback_payload["reasoning_result"] = {
+                "reasoning_level": "high",
+                "activated": False,
+                "winner_reason": "high_reasoning_rollout_denied",
+                "rollout_reason": rollout_reason,
+                "rollout_bucket": rollout_bucket,
+                "candidates": [],
+            }
+            return fallback_payload
+
+        if str(intent or "") not in self.HIGH_REASONING_ELIGIBLE_INTENTS:
+            fallback_payload["reasoning_result"] = {
+                "reasoning_level": "high",
+                "activated": False,
+                "winner_reason": "intent_not_eligible",
+                "candidates": [],
+            }
+            return fallback_payload
+
+        start = time.perf_counter()
+        timeout_ms = max(1000, int(settings.HIGH_REASONING_TIMEOUT_MS or 12000))
+        max_candidates = max(2, min(int(settings.HIGH_REASONING_MAX_CANDIDATES or 3), 3))
+        sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
+        citations = payload.get("citations") if isinstance(payload.get("citations"), list) else []
+        evidence_block = self._build_high_reasoning_evidence_block(sources=sources, citations=citations)
+        base_answer = str(payload.get("answer") or "").strip()
+
+        if not base_answer or not evidence_block or not self.client:
+            fallback_payload["reasoning_result"] = {
+                "reasoning_level": "high",
+                "activated": False,
+                "winner_reason": "insufficient_evidence_or_provider",
+                "candidates": [],
+            }
+            return fallback_payload
+
+        try:
+            candidates: list[dict[str, Any]] = []
+            for index, (style_name, style_instruction) in enumerate(self.HIGH_REASONING_STYLES[:max_candidates]):
+                elapsed_ms = int((time.perf_counter() - start) * 1000)
+                remaining_ms = timeout_ms - elapsed_ms
+                if remaining_ms <= 350:
+                    raise TimeoutError("high_reasoning_timeout")
+
+                candidate_answer = self._generate_high_reasoning_candidate(
+                    question=question,
+                    base_answer=base_answer,
+                    style_name=style_name,
+                    style_instruction=style_instruction,
+                    evidence_block=evidence_block,
+                    timeout_seconds=remaining_ms / 1000.0,
+                )
+                if not candidate_answer:
+                    raise RuntimeError("high_reasoning_candidate_empty")
+
+                candidates.append(
+                    {
+                        "index": index,
+                        "style": style_name,
+                        "answer": candidate_answer,
+                    }
+                )
+
+            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            remaining_ms = timeout_ms - elapsed_ms
+            if remaining_ms <= 350:
+                raise TimeoutError("high_reasoning_timeout")
+
+            judge_payload = self._judge_high_reasoning_candidates(
+                question=question,
+                candidates=candidates,
+                evidence_block=evidence_block,
+                timeout_seconds=remaining_ms / 1000.0,
+            )
+
+            score_by_index: dict[int, dict[str, Any]] = {}
+            for item in (judge_payload.get("scores") if isinstance(judge_payload, dict) else []) or []:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    idx = int(item.get("index"))
+                except (TypeError, ValueError):
+                    continue
+                grounding = self._coerce_unit_score(item.get("grounding_score"))
+                citation = self._coerce_unit_score(item.get("citation_score"))
+                factual = self._coerce_unit_score(item.get("factual_consistency_score"))
+                legal_usefulness = self._coerce_unit_score(item.get("legal_usefulness_score"))
+                actionability = self._coerce_unit_score(item.get("actionability_score"))
+                clarity = self._coerce_unit_score(item.get("clarity_score"))
+                weighted_overall = (
+                    0.30 * grounding
+                    + 0.25 * factual
+                    + 0.20 * citation
+                    + 0.10 * legal_usefulness
+                    + 0.10 * actionability
+                    + 0.05 * clarity
+                )
+                score_by_index[idx] = {
+                    "grounding_score": grounding,
+                    "citation_score": citation,
+                    "factual_consistency_score": factual,
+                    "legal_usefulness_score": legal_usefulness,
+                    "actionability_score": actionability,
+                    "clarity_score": clarity,
+                    "overall_score": max(
+                        weighted_overall,
+                        self._coerce_unit_score(item.get("overall_score")),
+                    ),
+                    "decision_reason": str(item.get("decision_reason") or "").strip(),
+                }
+
+            ranked_candidates: list[dict[str, Any]] = []
+            for item in candidates:
+                score = score_by_index.get(item["index"]) or {
+                    "grounding_score": 0.0,
+                    "citation_score": 0.0,
+                    "factual_consistency_score": 0.0,
+                    "legal_usefulness_score": 0.0,
+                    "actionability_score": 0.0,
+                    "clarity_score": 0.0,
+                    "overall_score": 0.0,
+                    "decision_reason": "Judge score unavailable.",
+                }
+                ranked_candidates.append(
+                    {
+                        "index": item["index"],
+                        "style": item["style"],
+                        "answer": item["answer"],
+                        "score": score,
+                    }
+                )
+
+            ranked_candidates.sort(key=lambda candidate: float(candidate["score"].get("overall_score", 0.0)), reverse=True)
+            if not ranked_candidates:
+                raise RuntimeError("high_reasoning_no_candidates")
+
+            winner = ranked_candidates[0]
+            second_best = ranked_candidates[1] if len(ranked_candidates) > 1 and settings.HIGH_REASONING_SHOW_TOP_2 else None
+            winner_reason = str(judge_payload.get("decision_reason") or winner["score"].get("decision_reason") or "").strip()
+
+            response_payload = dict(payload)
+            response_payload["answer"] = winner["answer"]
+            response_payload["reasoning_result"] = {
+                "reasoning_level": "high",
+                "activated": True,
+                "winner_index": int(winner["index"]),
+                "second_best_index": int(second_best["index"]) if second_best else None,
+                "winner_reason": winner_reason,
+                "candidates": [
+                    {
+                        "rank": rank,
+                        "style": candidate["style"],
+                        "answer": candidate["answer"],
+                        "score": candidate["score"],
+                    }
+                    for rank, candidate in enumerate(ranked_candidates, start=1)
+                ],
+            }
+
+            if settings.HIGH_REASONING_LOG_SCORES:
+                logger.info(
+                    "high_reasoning_success intent=%s winner=%s second=%s latency_ms=%s scores=%s",
+                    intent,
+                    winner["index"],
+                    second_best["index"] if second_best else None,
+                    int((time.perf_counter() - start) * 1000),
+                    [round(float(candidate["score"].get("overall_score", 0.0)), 4) for candidate in ranked_candidates],
+                )
+
+            return response_payload
+        except Exception as exc:
+            degraded = dict(payload)
+            degraded["used_fallback"] = True
+            degraded["fallback_reason"] = "high_reasoning_timeout_or_error"
+            degraded["reasoning_result"] = {
+                "reasoning_level": "high",
+                "activated": False,
+                "winner_reason": f"high_reasoning_failed: {exc}",
+                "candidates": [],
+            }
+            if settings.HIGH_REASONING_LOG_SCORES:
+                logger.warning("high_reasoning_fallback intent=%s reason=%s", intent, exc)
+            return degraded
+
     def _answer_with_optional_external_research(
         self,
         *,
@@ -2677,6 +3421,7 @@ User message:
         case_id: Optional[int],
         document_id: Optional[int],
         use_external_research: bool,
+        reasoning_level: str,
         intent: str | None,
         target_type: str | None,
         target_id: int | None,
@@ -2737,27 +3482,45 @@ User message:
         )
 
         if not use_external_research:
-            return {
+            return self._finalize_reasoning_payload(
+                payload={
                 **base_result,
                 "jurisdiction": jurisdiction_context,
-            }
+                },
+                reasoning_level=reasoning_level,
+                intent=intent,
+                question=normalized_question,
+                tenant_id=tenant_id,
+            )
 
         research = external_research_service.search(
             query=optimized_question,
             max_results=max(3, min(top_k, 8)),
         )
         if not research.get("used_external"):
-            return {
+            return self._finalize_reasoning_payload(
+                payload={
                 **base_result,
                 "jurisdiction": jurisdiction_context,
-            }
+                },
+                reasoning_level=reasoning_level,
+                intent=intent,
+                question=normalized_question,
+                tenant_id=tenant_id,
+            )
 
         external_results = research.get("results") or []
         if not external_results:
-            return {
+            return self._finalize_reasoning_payload(
+                payload={
                 **base_result,
                 "jurisdiction": jurisdiction_context,
-            }
+                },
+                reasoning_level=reasoning_level,
+                intent=intent,
+                question=normalized_question,
+                tenant_id=tenant_id,
+            )
 
         synthesized_answer = self._synthesize_answer_with_external_research(
             question=question,
@@ -2774,17 +3537,23 @@ User message:
         merged_citations = list(base_result.get("citations") or [])
         merged_citations.extend(self._external_results_to_citations(external_results))
 
-        return {
-            "answer": synthesized_answer or base_result.get("answer", ""),
-            "used_fallback": bool(base_result.get("used_fallback")),
-            "fallback_reason": base_result.get("fallback_reason"),
-            "confidence": base_result.get("confidence", "medium"),
-            "scope": base_result.get("scope", "global"),
-            "sources": merged_sources[:20],
-            "citations": merged_citations[:12],
-            "cache": base_result.get("cache", {"hit": False, "backend": "none"}),
-            "jurisdiction": jurisdiction_context,
-        }
+        return self._finalize_reasoning_payload(
+            payload={
+                "answer": synthesized_answer or base_result.get("answer", ""),
+                "used_fallback": bool(base_result.get("used_fallback")),
+                "fallback_reason": base_result.get("fallback_reason"),
+                "confidence": base_result.get("confidence", "medium"),
+                "scope": base_result.get("scope", "global"),
+                "sources": merged_sources[:20],
+                "citations": merged_citations[:12],
+                "cache": base_result.get("cache", {"hit": False, "backend": "none"}),
+                "jurisdiction": jurisdiction_context,
+            },
+            reasoning_level=reasoning_level,
+            intent=intent,
+            question=normalized_question,
+            tenant_id=tenant_id,
+        )
 
     def _answer_material_breach_clause_question(
         self,
@@ -3143,14 +3912,13 @@ External research snippets (JSON):
             title = str(item.get("title") or item.get("domain") or "Web Research").strip()
             snippet = str(item.get("snippet") or "").strip()
             url = str(item.get("url") or "").strip()
-            if url:
-                snippet = f"{snippet} ({url})".strip()
             citations.append(
                 {
                     "label": title[:120] or "Web Research",
                     "document_id": None,
                     "case_id": None,
                     "snippet": snippet[:280],
+                    "url": url or None,
                 }
             )
         return citations

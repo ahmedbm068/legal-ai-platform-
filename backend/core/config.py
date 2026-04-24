@@ -37,6 +37,18 @@ class Settings(BaseSettings):
     VISION_API_KEY: Optional[str] = None
     VISION_BASE_URL: Optional[str] = None
     SUMMARY_AGENT_MODEL: Optional[str] = None
+    LEGAL_WORKFLOW_LLM_AGENTS_ENABLED: bool = True
+    LEGAL_TRUST_ENGINE_ENABLED: bool = True
+    LEGAL_TRUST_STRICT_OUTPUTS: bool = True
+    LEGAL_TRUST_AGENTS_ENABLED: bool = True
+    LEGAL_AGENT_KILL_SWITCH: bool = False
+    CLAIM_VALIDATION_AGENT_ENABLED: bool = True
+    CONTRADICTION_DETECTION_AGENT_ENABLED: bool = True
+    LEGAL_TRUST_MIN_CITATION_COVERAGE: float = 0.70
+    LEGAL_TRUST_REJECT_UNSUPPORTED_CLAIMS: bool = True
+    RELEASE_GATE_MIN_ACCURACY: float = 0.90
+    RELEASE_GATE_MAX_HALLUCINATION_RATE: float = 0.05
+    RELEASE_GATE_MIN_CITATION_COVERAGE: float = 0.95
     LLM_TIMEOUT_SECONDS: int = 45
     LLM_MAX_RETRIES: int = 2
     EXTERNAL_RESEARCH_ENABLED: bool = True
@@ -97,6 +109,17 @@ class Settings(BaseSettings):
     PORTAL_ALLOW_CONSOLE_CODE_FALLBACK: bool = True
     PORTAL_REQUIRE_TENANT_SLUG: bool = True
     STAFF_INVITE_ONLY: bool = True
+    STAFF_DEFAULT_TENANT_NAME: str = "Arbi Mostaissier"
+
+    # High reasoning multi-answer mode
+    ENABLE_HIGH_REASONING_MULTI_ANSWER: bool = False
+    HIGH_REASONING_MAX_CANDIDATES: int = 3
+    HIGH_REASONING_SHOW_TOP_2: bool = True
+    HIGH_REASONING_TIMEOUT_MS: int = 12000
+    HIGH_REASONING_LOG_SCORES: bool = True
+    HIGH_REASONING_TENANT_ALLOWLIST: str = ""
+    HIGH_REASONING_ROLLOUT_PERCENTAGE: int = 100
+    HIGH_REASONING_ROLLOUT_SALT: str = "legal-ai-high-reasoning-v1"
 
     # Auth hardening
     AUTH_LOGIN_MAX_ATTEMPTS: int = 6

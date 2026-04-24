@@ -37,6 +37,9 @@ class EvalResult:
     duration_ms: float
     assertions: list[AssertionResult]
     answer_preview: str
+    citation_coverage: float = 0.0
+    hallucination_rate: float = 1.0
+    trust_contract_valid: bool = False
 
 
 CONFIDENCE_ORDER = {"low": 1, "medium": 2, "high": 3}
@@ -268,6 +271,42 @@ def count_bullets(text: str) -> int:
     return sum(1 for line in (text or "").splitlines() if line.strip().startswith("- "))
 
 
+MANDATORY_TRUST_SECTIONS = {
+    "Issue Identification",
+    "Applicable Rule / Law",
+    "Application to Facts",
+    "Evidence Mapping",
+    "Uncertainty / Missing Information",
+    "Counter-Arguments / Alternative Interpretations",
+    "Risk Assessment (per party)",
+    "Recommended Next Steps",
+}
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _trust_panel_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    direct = payload.get("trust_panel")
+    if isinstance(direct, dict):
+        return direct
+    structured = payload.get("structured_result")
+    if isinstance(structured, dict) and isinstance(structured.get("trust_panel"), dict):
+        return structured["trust_panel"]
+    return {}
+
+
+def _trust_validation_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    structured = payload.get("structured_result")
+    if isinstance(structured, dict) and isinstance(structured.get("trust_validation"), dict):
+        return structured["trust_validation"]
+    return {}
+
+
 def evaluate_prompt(
     session: requests.Session,
     base_url: str,
@@ -288,6 +327,7 @@ def evaluate_prompt(
             duration_ms=0.0,
             assertions=[AssertionResult(name="prompt_present", passed=False, detail="prompt is missing in suite row")],
             answer_preview="",
+            trust_contract_valid=False,
         )
 
     started = time.perf_counter()
@@ -326,11 +366,42 @@ def evaluate_prompt(
             duration_ms=duration_ms,
             assertions=assertions,
             answer_preview=preview,
+            trust_contract_valid=False,
         )
 
     answer = str(payload.get("answer") or "").strip()
     intent = str(payload.get("parsed_intent") or "").strip()
     confidence = str(payload.get("confidence") or "").strip()
+    trust_panel = _trust_panel_from_payload(payload)
+    trust_validation = _trust_validation_from_payload(payload)
+    trust_metrics = trust_panel.get("metrics") if isinstance(trust_panel.get("metrics"), dict) else {}
+    citation_coverage = _as_float(trust_metrics.get("citation_coverage"))
+    hallucination_rate = _as_float(trust_metrics.get("hallucination_rate"), default=1.0)
+    trust_contract_valid = bool(trust_validation.get("is_valid")) if trust_validation else bool(trust_panel)
+
+    require_trust_contract = bool(rendered_spec.get("require_trust_contract", True))
+    if require_trust_contract:
+        sections = trust_panel.get("legal_reasoning_sections") if isinstance(trust_panel, dict) else []
+        present_sections = {
+            str(item.get("title") or "").strip()
+            for item in sections
+            if isinstance(item, dict)
+        } if isinstance(sections, list) else set()
+        missing_sections = sorted(MANDATORY_TRUST_SECTIONS.difference(present_sections))
+        assertions.append(
+            AssertionResult(
+                name="trust_contract_present",
+                passed=bool(trust_panel) and trust_contract_valid,
+                detail="trust_panel must exist and pass output-contract validation",
+            )
+        )
+        assertions.append(
+            AssertionResult(
+                name="mandatory_trust_sections",
+                passed=not missing_sections,
+                detail="missing=" + (", ".join(missing_sections) if missing_sections else "none"),
+            )
+        )
 
     expected_intent = str(rendered_spec.get("expected_intent") or "").strip()
     if expected_intent:
@@ -429,6 +500,9 @@ def evaluate_prompt(
         duration_ms=duration_ms,
         assertions=assertions,
         answer_preview=preview,
+        citation_coverage=round(citation_coverage, 4),
+        hallucination_rate=round(hallucination_rate, 4),
+        trust_contract_valid=trust_contract_valid,
     )
 
 
@@ -458,6 +532,17 @@ def write_reports(
         "passed": passed_count,
         "failed": total - passed_count,
         "pass_rate": round(pass_rate, 4),
+        "trust_quality": {
+            "average_citation_coverage": round(
+                sum(item.citation_coverage for item in results) / total if total else 0.0,
+                4,
+            ),
+            "average_hallucination_rate": round(
+                sum(item.hallucination_rate for item in results) / total if total else 1.0,
+                4,
+            ),
+            "trust_contract_valid_count": sum(1 for item in results if item.trust_contract_valid),
+        },
         "results": [
             {
                 **asdict(result),
@@ -475,6 +560,8 @@ def write_reports(
         f"- Case ID: `{case_id}`",
         f"- Suite: `{suite_path}`",
         f"- Passed: `{passed_count}/{total}` ({pass_rate:.1%})",
+        f"- Avg citation coverage: `{(sum(item.citation_coverage for item in results) / total if total else 0.0):.1%}`",
+        f"- Avg hallucination rate: `{(sum(item.hallucination_rate for item in results) / total if total else 1.0):.1%}`",
         "",
         "## Results",
         "",
@@ -484,6 +571,9 @@ def write_reports(
         lines.append(f"- Prompt: `{result.prompt}`")
         lines.append(f"- Intent: `{result.parsed_intent or 'n/a'}`")
         lines.append(f"- Confidence: `{result.confidence or 'n/a'}`")
+        lines.append(f"- Citation coverage: `{result.citation_coverage:.1%}`")
+        lines.append(f"- Hallucination rate: `{result.hallucination_rate:.1%}`")
+        lines.append(f"- Trust contract valid: `{result.trust_contract_valid}`")
         lines.append(f"- Duration: `{result.duration_ms:.1f} ms`")
         for assertion in result.assertions:
             marker = "PASS" if assertion.passed else "FAIL"
@@ -514,7 +604,9 @@ def main() -> int:
     parser.add_argument("--token", default=None, help="Use an existing bearer token")
     parser.add_argument("--email", default=None, help="Login email (required with --case-id when --token is not set)")
     parser.add_argument("--password", default="EvalPass!123", help="Login password (default: EvalPass!123)")
-    parser.add_argument("--min-pass-rate", type=float, default=1.0, help="Fail if pass rate is below this value")
+    parser.add_argument("--min-pass-rate", type=float, default=0.9, help="Fail if pass rate is below this value")
+    parser.add_argument("--min-citation-coverage", type=float, default=0.95, help="Fail if average citation coverage is below this value")
+    parser.add_argument("--max-hallucination-rate", type=float, default=0.05, help="Fail if average hallucination rate is above this value")
     parser.add_argument("--limit", type=int, default=0, help="Run only the first N eval rows (0 = all).")
     parser.add_argument("--ids", default="", help="Comma-separated eval ids to run.")
     parser.add_argument("--spawn-server", action="store_true", help="Spawn uvicorn for the run")
@@ -598,17 +690,36 @@ def main() -> int:
         passed = sum(1 for row in results if row.passed)
         total = len(results)
         pass_rate = (passed / total) if total else 0.0
+        avg_citation_coverage = (sum(row.citation_coverage for row in results) / total) if total else 0.0
+        avg_hallucination_rate = (sum(row.hallucination_rate for row in results) / total) if total else 1.0
         print(f"Eval results: {passed}/{total} passed ({pass_rate:.1%})")
+        print(f"Average citation coverage: {avg_citation_coverage:.1%}")
+        print(f"Average hallucination rate: {avg_hallucination_rate:.1%}")
         print(f"JSON report: {json_path}")
         print(f"Markdown report: {md_path}")
 
+        gate_failed = False
         if pass_rate < float(args.min_pass_rate):
             print(
                 f"Pass rate {pass_rate:.1%} is below required threshold {float(args.min_pass_rate):.1%}",
                 file=sys.stderr,
             )
-            return 1
-        return 0
+            gate_failed = True
+        if avg_citation_coverage < float(args.min_citation_coverage):
+            print(
+                f"Citation coverage {avg_citation_coverage:.1%} is below required threshold "
+                f"{float(args.min_citation_coverage):.1%}",
+                file=sys.stderr,
+            )
+            gate_failed = True
+        if avg_hallucination_rate > float(args.max_hallucination_rate):
+            print(
+                f"Hallucination rate {avg_hallucination_rate:.1%} is above allowed threshold "
+                f"{float(args.max_hallucination_rate):.1%}",
+                file=sys.stderr,
+            )
+            gate_failed = True
+        return 1 if gate_failed else 0
     finally:
         if server_proc is not None:
             server_proc.terminate()

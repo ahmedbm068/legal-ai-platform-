@@ -1,4 +1,5 @@
 import type {
+    AIResponseAuditLogListResponse,
     CalendarAppointment,
     CalendarAppointmentActionResponse,
     CaseItem,
@@ -12,6 +13,7 @@ import type {
     EvidenceAnalysisReview,
     EvidenceReviewListResponse,
     FullDocumentAnalysis,
+    FeedbackRootCause,
     ImageBatchDetailResponse,
     ImageBatchUploadResponse,
     ImageDocumentBatch,
@@ -532,10 +534,14 @@ export const workspaceApi = {
             workspaceDocumentId?: number | null;
         }
     ) =>
-        request<PromptOptimizationResponse>("/ai/prompt-optimize", {
+        request<PromptOptimizationResponse>("/ai/optimize-prompt", {
             method: "POST",
             token,
-            body: payload,
+            body: {
+                prompt: payload.prompt,
+                workspace_case_id: payload.workspaceCaseId ?? null,
+                workspace_document_id: payload.workspaceDocumentId ?? null,
+            },
             timeoutMs: SLOW_AI_TIMEOUT_MS,
         }),
 
@@ -544,9 +550,11 @@ export const workspaceApi = {
         message: string,
         options?: {
             topK?: number;
+            reasoningLevel?: "low" | "medium" | "high";
             useExternalResearch?: boolean;
             mode?: "default" | "legal_search";
             legalSearchMultilingualOutput?: boolean;
+            legalSearchCodeScope?: string[];
             agentMode?: boolean;
             workspaceCaseId?: number | null;
             workspaceDocumentId?: number | null;
@@ -567,9 +575,11 @@ export const workspaceApi = {
             body: {
                 message,
                 top_k: options?.topK ?? 5,
+                reasoning_level: options?.reasoningLevel ?? "medium",
                 use_external_research: options?.useExternalResearch ?? false,
                 mode: options?.mode ?? "default",
                 legal_search_multilingual_output: options?.legalSearchMultilingualOutput ?? false,
+                legal_search_code_scope: options?.legalSearchCodeScope ?? [],
                 agent_mode: options?.agentMode ?? false,
                 workspace_case_id: options?.workspaceCaseId ?? null,
                 workspace_document_id: options?.workspaceDocumentId ?? null,
@@ -591,13 +601,35 @@ export const workspaceApi = {
             parsed_intent?: string | null;
             confidence?: string | null;
             feedback_value: "up" | "down";
+            comment?: string | null;
+            root_cause?: FeedbackRootCause | null;
+            legal_domain?: boolean | null;
+            jurisdiction?: JurisdictionCountry | null;
             source_count?: number;
             metadata?: Record<string, unknown> | null;
         }
     ) =>
-        request<any>("/copilot/feedback", {
+        request<any>("/ai/feedback", {
             method: "POST",
             token,
             body: payload,
         }),
+
+    listAiAuditLogs: (
+        token: string,
+        params?: {
+            caseId?: number | null;
+            documentId?: number | null;
+            limit?: number;
+        }
+    ) => {
+        const search = new URLSearchParams();
+        if (params?.caseId) search.set("case_id", String(params.caseId));
+        if (params?.documentId) search.set("document_id", String(params.documentId));
+        if (params?.limit) search.set("limit", String(params.limit));
+        const query = search.toString();
+        return request<AIResponseAuditLogListResponse>(`/ai/audit-logs${query ? `?${query}` : ""}`, {
+            token,
+        });
+    },
 };

@@ -21,10 +21,23 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 def _resolve_bootstrap_tenant(db: Session, tenant_name: str | None) -> Tenant:
     normalized_tenant_name = str(tenant_name or "").strip()
     if not normalized_tenant_name:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="tenant_name is required for the initial bootstrap registration.",
-        )
+        configured_tenant_name = str(settings.STAFF_DEFAULT_TENANT_NAME or "").strip()
+        if configured_tenant_name:
+            normalized_tenant_name = configured_tenant_name
+        else:
+            existing_tenants = db.query(Tenant).order_by(Tenant.id.asc()).limit(2).all()
+            if len(existing_tenants) == 1:
+                tenant = existing_tenants[0]
+                if not tenant.slug:
+                    tenant.slug = slugify_tenant_name(tenant.name)
+                    db.commit()
+                    db.refresh(tenant)
+                return tenant
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="tenant_name is required for the initial bootstrap registration.",
+            )
 
     tenant = db.query(Tenant).filter(Tenant.name == normalized_tenant_name).first()
     if tenant:

@@ -90,6 +90,7 @@ def _dispatch(*, job: BackgroundJob, payload: dict[str, Any], db: Session) -> di
     if job.job_type == "voice_process":
         from backend.models.voice_recording import VoiceRecording
         from backend.services.ai.case_snapshot_service import case_snapshot_service
+        from backend.services.voice_calendar_sync_service import voice_calendar_sync_service
         from backend.services.voice_processing_service import process_voice_recording
 
         recording_id = int(payload["recording_id"])
@@ -97,6 +98,25 @@ def _dispatch(*, job: BackgroundJob, payload: dict[str, Any], db: Session) -> di
         process_voice_recording(recording_id, consultation_request_id)
         recording = db.query(VoiceRecording).filter(VoiceRecording.id == recording_id).first()
         if recording and recording.case_id and recording.tenant_id:
+            calendar_sync_result: dict[str, Any] = {
+                "created_count": 0,
+                "skipped_count": 0,
+                "reason": "transcription_not_completed",
+            }
+            if str(recording.transcription_status or "") == "completed" and bool(recording.transcript_text):
+                try:
+                    calendar_sync_result = voice_calendar_sync_service.sync_recording_key_dates(
+                        db=db,
+                        recording=recording,
+                    )
+                except Exception as exc:
+                    calendar_sync_result = {
+                        "created_count": 0,
+                        "skipped_count": 0,
+                        "reason": "calendar_sync_failed",
+                        "error": str(exc),
+                    }
+
             case_snapshot_service.refresh_case_snapshot(
                 db=db,
                 tenant_id=recording.tenant_id,
@@ -107,8 +127,17 @@ def _dispatch(*, job: BackgroundJob, payload: dict[str, Any], db: Session) -> di
                 "case_id": recording.case_id,
                 "status": recording.transcription_status,
                 "transcript_available": bool(recording.transcript_text),
+                "calendar_sync": calendar_sync_result,
             }
-        return {"recording_id": recording_id, "status": "processed"}
+        return {
+            "recording_id": recording_id,
+            "status": "processed",
+            "calendar_sync": {
+                "created_count": 0,
+                "skipped_count": 0,
+                "reason": "recording_not_found_or_unscoped",
+            },
+        }
 
     if job.job_type == "case_snapshot_refresh":
         from backend.services.ai.case_snapshot_service import case_snapshot_service

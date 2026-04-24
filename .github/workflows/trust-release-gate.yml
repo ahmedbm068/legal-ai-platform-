@@ -1,0 +1,62 @@
+name: Legal Trust Release Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  trust-gate:
+    runs-on: ubuntu-latest
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/legal_ai_test
+      REDIS_URL: redis://localhost:6379
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: test
+      MINIO_SECRET_KEY: test
+      MINIO_BUCKET: legal-ai-test
+      SECRET_KEY: test-secret
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate eval suite JSON
+        run: python -m json.tool scripts/evals/default_eval_suite.json > /tmp/default_eval_suite.validated.json
+
+      - name: Compile trust-critical backend
+        run: |
+          python -m py_compile \
+            backend/main.py \
+            backend/api/rag.py \
+            backend/services/ai/legal_trust_models.py \
+            backend/services/ai/legal_trust_service.py \
+            backend/services/ai/output_contract_validator.py \
+            backend/services/ai/agents/article_applicability_agent.py \
+            backend/services/ai/agents/claim_validation_agent.py \
+            backend/services/ai/agents/strict_verifier_agent.py \
+            backend/services/ai/agents/contradiction_detection_agent.py \
+            scripts/run_agent_evals.py \
+            scripts/run_regression_checks.py
+
+      - name: Run trust engine unit tests
+        run: |
+          PYTHONPATH=. python tests/test_legal_trust_engine.py
+
+      - name: Enforce release gate thresholds are wired
+        run: |
+          python scripts/run_agent_evals.py --help | grep -- "--min-citation-coverage"
+          python scripts/run_agent_evals.py --help | grep -- "--max-hallucination-rate"

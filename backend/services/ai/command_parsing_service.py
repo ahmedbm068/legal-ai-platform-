@@ -6,6 +6,13 @@ from typing import Any, Dict, Optional
 
 
 class CommandParsingService:
+    CONFIDENCE_SCORES = {
+        "high": 0.9,
+        "medium": 0.65,
+        "low": 0.4,
+    }
+    LOW_CONFIDENCE_THRESHOLD = 0.55
+
     CASE_PATTERN = re.compile(r"\bcase\s*#?\s*(\d+)\b", re.IGNORECASE)
     DOCUMENT_PATTERN = re.compile(r"\bdocument\s*#?\s*(\d+)\b", re.IGNORECASE)
     CLIENT_ID_PATTERN = re.compile(r"\bclient\s*#?\s*(\d+)\b", re.IGNORECASE)
@@ -477,6 +484,23 @@ class CommandParsingService:
             lowered=lowered,
             intent=intent,
         )
+        confidence_score = self._compute_confidence_score(
+            confidence=confidence,
+            intent=intent,
+            target_type=target_type,
+            case_id=case_id,
+            document_id=document_id,
+            clean_query=clean_query,
+            lowered=lowered,
+        )
+        arbitration_candidates = self._build_arbitration_candidates(
+            intent=intent,
+            target_type=target_type,
+            case_id=case_id,
+            document_id=document_id,
+            confidence_score=confidence_score,
+        )
+        low_confidence = confidence_score < self.LOW_CONFIDENCE_THRESHOLD
 
         return {
             "raw_message": original_message,
@@ -498,8 +522,94 @@ class CommandParsingService:
             "requested_count": requested_count,
             "requested_horizon_days": requested_horizon_days,
             "requested_contractual_context": requested_contractual_context,
-            "confidence": confidence
+            "confidence": confidence,
+            "confidence_score": round(confidence_score, 3),
+            "low_confidence": low_confidence,
+            "arbitration_candidates": arbitration_candidates,
         }
+
+    def _compute_confidence_score(
+        self,
+        *,
+        confidence: str,
+        intent: str,
+        target_type: Optional[str],
+        case_id: Optional[int],
+        document_id: Optional[int],
+        clean_query: str,
+        lowered: str,
+    ) -> float:
+        score = float(self.CONFIDENCE_SCORES.get(str(confidence).strip().lower(), 0.4))
+
+        if intent in {"ask_global", "summarize_global"}:
+            score -= 0.05
+        if intent in {"ask_case", "ask_document", "summarize_case", "summarize_document"}:
+            score += 0.03
+
+        token_count = len([token for token in clean_query.split(" ") if token])
+        if token_count <= 2:
+            score -= 0.1
+        elif token_count >= 18:
+            score += 0.03
+
+        if case_id is not None or document_id is not None:
+            score += 0.05
+        elif target_type in {"case", "document"}:
+            score += 0.02
+
+        if intent in {"ask_global", "ask_case", "ask_document"} and self._contains_any(lowered, self.UPDATE_VERB_KEYWORDS):
+            score -= 0.08
+
+        if intent in {"create_case", "update_case", "create_client", "update_client"} and self._contains_any(
+            lowered,
+            ["maybe", "perhaps", "not sure", "i think"],
+        ):
+            score -= 0.08
+
+        return max(0.05, min(score, 0.99))
+
+    def _build_arbitration_candidates(
+        self,
+        *,
+        intent: str,
+        target_type: Optional[str],
+        case_id: Optional[int],
+        document_id: Optional[int],
+        confidence_score: float,
+    ) -> list[str]:
+        candidates: list[str] = [intent]
+        has_case_scope = target_type == "case" or case_id is not None
+        has_document_scope = target_type == "document" or document_id is not None
+
+        if intent == "ask_global":
+            if has_document_scope:
+                candidates.append("ask_document")
+            if has_case_scope:
+                candidates.append("ask_case")
+        elif intent == "summarize_global":
+            if has_document_scope:
+                candidates.append("summarize_document")
+            if has_case_scope:
+                candidates.append("summarize_case")
+        elif intent == "ask_document" and not has_document_scope:
+            candidates.append("ask_global")
+        elif intent == "ask_case" and not has_case_scope:
+            candidates.append("ask_global")
+        elif intent == "summarize_document" and not has_document_scope:
+            candidates.append("summarize_global")
+        elif intent == "summarize_case" and not has_case_scope:
+            candidates.append("summarize_global")
+
+        if confidence_score < self.LOW_CONFIDENCE_THRESHOLD and intent not in {"ask_global", "summarize_global"}:
+            candidates.append("ask_global")
+
+        deduped: list[str] = []
+        for candidate in candidates:
+            normalized = str(candidate or "").strip()
+            if not normalized or normalized in deduped:
+                continue
+            deduped.append(normalized)
+        return deduped
 
     def _detect_intent(self, lowered: str, target_type: Optional[str]) -> tuple[str, str]:
         if self._contains_any(lowered, self.CREATE_CASE_KEYWORDS):

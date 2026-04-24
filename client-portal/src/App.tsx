@@ -222,6 +222,11 @@ function renderAssistantResponse(result: ClientPortalAssistantResponse | null, a
                             <li key={`${citation.label}-${citation.snippet}`}>
                                 <strong>{citation.label}</strong>
                                 <p>{citation.snippet || "Grounded citation available."}</p>
+                                {citation.url ? (
+                                    <a href={citation.url} target="_blank" rel="noreferrer noopener">
+                                        Open source
+                                    </a>
+                                ) : null}
                             </li>
                         ))}
                     </ul>

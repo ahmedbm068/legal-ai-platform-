@@ -162,6 +162,7 @@ export interface CitationItem {
   document_id?: number | null;
   case_id?: number | null;
   snippet: string;
+  url?: string | null;
 }
 
 export interface ExecutionTraceItem {

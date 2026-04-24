@@ -1,0 +1,299 @@
+{
+    "tunisia": [
+        {
+            "article": "Article 21 (Constitution 2022)",
+            "title": "Equality before the law",
+            "summary": "Citizens are equal in rights and duties and the state must guarantee equal protection under the law without discrimination.",
+            "keywords": [
+                "equality",
+                "discrimination",
+                "equal protection",
+                "constitutional right"
+            ],
+            "tags": [
+                "constitution",
+                "fundamental-rights"
+            ],
+            "url": "https://www.wipo.int/wipolex/en/legislation/details/21853"
+        },
+        {
+            "article": "Article 24 (Constitution 2022)",
+            "title": "Privacy and home inviolability",
+            "summary": "Personal privacy, family life, and home privacy are protected, and any interference must follow legal safeguards.",
+            "keywords": [
+                "privacy",
+                "personal data",
+                "home",
+                "family life",
+                "search and seizure"
+            ],
+            "tags": [
+                "constitution",
+                "civil-liberties"
+            ],
+            "url": "https://www.wipo.int/wipolex/en/legislation/details/21853"
+        },
+        {
+            "article": "Article 37 (Constitution 2022)",
+            "title": "Freedom of expression and publication",
+            "summary": "Freedom of opinion, expression, and publication is guaranteed, while legal limits must remain necessary and proportionate.",
+            "keywords": [
+                "expression",
+                "speech",
+                "publication",
+                "press",
+                "media"
+            ],
+            "tags": [
+                "constitution",
+                "public-law"
+            ],
+            "url": "https://www.wipo.int/wipolex/en/legislation/details/21853"
+        },
+        {
+            "article": "Article 55 (Constitution 2022)",
+            "title": "Limits on rights and freedoms",
+            "summary": "Restrictions to constitutional rights must be established by law, necessary, and proportionate, and must preserve the core of each right.",
+            "keywords": [
+                "proportionality",
+                "necessity",
+                "restriction",
+                "rights",
+                "constitutional review"
+            ],
+            "tags": [
+                "constitution",
+                "judicial-review"
+            ],
+            "url": "https://www.wipo.int/wipolex/en/legislation/details/21853"
+        },
+        {
+            "article": "COC (Code of Obligations and Contracts)",
+            "title": "Contract formation and binding force",
+            "summary": "Contractual obligations arise from valid consent and lawful cause; agreed obligations bind parties and must be performed in good faith.",
+            "keywords": [
+                "contract",
+                "consent",
+                "obligation",
+                "good faith",
+                "breach"
+            ],
+            "tags": [
+                "private-law",
+                "contracts"
+            ],
+            "url": "https://www.wipo.int/wipolex/en/legislation/"
+        },
+        {
+            "article": "COC (Civil liability principles)",
+            "title": "Fault, damage, and causation",
+            "summary": "Civil liability generally requires a wrongful act, actual damage, and a causal link between conduct and harm.",
+            "keywords": [
+                "liability",
+                "fault",
+                "damage",
+                "causation",
+                "compensation"
+            ],
+            "tags": [
+                "private-law",
+                "tort"
+            ],
+            "url": "https://www.wipo.int/wipolex/en/legislation/"
+        },
+        {
+            "article": "Labor law principles",
+            "title": "Employment protection and dismissal",
+            "summary": "Termination of employment should rely on lawful grounds and procedural safeguards, with possible compensation for abusive dismissal.",
+            "keywords": [
+                "employment",
+                "dismissal",
+                "termination",
+                "worker rights",
+                "compensation"
+            ],
+            "tags": [
+                "labor-law"
+            ],
+            "url": "https://www.ilo.org/dyn/natlex/natlex4.detail?p_lang=en&p_isn=46184"
+        },
+        {
+            "article": "Administrative justice principles",
+            "title": "Judicial control of administrative acts",
+            "summary": "Administrative decisions can be reviewed for legality, competence, procedure, and misuse of power.",
+            "keywords": [
+                "administrative law",
+                "ultra vires",
+                "abuse of power",
+                "annulment"
+            ],
+            "tags": [
+                "public-law",
+                "administrative-courts"
+            ],
+            "url": "https://www.wipo.int/wipolex/en/legislation/"
+        }
+    ],
+    "germany": [
+        {
+            "article": "Article 1 GG",
+            "title": "Human dignity",
+            "summary": "Human dignity is inviolable and all public authority is bound to respect and protect it.",
+            "keywords": [
+                "human dignity",
+                "fundamental rights",
+                "state duty"
+            ],
+            "tags": [
+                "grundgesetz",
+                "constitutional-law"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_gg/englisch_gg.html"
+        },
+        {
+            "article": "Article 2 GG",
+            "title": "General freedom of action and personality",
+            "summary": "Everyone has the right to free development of personality, subject to the rights of others and constitutional order.",
+            "keywords": [
+                "personality",
+                "freedom of action",
+                "constitutional order"
+            ],
+            "tags": [
+                "grundgesetz",
+                "fundamental-rights"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_gg/englisch_gg.html"
+        },
+        {
+            "article": "Article 3 GG",
+            "title": "Equality before the law",
+            "summary": "All persons are equal before the law; discrimination based on protected attributes is prohibited.",
+            "keywords": [
+                "equality",
+                "discrimination",
+                "equal treatment"
+            ],
+            "tags": [
+                "grundgesetz",
+                "fundamental-rights"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_gg/englisch_gg.html"
+        },
+        {
+            "article": "Article 5 GG",
+            "title": "Freedom of expression",
+            "summary": "Expression, information, and press freedom are protected, with limits under general law and rights of others.",
+            "keywords": [
+                "expression",
+                "press",
+                "speech",
+                "media",
+                "general law"
+            ],
+            "tags": [
+                "grundgesetz",
+                "public-law"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_gg/englisch_gg.html"
+        },
+        {
+            "article": "Article 12 GG",
+            "title": "Freedom of occupation",
+            "summary": "All Germans may choose occupation, workplace, and training freely, subject to statutory restrictions.",
+            "keywords": [
+                "occupation",
+                "profession",
+                "employment",
+                "vocational freedom"
+            ],
+            "tags": [
+                "grundgesetz",
+                "labor-law"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_gg/englisch_gg.html"
+        },
+        {
+            "article": "Article 14 GG",
+            "title": "Property and inheritance",
+            "summary": "Property rights are guaranteed, their content can be defined by law, and expropriation requires legal basis and compensation.",
+            "keywords": [
+                "property",
+                "expropriation",
+                "compensation",
+                "inheritance"
+            ],
+            "tags": [
+                "grundgesetz",
+                "constitutional-law"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_gg/englisch_gg.html"
+        },
+        {
+            "article": "Article 20 GG",
+            "title": "Constitutional principles",
+            "summary": "Germany is a democratic and social federal state, and all state authority is bound by law and justice.",
+            "keywords": [
+                "rule of law",
+                "democracy",
+                "federal state",
+                "constitutional principles"
+            ],
+            "tags": [
+                "grundgesetz",
+                "state-structure"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_gg/englisch_gg.html"
+        },
+        {
+            "article": "Section 280 BGB",
+            "title": "Damages for breach of duty",
+            "summary": "A creditor may claim damages when a debtor breaches a contractual duty and is responsible for that breach.",
+            "keywords": [
+                "contract",
+                "breach",
+                "damages",
+                "debtor",
+                "creditor"
+            ],
+            "tags": [
+                "bgb",
+                "contracts"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_bgb/"
+        },
+        {
+            "article": "Section 823 BGB",
+            "title": "Tort liability",
+            "summary": "A person who unlawfully injures another's protected rights can be liable for compensation.",
+            "keywords": [
+                "tort",
+                "liability",
+                "injury",
+                "compensation",
+                "unlawful act"
+            ],
+            "tags": [
+                "bgb",
+                "tort"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_bgb/"
+        },
+        {
+            "article": "Section 263 StGB",
+            "title": "Fraud",
+            "summary": "Fraud can arise when deception causes an error that leads to detrimental property disposition and financial loss.",
+            "keywords": [
+                "fraud",
+                "deception",
+                "property loss",
+                "criminal law"
+            ],
+            "tags": [
+                "stgb",
+                "criminal-law"
+            ],
+            "url": "https://www.gesetze-im-internet.de/englisch_stgb/"
+        }
+    ]
+}

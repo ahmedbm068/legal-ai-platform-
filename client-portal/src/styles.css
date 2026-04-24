@@ -699,6 +699,15 @@ textarea {
     white-space: pre-wrap;
 }
 
+.response-card a {
+    margin-top: 0.4rem;
+    display: inline-flex;
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-weight: 600;
+}
+
 .case-intelligence-grid {
     display: grid;
     gap: 0.85rem;

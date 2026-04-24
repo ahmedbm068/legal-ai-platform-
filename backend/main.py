@@ -29,6 +29,7 @@ from backend.database.schema_sync import apply_legacy_schema_patches
 from backend.models.background_job import BackgroundJob
 from backend.models.case import Case
 from backend.models.appointment import Appointment
+from backend.models.ai_response_audit_log import AIResponseAuditLog
 from backend.models.call_session import CallSession
 from backend.models.case_context_snapshot import CaseContextSnapshot
 from backend.models.case_image_asset import CaseImageAsset

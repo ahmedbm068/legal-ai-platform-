@@ -36,6 +36,20 @@ class CommandParsingServiceTests(unittest.TestCase):
         self.assertEqual(parsed["intent"], "update_case_appointment")
         self.assertEqual(parsed["appointment_id"], 7)
 
+    def test_parse_returns_confidence_score_and_low_confidence(self) -> None:
+        parsed = command_parsing_service.parse("Hello")
+        self.assertIn("confidence", parsed)
+        self.assertIn("confidence_score", parsed)
+        self.assertIn("low_confidence", parsed)
+        self.assertIsInstance(parsed["confidence_score"], float)
+        self.assertIsInstance(parsed["low_confidence"], bool)
+
+    def test_parse_returns_arbitration_candidates(self) -> None:
+        parsed = command_parsing_service.parse("Can you maybe review this?")
+        self.assertIn("arbitration_candidates", parsed)
+        self.assertIsInstance(parsed["arbitration_candidates"], list)
+        self.assertGreaterEqual(len(parsed["arbitration_candidates"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
