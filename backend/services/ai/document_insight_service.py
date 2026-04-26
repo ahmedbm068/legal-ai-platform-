@@ -6,6 +6,7 @@ from typing import Any
 
 from backend.models.document import Document
 from backend.services.ai.document_classifier_service import document_classifier_service
+from backend.services.ai.legal_case_reading_service import legal_case_reading_service
 from backend.services.ai.legal_text_formatter import LegalTextFormatter
 
 
@@ -184,8 +185,13 @@ class DocumentInsightService:
             legal_risks=legal_risks,
             missing_evidence=missing_evidence,
         )
+        legal_case_analysis = legal_case_reading_service.build_case_analysis(
+            text=sanitized_text,
+            document_type=document_type,
+            filename=document.filename,
+        )
 
-        return {
+        insights = {
             "document_type": document_type,
             "document_type_confidence": classification.confidence,
             "general_summary": general_summary,
@@ -198,8 +204,13 @@ class DocumentInsightService:
             "legal_risks": legal_risks,
             "recommended_actions": recommended_actions,
             "summary_source": "elite_heuristic",
-            "summary_version": "v9",
+            "summary_version": "v10_case_reading",
         }
+
+        if legal_case_analysis:
+            insights["legal_case_analysis"] = legal_case_analysis
+
+        return insights
 
     @staticmethod
     def _refine_document_type_from_filename(*, filename: str, document_type: str) -> str:

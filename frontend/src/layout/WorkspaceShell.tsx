@@ -35,6 +35,10 @@ export default function WorkspaceShell() {
             label: t("navDocumentsLabel", "Documents"),
             description: t("navDocumentsDesc", "Upload and processing queue"),
         },
+        "/editor": {
+            label: t("navEditorLabel", "Legal Editor"),
+            description: t("navEditorDesc", "Draft, verify, version, and export"),
+        },
         "/calendar": {
             label: t("navCalendarLabel", "Calendar"),
             description: t("navCalendarDesc", "Deadlines and why-they-matter"),

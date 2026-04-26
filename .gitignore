@@ -32,3 +32,9 @@ vite.config.d.ts
 
 # Local vector metadata snapshots
 faiss_metadata_*.json
+faiss_index*.bin
+faiss_metadata.json
+
+# Local ML model checkpoints and generated artifacts
+docs/ml/models/**/model.safetensors
+docs/ml/outputs/

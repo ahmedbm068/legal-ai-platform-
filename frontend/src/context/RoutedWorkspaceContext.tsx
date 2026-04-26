@@ -9,6 +9,7 @@ import {
     type ReactNode,
 } from "react";
 import { workspaceApi } from "../workspaceApi";
+import { persistChatStateToLocalStorage } from "../chatStorage";
 import { type ThemeMode, type UiLanguage, translateRouted } from "./routedI18n";
 import type {
     CalendarAppointment,
@@ -145,15 +146,38 @@ function truncateText(value: string, limit: number) {
     return `${trimmed.slice(0, Math.max(0, limit - 1)).trim()}...`;
 }
 
-function normalizeStoredMessage(message: ChatMessage): ChatMessage {
-    const rawAnswer = message.meta?.rawAnswer;
-    if (message.role === "assistant" && typeof rawAnswer === "string" && rawAnswer && message.content !== rawAnswer) {
+function normalizeArray(value: unknown) {
+    return Array.isArray(value) ? value : [];
+}
+
+function normalizeStoredMessage(message: Partial<ChatMessage> | null | undefined): ChatMessage {
+    const meta = message && typeof message.meta === "object" && message.meta ? message.meta : {};
+    const rawAnswer = typeof meta.rawAnswer === "string" ? meta.rawAnswer : null;
+    const role = message?.role === "assistant" || message?.role === "user" ? message.role : "assistant";
+    const content = String(message?.content || rawAnswer || "");
+    const normalized: ChatMessage = {
+        id: String(message?.id || generateId()),
+        role,
+        content,
+        timestamp: String(message?.timestamp || new Date().toISOString()),
+        meta: {
+            ...meta,
+            sources: normalizeArray(meta.sources),
+            citations: normalizeArray(meta.citations),
+            executionTrace: normalizeArray(meta.executionTrace),
+            steps: normalizeArray(meta.steps),
+            savedAssetIds: normalizeArray(meta.savedAssetIds),
+            rawAnswer,
+        },
+    };
+
+    if (normalized.role === "assistant" && rawAnswer && normalized.content !== rawAnswer) {
         return {
-            ...message,
+            ...normalized,
             content: rawAnswer,
         };
     }
-    return message;
+    return normalized;
 }
 
 function buildChatSessionTitle(messages: ChatMessage[], fallback = "New chat"): string {
@@ -267,9 +291,9 @@ function createAssistantMessage(response: CopilotResponse): ChatMessage {
         steps: response.steps,
         structuredResult: response.structured_result,
         trustPanel: response.trust_panel,
-        sources: response.sources,
-        citations: response.citations,
-        executionTrace: response.execution_trace,
+        sources: normalizeArray(response.sources),
+        citations: normalizeArray(response.citations),
+        executionTrace: normalizeArray(response.execution_trace),
         cache: response.cache,
         jobId: response.job_id,
         caseSnapshotVersion: response.case_snapshot_version,
@@ -350,7 +374,10 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
     }, [language]);
 
     useEffect(() => {
-        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatState));
+        const compacted = persistChatStateToLocalStorage(CHAT_STORAGE_KEY, chatState);
+        if (compacted) {
+            setChatState(compacted);
+        }
     }, [chatState]);
 
     const refreshWorkspace = useCallback(async () => {

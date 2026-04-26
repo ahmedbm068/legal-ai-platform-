@@ -11,7 +11,8 @@ services:
       N8N_PROTOCOL: http
       WEBHOOK_URL: http://localhost:5678/
       LEGAL_AI_BACKEND_URL: ${LEGAL_AI_BACKEND_URL:-http://host.docker.internal:8000}
-      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-legal-ai-n8n-secret}
+      # Development default only. Override N8N_WEBHOOK_SECRET outside local demos.
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-dev-only-legal-ai-n8n-secret}
       GENERIC_TIMEZONE: UTC
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
@@ -23,9 +24,10 @@ services:
     image: postgres:15
     container_name: legal_ai_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: legal_ai
+      # Development defaults only. Override these in shared or production environments.
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-legal_ai}
     ports:
       - "5433:5432"
     volumes:
@@ -44,8 +46,9 @@ services:
     container_name: legal_ai_minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      # Development defaults only. Override these in shared or production environments.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
       - "9000:9000"
       - "9001:9001"

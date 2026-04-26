@@ -88,8 +88,14 @@ class SummarizationService:
                 insights["recommended_actions"] = (
                     agent_result.get("recommended_actions") or insights.get("recommended_actions", [])
                 )
+                insights["legal_case_analysis"] = (
+                    agent_result.get("legal_case_analysis") or insights.get("legal_case_analysis")
+                )
                 insights["summary_source"] = agent_result.get("summary_source") or "llm_summary_agent"
-                insights["summary_version"] = agent_result.get("summary_version") or "v1"
+                insights["summary_version"] = agent_result.get("summary_version") or "v2_case_reading"
+                case_brief = self._build_legal_case_brief(insights.get("legal_case_analysis") or {})
+                if case_brief and "Legal Case Reading Brief" not in long_summary:
+                    long_summary = self._clean_summary_output(f"{long_summary}\n\n{case_brief}")
             else:
                 long_summary = self._build_final_summary(insights=insights)
                 short_summary = self._build_short_summary(insights=insights, long_summary=long_summary)
@@ -157,6 +163,7 @@ class SummarizationService:
         legal_risks = self._clean_string_list(insights.get("legal_risks", []))
         recommended_actions = self._clean_string_list(insights.get("recommended_actions", []))
         key_points = self._clean_string_list(insights.get("key_points", []))
+        legal_case_analysis = insights.get("legal_case_analysis")
 
         sections: list[str] = []
 
@@ -208,6 +215,11 @@ class SummarizationService:
         if date_lines:
             sections.append("Key Dates:\n" + "\n".join(date_lines))
 
+        if isinstance(legal_case_analysis, dict):
+            case_brief = self._build_legal_case_brief(legal_case_analysis)
+            if case_brief:
+                sections.append(case_brief)
+
         if legal_risks:
             sections.append("Legal Risks:\n" + "\n".join(f"- {risk}" for risk in legal_risks[:5]))
 
@@ -225,6 +237,47 @@ class SummarizationService:
 
         final_summary = "\n\n".join(section.strip() for section in sections if section.strip())
         return self._clean_summary_output(final_summary)
+
+    def _build_legal_case_brief(self, analysis: dict[str, Any]) -> str:
+        def clean_list(name: str, limit: int) -> list[str]:
+            return self._clean_string_list(analysis.get(name, []))[:limit]
+
+        lines: list[str] = ["Legal Case Reading Brief:"]
+
+        anatomy_parts = [
+            f"Case: {self._clean_text(analysis.get('case_name', ''))}" if analysis.get("case_name") else "",
+            f"Court: {self._clean_text(analysis.get('court_level', ''))}" if analysis.get("court_level") else "",
+            f"Citation: {self._clean_text(analysis.get('citation', ''))}" if analysis.get("citation") else "",
+        ]
+        anatomy = [item for item in anatomy_parts if item]
+        if anatomy:
+            lines.extend(["", "Case Anatomy:", *[f"- {item}" for item in anatomy]])
+
+        catchwords = clean_list("catchwords", 8)
+        if catchwords:
+            lines.append("- Catchwords: " + ", ".join(catchwords))
+
+        judges = clean_list("judges", 6)
+        if judges:
+            lines.append("- Judges: " + ", ".join(judges))
+
+        headnote_warning = self._clean_text(analysis.get("headnote_warning", ""))
+        if headnote_warning:
+            lines.extend(["", "Headnote Caution:", f"- {headnote_warning}"])
+
+        section_map = [
+            ("Fact Flowchart:", clean_list("fact_flowchart", 6)),
+            ("Legal Issue(s):", clean_list("legal_issues", 4)),
+            ("Holding:", clean_list("holding", 4)),
+            ("Ratio Decidendi:", clean_list("ratio", 4)),
+            ("Obiter Dicta:", clean_list("obiter", 4)),
+            ("Half-Page Case Summary:", clean_list("summary_bullets", 8)),
+        ]
+        for title, items in section_map:
+            if items:
+                lines.extend(["", title, *[f"- {item}" for item in items]])
+
+        return "\n".join(lines)
 
     def _build_short_summary(self, insights: dict[str, Any], long_summary: str) -> str:
         document_type = self._clean_text(insights.get("document_type", "unknown")).replace("_", " ")

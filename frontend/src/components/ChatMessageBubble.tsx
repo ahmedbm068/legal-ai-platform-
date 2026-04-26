@@ -20,6 +20,7 @@ interface ChatMessageBubbleProps {
   onRegenerate: (message: ChatMessage) => void;
   onFeedback: (message: ChatMessage, value: FeedbackValue, rootCause?: FeedbackRootCause | null) => void;
   onAskMissingInfo?: (message: ChatMessage, missingInfo: string) => void;
+  onGenerateDocument?: (message: ChatMessage) => void;
   onTrustReview?: (message: ChatMessage, decision: "approved" | "needs_revision") => void;
 }
 
@@ -600,6 +601,15 @@ function asStringList(value: unknown, limit = 12): string[] {
   return rows;
 }
 
+function safeNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatScore(value: unknown): string {
+  return safeNumber(value).toFixed(2);
+}
+
 function normalizeRiskLevel(value: unknown): "low" | "medium" | "high" {
   const token = String(value || "").trim().toLowerCase();
   if (token === "low" || token === "medium" || token === "high") return token;
@@ -841,19 +851,24 @@ function verificationSeverity(value: string): "low" | "medium" | "high" {
 }
 
 function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
-  const { language, message, feedback, onCopy, onRegenerate, onFeedback, onAskMissingInfo, onTrustReview } = props;
+  const { language, message, feedback, onCopy, onRegenerate, onFeedback, onAskMissingInfo, onGenerateDocument, onTrustReview } = props;
   const [showDownvoteReasonSelector, setShowDownvoteReasonSelector] = useState(false);
   const copy = BUBBLE_TEXT[language] || BUBBLE_TEXT.en;
   const tb = (key: string, fallback: string) => copy[key] || BUBBLE_TEXT.en[key] || fallback;
-  const sections = useMemo(() => parseSections(message.content, tb("sectionResponse", "Response")), [message.content, language]);
-  const tags = useMemo(() => extractTags(message.content), [message.content]);
-  const sourceCount = message.meta?.sources?.length ?? 0;
-  const citationCount = message.meta?.citations?.length ?? 0;
+  const content = String(message.content || "");
+  const safeSources = Array.isArray(message.meta?.sources) ? message.meta.sources : [];
+  const safeCitations = Array.isArray(message.meta?.citations) ? message.meta.citations : [];
+  const sections = useMemo(() => parseSections(content, tb("sectionResponse", "Response")), [content, language]);
+  const tags = useMemo(() => extractTags(content), [content]);
+  const sourceCount = safeSources.length;
+  const citationCount = safeCitations.length;
   const confidence = message.meta?.confidence;
   const trustPanel = useMemo(() => extractLegalTrustPanelData(message), [message]);
   const reasoningResult = message.meta?.reasoningResult;
-  const rankedCandidates = reasoningResult?.candidates ?? [];
-  const secondBestCandidate = rankedCandidates.find((candidate) => candidate.rank === 2) || null;
+  const rankedCandidates = Array.isArray(reasoningResult?.candidates) ? reasoningResult.candidates : [];
+  const secondBestCandidate = rankedCandidates.find((candidate) => Number(candidate?.rank) === 2) || null;
+  const secondBestScore = asRecord(secondBestCandidate?.score);
+  const secondBestAnswer = String(secondBestCandidate?.answer || "");
   const cache = message.meta?.cache;
   const isStreaming =
     message.role === "assistant" &&
@@ -938,14 +953,14 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
                 </summary>
                 <div className="reasoning-alt-card">
                   <div className="reasoning-alt-meta">
-                    <span className="assistant-meta-badge">Style: {secondBestCandidate.style}</span>
-                    <span className="assistant-meta-badge">Overall: {secondBestCandidate.score.overall_score.toFixed(2)}</span>
-                    <span className="assistant-meta-badge">Grounding: {secondBestCandidate.score.grounding_score.toFixed(2)}</span>
-                    <span className="assistant-meta-badge">Citations: {secondBestCandidate.score.citation_score.toFixed(2)}</span>
-                    <span className="assistant-meta-badge">Factual: {secondBestCandidate.score.factual_consistency_score.toFixed(2)}</span>
+                    <span className="assistant-meta-badge">Style: {String(secondBestCandidate.style || "Alternative")}</span>
+                    <span className="assistant-meta-badge">Overall: {formatScore(secondBestScore?.overall_score)}</span>
+                    <span className="assistant-meta-badge">Grounding: {formatScore(secondBestScore?.grounding_score)}</span>
+                    <span className="assistant-meta-badge">Citations: {formatScore(secondBestScore?.citation_score)}</span>
+                    <span className="assistant-meta-badge">Factual: {formatScore(secondBestScore?.factual_consistency_score)}</span>
                   </div>
                   {reasoningResult.winner_reason ? <p>Judge reason: {reasoningResult.winner_reason}</p> : null}
-                  {secondBestCandidate.answer.split("\n\n").map((paragraph, paragraphIndex) => (
+                  {secondBestAnswer.split("\n\n").filter(Boolean).map((paragraph, paragraphIndex) => (
                     <p key={`reasoning-alt-${paragraphIndex}`}>
                       {renderHighlightedWithLinks(paragraph, `reasoning-alt-${paragraphIndex}`)}
                     </p>
@@ -1148,27 +1163,32 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
           </div>
         ) : null}
 
-        {canShowActions && message.meta?.citations?.length ? (
+        {canShowActions && safeCitations.length ? (
           <div className="assistant-sections">
             <section className="assistant-section">
               <h4>Citations</h4>
               <ul className="citation-list">
-                {message.meta.citations.slice(0, 5).map((citation) => (
-                  <li key={`${citation.label}-${citation.snippet}`} className="citation-item">
-                    <strong>{citation.label}</strong>
-                    <span>{renderLinkifiedText(` ${citation.snippet}`, `${citation.label}-snippet`)}</span>
-                    {(citation.url || extractFirstUrl(citation.snippet)) ? (
-                      <a
-                        className="citation-source-link"
-                        href={(citation.url || extractFirstUrl(citation.snippet)) || ""}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                      >
-                        Open source
-                      </a>
-                    ) : null}
-                  </li>
-                ))}
+                {safeCitations.slice(0, 5).map((citation, citationIndex) => {
+                  const label = String(citation?.label || `Source ${citationIndex + 1}`);
+                  const snippet = String(citation?.snippet || "");
+                  const url = typeof citation?.url === "string" ? citation.url : null;
+                  return (
+                    <li key={`${label}-${citationIndex}`} className="citation-item">
+                      <strong>{label}</strong>
+                      <span>{renderLinkifiedText(` ${snippet}`, `${label}-snippet`)}</span>
+                      {(url || extractFirstUrl(snippet)) ? (
+                        <a
+                          className="citation-source-link"
+                          href={(url || extractFirstUrl(snippet)) || ""}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          Open source
+                        </a>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           </div>
@@ -1183,6 +1203,11 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
               <button type="button" onClick={() => onRegenerate(message)}>
                 {tb("regenerate", "Regenerate")}
               </button>
+              {onGenerateDocument ? (
+                <button type="button" onClick={() => onGenerateDocument(message)}>
+                  {tb("generateDocument", "Generate document")}
+                </button>
+              ) : null}
               <button
                 className={feedback?.value === "up" ? "active" : ""}
                 disabled={feedback?.status === "saving"}

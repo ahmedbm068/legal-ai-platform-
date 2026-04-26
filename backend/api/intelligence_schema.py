@@ -1,4 +1,4 @@
-from typing import List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -129,6 +129,7 @@ class StructuredDocumentInsightsOut(BaseModel):
     recommended_next_actions: List[str]
     summary_source: str
     summary_version: str
+    legal_case_analysis: Optional[Dict[str, Any]] = None
 
 
 class DocumentSummarizeResponse(BaseModel):

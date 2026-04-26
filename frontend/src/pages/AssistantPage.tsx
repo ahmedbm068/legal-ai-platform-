@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import ChatMessageBubble, { type MessageFeedbackState } from "../components/ChatMessageBubble";
 import { workspaceApi } from "../workspaceApi";
 import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
+import { saveEditorDraftSeed } from "../editorDraftSeed";
 import type { ChatMessage, FeedbackRootCause } from "../types";
 
 type WorkspaceMode = "chat" | "agent" | "legal_search";
@@ -390,6 +391,31 @@ export default function AssistantPage() {
         void submitPrompt(prompt);
     }
 
+    function handleGenerateDocument(message: ChatMessage) {
+        if (!activeCaseId || message.role !== "assistant") return;
+
+        const index = activeMessages.findIndex((row) => row.id === message.id);
+        let promptText: string | null = null;
+        for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+            if (activeMessages[cursor].role === "user") {
+                promptText = activeMessages[cursor].content;
+                break;
+            }
+        }
+
+        saveEditorDraftSeed({
+            source: "assistant",
+            caseId: activeCaseId,
+            caseTitle: selectedCase?.title || null,
+            prompt: promptText,
+            answer: message.meta?.rawAnswer || message.content,
+            sources: message.meta?.sources || [],
+            citations: message.meta?.citations || [],
+            createdAt: new Date().toISOString(),
+        });
+        navigate(`/editor/${activeCaseId}`);
+    }
+
     async function handleTrustReview(message: ChatMessage, decision: "approved" | "needs_revision") {
         if (!token || !activeCaseId) return;
         const index = activeMessages.findIndex((row) => row.id === message.id);
@@ -548,6 +574,7 @@ export default function AssistantPage() {
                                                 void handleFeedback(msg, value, rootCause);
                                             }}
                                             onAskMissingInfo={handleAskMissingInfo}
+                                            onGenerateDocument={handleGenerateDocument}
                                             onRegenerate={() => {
                                                 void handleRegenerate(message);
                                             }}

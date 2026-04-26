@@ -10,7 +10,7 @@ import type {
 } from "../types";
 
 type CardTone = "risk" | "warning" | "stable" | "neutral";
-type CardKey = "summary" | "risks" | "missing" | "evidence" | "timeline" | "contradictions";
+type CardKey = "summary" | "caseBrief" | "risks" | "missing" | "evidence" | "timeline" | "contradictions";
 
 interface IntelligencePanelProps {
   language: "en" | "de" | "ar";
@@ -40,6 +40,7 @@ const PANEL_TEXT: Record<"en" | "de" | "ar", Record<string, string>> = {
     high: "High",
     medium: "Medium",
     summary: "Summary",
+    caseBrief: "Case Brief",
     risks: "Risks",
     missingInfo: "Missing Info",
     evidence: "Evidence",
@@ -153,6 +154,8 @@ function iconFor(key: CardKey): string {
   switch (key) {
     case "summary":
       return "AI";
+    case "caseBrief":
+      return "R";
     case "risks":
       return "!";
     case "missing":
@@ -192,6 +195,22 @@ function extractMissingLines(text: string): string[] {
     .slice(0, 6);
 }
 
+function safeString(value: unknown): string {
+  return String(value || "").trim();
+}
+
+function safeStringList(value: unknown, limit = 12): string[] {
+  if (!Array.isArray(value)) return [];
+  const rows: string[] = [];
+  for (const item of value) {
+    const text = safeString(item);
+    if (!text || rows.includes(text)) continue;
+    rows.push(text);
+    if (rows.length >= limit) break;
+  }
+  return rows;
+}
+
 function IntelligencePanelComponent(props: IntelligencePanelProps) {
   const { language, caseItem, client, documents, consultations, recordings, analysis, latestAssistantMessage, onLaunchAction } = props;
   const copy = PANEL_TEXT[language] || PANEL_TEXT.en;
@@ -200,6 +219,7 @@ function IntelligencePanelComponent(props: IntelligencePanelProps) {
 
   const [expanded, setExpanded] = useState<Record<CardKey, boolean>>({
     summary: true,
+    caseBrief: true,
     risks: true,
     missing: true,
     evidence: true,
@@ -227,6 +247,35 @@ function IntelligencePanelComponent(props: IntelligencePanelProps) {
     }
     return Array.from(new Set(merged)).slice(0, 8);
   }, [analysis?.insights?.legal_risks, latestAssistantMessage, language]);
+
+  const caseBriefRows = useMemo(() => {
+    const brief = analysis?.insights?.legal_case_analysis;
+    if (!brief) return [];
+    const catchwords = safeStringList(brief.catchwords, 8);
+    const factFlowchart = safeStringList(brief.fact_flowchart, 8);
+    const legalIssues = safeStringList(brief.legal_issues, 6);
+    const holding = safeStringList(brief.holding, 6);
+    const ratio = safeStringList(brief.ratio, 6);
+    const obiter = safeStringList(brief.obiter, 6);
+
+    const rows: Array<{ title: string; items: string[] }> = [
+      {
+        title: "Case anatomy",
+        items: [
+          safeString(brief.case_name) ? `Case: ${safeString(brief.case_name)}` : "",
+          safeString(brief.court_level) ? `Court: ${safeString(brief.court_level)}` : "",
+          safeString(brief.citation) ? `Citation: ${safeString(brief.citation)}` : "",
+          catchwords.length ? `Catchwords: ${catchwords.join(", ")}` : "",
+        ].filter(Boolean),
+      },
+      { title: "Fact flowchart", items: factFlowchart },
+      { title: "Issue and holding", items: [...legalIssues, ...holding] },
+      { title: "Ratio", items: ratio },
+      { title: "Obiter", items: obiter },
+    ];
+
+    return rows.filter((row) => row.items.length);
+  }, [analysis?.insights?.legal_case_analysis]);
 
   const missingInfo = useMemo(() => {
     const rows: string[] = [];
@@ -360,6 +409,24 @@ function IntelligencePanelComponent(props: IntelligencePanelProps) {
         aiEnhanced: true,
         body: <p>{summary}</p>,
       },
+      ...(caseBriefRows.length ? [{
+        key: "caseBrief" as CardKey,
+        title: tp("caseBrief", "Case Brief"),
+        tone: "stable" as CardTone,
+        aiEnhanced: true,
+        body: (
+          <div className="intel-row-list">
+            {caseBriefRows.map((row) => (
+              <article key={row.title}>
+                <strong>{row.title}</strong>
+                <ul>
+                  {row.items.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </article>
+            ))}
+          </div>
+        ),
+      }] : []),
       {
         key: "risks",
         title: tp("risks", "Risks"),

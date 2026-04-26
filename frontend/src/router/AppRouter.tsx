@@ -7,6 +7,7 @@ import CalendarPage from "../pages/CalendarPage";
 import CasesPage from "../pages/CasesPage";
 import DashboardPage from "../pages/DashboardPage";
 import DocumentsPage from "../pages/DocumentsPage";
+import LegalEditorPage from "../pages/LegalEditorPage";
 import SettingsPage from "../pages/SettingsPage";
 import ProtectedRoute from "./ProtectedRoute";
 
@@ -30,6 +31,9 @@ export default function AppRouter() {
 
                     <Route path="documents" element={<DocumentsPage />} />
                     <Route path="documents/:caseId" element={<DocumentsPage />} />
+
+                    <Route path="editor" element={<LegalEditorPage />} />
+                    <Route path="editor/:caseId" element={<LegalEditorPage />} />
 
                     <Route path="calendar" element={<CalendarPage />} />
                     <Route path="calendar/:caseId" element={<CalendarPage />} />

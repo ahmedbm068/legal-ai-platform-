@@ -3962,6 +3962,82 @@ select:focus-visible {
   box-shadow: 0 12px 22px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+.app-crash-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(135deg, rgba(12, 35, 30, 0.96), rgba(14, 21, 28, 0.98)),
+    #0e1717;
+  color: #eef8f3;
+}
+
+.app-crash-card {
+  width: min(620px, 100%);
+  padding: 28px;
+  border: 1px solid rgba(130, 226, 190, 0.28);
+  border-radius: 8px;
+  background: rgba(16, 38, 32, 0.94);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.app-crash-eyebrow {
+  margin: 0 0 10px;
+  color: #83e6bf;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-crash-card h1 {
+  margin: 0 0 12px;
+  font-size: 1.8rem;
+}
+
+.app-crash-card p {
+  margin: 0 0 16px;
+  color: rgba(238, 248, 243, 0.78);
+  line-height: 1.6;
+}
+
+.app-crash-card code {
+  display: block;
+  max-height: 120px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid rgba(238, 248, 243, 0.14);
+  border-radius: 8px;
+  color: #d7fff0;
+  background: rgba(0, 0, 0, 0.24);
+  white-space: pre-wrap;
+}
+
+.app-crash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.app-crash-actions button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(238, 248, 243, 0.22);
+  border-radius: 8px;
+  color: #eef8f3;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+}
+
+.app-crash-actions button.primary {
+  border-color: transparent;
+  color: #09211a;
+  background: #83e6bf;
+  font-weight: 800;
+}
+
 @media (max-width: 1120px) {
   .workspace-topbar {
     flex-direction: column;

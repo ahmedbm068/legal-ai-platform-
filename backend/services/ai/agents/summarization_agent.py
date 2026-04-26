@@ -76,8 +76,22 @@ Return valid JSON only with this exact schema:
   "parties_detected": ["string"],
   "legal_risks": ["string"],
   "recommended_actions": ["string"],
+  "legal_case_analysis": {{
+    "case_name": "string",
+    "court_level": "string",
+    "citation": "string",
+    "judges": ["string"],
+    "catchwords": ["string"],
+    "headnote_warning": "string",
+    "fact_flowchart": ["chronological legally material fact"],
+    "legal_issues": ["string"],
+    "holding": ["string"],
+    "ratio": ["string"],
+    "obiter": ["string"],
+    "summary_bullets": ["string"]
+  }},
   "summary_source": "llm_summary_agent",
-  "summary_version": "v1"
+  "summary_version": "v2_case_reading"
 }}
 
 Requirements for "summary":
@@ -94,11 +108,50 @@ Key Obligations / Clauses:
 Key Dates:
 - ...
 
+Legal Case Reading Brief:
+Case Anatomy:
+- Case: ...
+- Court: ...
+- Citation: ...
+- Catchwords: ...
+
+Headnote Caution:
+- Treat headnotes as orientation only; verify the facts, holding, ratio, and obiter against the judgment text.
+
+Fact Flowchart:
+- ...
+
+Legal Issue(s):
+- ...
+
+Holding:
+- ...
+
+Ratio Decidendi:
+- ...
+
+Obiter Dicta:
+- ...
+
+Half-Page Case Summary:
+- ...
+
 Legal Risks:
 - ...
 
 Recommended Next Steps:
 - ...
+
+Legal case reading method:
+- If the document is a judgment, reported case, law report, or case note, analyze it like a lawyer reading a case.
+- Start from case anatomy: parties, court, citation, catchwords/legal area, and judges when available.
+- Treat any headnote as helpful but non-authoritative; verify against the judgment.
+- Build a chronological fact flowchart of legally material facts only. Ask whether omitting the fact would change the outcome.
+- Separate legal issue, holding, ratio decidendi, and obiter dicta.
+- Ratio must be the necessary legal reasoning for the outcome, not every interesting statement.
+- Obiter is useful commentary, dissent, hypotheticals, or statements not necessary to the result.
+- Compress the final case note into revision-ready bullets.
+- If the document is not a legal case, return an empty legal_case_analysis object and omit the Legal Case Reading Brief section from the summary.
 
 Requirements for "summary_short":
 - 2 to 4 sentences
@@ -129,8 +182,31 @@ Document text:
             "parties_detected": AgentOutputFormatter.normalize_string_list(payload.get("parties_detected") or fallback.get("parties_detected") or [], limit=8),
             "legal_risks": AgentOutputFormatter.normalize_string_list(payload.get("legal_risks") or fallback.get("legal_risks") or [], limit=8),
             "recommended_actions": AgentOutputFormatter.normalize_string_list(payload.get("recommended_actions") or fallback.get("recommended_actions") or [], limit=8),
+            "legal_case_analysis": SummarizationAgent._normalize_case_analysis(
+                payload.get("legal_case_analysis") or fallback.get("legal_case_analysis") or {}
+            ),
             "summary_source": AgentOutputFormatter.sanitize_text(payload.get("summary_source") or "llm_summary_agent"),
-            "summary_version": AgentOutputFormatter.sanitize_text(payload.get("summary_version") or "v1"),
+            "summary_version": AgentOutputFormatter.sanitize_text(payload.get("summary_version") or "v2_case_reading"),
+        }
+
+    @staticmethod
+    def _normalize_case_analysis(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+
+        return {
+            "case_name": AgentOutputFormatter.sanitize_text(value.get("case_name")),
+            "court_level": AgentOutputFormatter.sanitize_text(value.get("court_level")),
+            "citation": AgentOutputFormatter.sanitize_text(value.get("citation")),
+            "judges": AgentOutputFormatter.normalize_string_list(value.get("judges"), limit=8),
+            "catchwords": AgentOutputFormatter.normalize_string_list(value.get("catchwords"), limit=10),
+            "headnote_warning": AgentOutputFormatter.sanitize_text(value.get("headnote_warning")),
+            "fact_flowchart": AgentOutputFormatter.normalize_string_list(value.get("fact_flowchart"), limit=8),
+            "legal_issues": AgentOutputFormatter.normalize_string_list(value.get("legal_issues"), limit=6),
+            "holding": AgentOutputFormatter.normalize_string_list(value.get("holding"), limit=6),
+            "ratio": AgentOutputFormatter.normalize_string_list(value.get("ratio"), limit=6),
+            "obiter": AgentOutputFormatter.normalize_string_list(value.get("obiter"), limit=6),
+            "summary_bullets": AgentOutputFormatter.normalize_string_list(value.get("summary_bullets"), limit=10),
         }
 
 

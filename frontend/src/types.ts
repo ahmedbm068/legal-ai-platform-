@@ -85,6 +85,20 @@ export interface StructuredDocumentInsights {
   recommended_next_actions: string[];
   summary_source: string;
   summary_version: string;
+  legal_case_analysis?: {
+    case_name?: string;
+    court_level?: string;
+    citation?: string;
+    judges?: string[];
+    catchwords?: string[];
+    headnote_warning?: string;
+    fact_flowchart?: string[];
+    legal_issues?: string[];
+    holding?: string[];
+    ratio?: string[];
+    obiter?: string[];
+    summary_bullets?: string[];
+  } | null;
 }
 
 export interface FullDocumentAnalysis {

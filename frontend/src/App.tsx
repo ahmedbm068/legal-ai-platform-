@@ -9,9 +9,42 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { persistChatStateToLocalStorage } from "./chatStorage";
 import { workspaceApi as api } from "./workspaceApi";
 import ChatMessageBubble, { type MessageFeedbackState } from "./components/ChatMessageBubble";
 import CaseCalendarPanel from "./components/CaseCalendarPanel";
+import {
+  CHAT_GLOBAL_SCOPE_ID,
+  CHAT_STORAGE_KEY,
+  DEFAULT_LAWYER_PHONE,
+  IMAGE_BATCH_POLL_INTERVAL_MS,
+  IMAGE_BATCH_POLL_MAX_CYCLES,
+  IMAGE_BATCH_POLL_STALL_MAX_CYCLES,
+  LANGUAGE_STORAGE_KEY,
+  REASONING_TOP_K,
+  THEME_STORAGE_KEY,
+  TOKEN_STORAGE_KEY,
+  compactDateTime,
+  createMessage,
+  formatFileSize,
+  generateId,
+  normalizeError,
+  parseMarkdownPreview,
+  parseStoredChatState,
+  truncateText,
+  type AuthFormState,
+  type BibliothequeItem,
+  type ChatSession,
+  type FeedbackValue,
+  type LibraryFilter,
+  type LibraryPreviewAsset,
+  type ReasoningLevel,
+  type SidebarTab,
+  type StoredChatSessionsState,
+  type ThemeMode,
+  type UiLanguage,
+  type WorkspaceMode,
+} from "./legacyWorkspaceSupport";
 import type {
   AIResponseAuditLog,
   CaseItem,
@@ -31,45 +64,6 @@ import type {
   User,
   VoiceRecording,
 } from "./types";
-
-const TOKEN_STORAGE_KEY = "legal-ai-platform-token";
-const THEME_STORAGE_KEY = "legal-ai-platform-theme-v3";
-const LANGUAGE_STORAGE_KEY = "legal-ai-platform-language-v2";
-const LEGACY_CHAT_STORAGE_KEY = "legal-ai-platform-chat-map-v2";
-const CHAT_STORAGE_KEY = "legal-ai-platform-chat-sessions-v3";
-const IMAGE_BATCH_POLL_INTERVAL_MS = 4500;
-const IMAGE_BATCH_POLL_MAX_CYCLES = 30;
-const IMAGE_BATCH_POLL_STALL_MAX_CYCLES = 6;
-
-type ThemeMode = "dark" | "light";
-type UiLanguage = "en" | "de" | "ar";
-type WorkspaceMode = "chat" | "agent" | "legal_search";
-type ReasoningLevel = "low" | "medium" | "high";
-type FeedbackValue = "up" | "down";
-type SidebarTab = "navigator" | "bibliotheque" | "calendar";
-type LibraryFilter = "all" | "pdf" | "voice" | "image";
-
-interface BibliothequeItem {
-  id: string;
-  sourceId: number;
-  kind: Exclude<LibraryFilter, "all">;
-  title: string;
-  subtitle: string;
-  status: string;
-  sizeLabel: string;
-  createdAt: string;
-  sortTime: number;
-  generatedDocumentId?: number | null;
-}
-
-interface LibraryPreviewAsset {
-  id: number;
-  filename: string;
-  mimeType: string;
-  url: string;
-  pageOrder?: number | null;
-  extractedText?: string | null;
-}
 
 type BrowserSpeechRecognition = {
   lang: string;
@@ -93,37 +87,6 @@ declare global {
     webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
   }
 }
-
-interface AuthFormState {
-  name: string;
-  tenant: string;
-  inviteToken: string;
-  email: string;
-  password: string;
-  role: "admin" | "lawyer" | "assistant";
-}
-
-const DEFAULT_LAWYER_PHONE = "+216 24 996 073";
-const CHAT_GLOBAL_SCOPE_ID = 0;
-
-interface ChatSession {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  messages: ChatMessage[];
-}
-
-interface StoredChatSessionsState {
-  sessionsByCase: Record<number, ChatSession[]>;
-  activeSessionIdByCase: Record<number, string>;
-}
-
-const REASONING_TOP_K: Record<ReasoningLevel, number> = {
-  low: 3,
-  medium: 6,
-  high: 9,
-};
 
 const APP_TEXT: Record<UiLanguage, Record<string, string>> = {
   en: {
@@ -463,228 +426,6 @@ const APP_TEXT: Record<UiLanguage, Record<string, string>> = {
     assistantLabel: "ذكاء",
   },
 };
-
-function generateId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `m-${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
-}
-
-function compactDate(value: string | null | undefined, locale = "en-US", noDateLabel = "No date"): string {
-  if (!value) return noDateLabel;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return noDateLabel;
-  return new Intl.DateTimeFormat(locale, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(parsed);
-}
-
-function compactDateTime(value: string | null | undefined, locale = "en-US", noDateLabel = "No date"): string {
-  if (!value) return noDateLabel;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return noDateLabel;
-  return new Intl.DateTimeFormat(locale, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(parsed);
-}
-
-function truncateText(value: string, max = 92): string {
-  const cleaned = (value || "").replace(/\s+/g, " ").trim();
-  if (cleaned.length <= max) return cleaned;
-  return `${cleaned.slice(0, max - 1)}...`;
-}
-
-function formatFileSize(bytes: number | null | undefined): string {
-  if (!bytes || bytes <= 0) return "0 KB";
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${Math.max(1, Math.round(kb))} KB`;
-  const mb = kb / 1024;
-  return `${mb.toFixed(1)} MB`;
-}
-
-function normalizeError(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  return fallback;
-}
-
-type MarkdownPreviewBlock =
-  | { kind: "heading"; level: 1 | 2 | 3; text: string }
-  | { kind: "paragraph"; text: string }
-  | { kind: "list"; items: string[] };
-
-function parseMarkdownPreview(text: string): MarkdownPreviewBlock[] {
-  const blocks: MarkdownPreviewBlock[] = [];
-  const lines = (text || "").split(/\r?\n/);
-  let paragraphLines: string[] = [];
-  let listItems: string[] = [];
-
-  const flushParagraph = () => {
-    if (!paragraphLines.length) return;
-    blocks.push({ kind: "paragraph", text: paragraphLines.join(" ").replace(/\s+/g, " ").trim() });
-    paragraphLines = [];
-  };
-
-  const flushList = () => {
-    if (!listItems.length) return;
-    blocks.push({ kind: "list", items: listItems });
-    listItems = [];
-  };
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-
-    const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
-    if (headingMatch) {
-      flushParagraph();
-      flushList();
-      blocks.push({
-        kind: "heading",
-        level: headingMatch[1].length as 1 | 2 | 3,
-        text: headingMatch[2].trim(),
-      });
-      continue;
-    }
-
-    const bulletMatch = line.match(/^[-*]\s+(.+)$/);
-    if (bulletMatch) {
-      flushParagraph();
-      listItems.push(bulletMatch[1].trim());
-      continue;
-    }
-
-    const numberedMatch = line.match(/^\d+[\).]\s+(.+)$/);
-    if (numberedMatch) {
-      flushParagraph();
-      listItems.push(numberedMatch[1].trim());
-      continue;
-    }
-
-    flushList();
-    paragraphLines.push(line);
-  }
-
-  flushParagraph();
-  flushList();
-  return blocks;
-}
-
-function normalizeStoredMessage(message: ChatMessage): ChatMessage {
-  const rawAnswer = message.meta?.rawAnswer;
-  if (message.role === "assistant" && typeof rawAnswer === "string" && rawAnswer && message.content !== rawAnswer) {
-    return {
-      ...message,
-      content: rawAnswer,
-    };
-  }
-  return message;
-}
-
-function buildChatSessionTitle(messages: ChatMessage[], fallback = "New chat"): string {
-  const firstUserMessage = messages.find((message) => message.role === "user")?.content || "";
-  return truncateText(firstUserMessage, 52) || fallback;
-}
-
-function normalizeStoredSession(rawSession: Partial<ChatSession> | null | undefined): ChatSession | null {
-  if (!rawSession || !Array.isArray(rawSession.messages)) {
-    return null;
-  }
-
-  const messages = rawSession.messages.map(normalizeStoredMessage);
-  const createdAt = rawSession.createdAt || messages[0]?.timestamp || new Date().toISOString();
-  const updatedAt = rawSession.updatedAt || messages[messages.length - 1]?.timestamp || createdAt;
-
-  return {
-    id: rawSession.id || generateId(),
-    title: rawSession.title || buildChatSessionTitle(messages),
-    createdAt,
-    updatedAt,
-    messages,
-  };
-}
-
-function parseStoredChatState(): StoredChatSessionsState {
-  try {
-    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Partial<StoredChatSessionsState>;
-      const sessionsByCase: Record<number, ChatSession[]> = {};
-      const activeSessionIdByCase: Record<number, string> = {};
-
-      Object.entries(parsed.sessionsByCase || {}).forEach(([key, value]) => {
-        const numeric = Number(key);
-        if (Number.isNaN(numeric) || !Array.isArray(value)) return;
-        const sessions = value
-          .map((session) => normalizeStoredSession(session))
-          .filter((session): session is ChatSession => Boolean(session));
-        sessionsByCase[numeric] = sessions;
-      });
-
-      Object.entries(parsed.activeSessionIdByCase || {}).forEach(([key, value]) => {
-        const numeric = Number(key);
-        if (!Number.isNaN(numeric) && typeof value === "string" && value.trim()) {
-          activeSessionIdByCase[numeric] = value;
-        }
-      });
-
-      return { sessionsByCase, activeSessionIdByCase };
-    }
-
-    const legacyRaw = localStorage.getItem(LEGACY_CHAT_STORAGE_KEY);
-    if (!legacyRaw) {
-      return { sessionsByCase: {}, activeSessionIdByCase: {} };
-    }
-
-    const parsed = JSON.parse(legacyRaw) as Record<string, ChatMessage[]>;
-    const sessionsByCase: Record<number, ChatSession[]> = {};
-    const activeSessionIdByCase: Record<number, string> = {};
-
-    Object.entries(parsed).forEach(([key, value]) => {
-      const numeric = Number(key);
-      if (!Number.isNaN(numeric) && Array.isArray(value)) {
-        const messages = value.map(normalizeStoredMessage);
-        const createdAt = messages[0]?.timestamp || new Date().toISOString();
-        const updatedAt = messages[messages.length - 1]?.timestamp || createdAt;
-        const sessionId = generateId();
-        sessionsByCase[numeric] = [{
-          id: sessionId,
-          title: buildChatSessionTitle(messages),
-          createdAt,
-          updatedAt,
-          messages,
-        }];
-        activeSessionIdByCase[numeric] = sessionId;
-      }
-    });
-
-    return { sessionsByCase, activeSessionIdByCase };
-  } catch {
-    return { sessionsByCase: {}, activeSessionIdByCase: {} };
-  }
-}
-
-function createMessage(role: "user" | "assistant", content: string, meta?: ChatMessage["meta"]): ChatMessage {
-  return {
-    id: generateId(),
-    role,
-    content,
-    timestamp: new Date().toISOString(),
-    meta,
-  };
-}
 
 function TypingIndicator() {
   return (
@@ -1163,7 +904,10 @@ export default function App() {
   }, [language]);
 
   useEffect(() => {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chatState));
+    const compacted = persistChatStateToLocalStorage(CHAT_STORAGE_KEY, chatState);
+    if (compacted) {
+      setChatState(compacted);
+    }
   }, [chatState]);
 
   useEffect(

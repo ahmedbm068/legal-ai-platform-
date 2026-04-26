@@ -30,6 +30,12 @@ export const APP_ROUTES: AppRoute[] = [
         useSelectedCase: true,
     },
     {
+        path: "/editor",
+        label: "Legal Editor",
+        description: "Draft, verify, version, and export",
+        useSelectedCase: true,
+    },
+    {
         path: "/calendar",
         label: "Calendar",
         description: "Deadlines and why-they-matter",

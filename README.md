@@ -76,6 +76,24 @@ Swagger:
 
 `http://127.0.0.1:8000/docs`
 
+## Quality Gates
+
+Run backend tests with either command:
+
+```bash
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
+```
+
+Run frontend build checks:
+
+```bash
+npm run build --prefix frontend
+npm run build --prefix client-portal
+```
+
+Project hardening notes for the jury/demo discussion are documented in [docs/pfe_hardening_notes.md](/c:/Users/ahmed/Desktop/pfe.2/legal-ai-platform/docs/pfe_hardening_notes.md).
+
 ## Frontend
 
 The Sprint 2 frontend lives in [frontend/](/c:/Users/ahmed/Desktop/pfe.2/legal-ai-platform/frontend).
@@ -158,6 +176,10 @@ Optional skips:
 ```bash
 .\venv\Scripts\python.exe scripts\run_regression_checks.py --skip-smoke
 ```
+
+## Development Defaults
+
+`docker-compose.yml` is configured for fast local development. PostgreSQL, MinIO, and n8n use clearly marked development defaults that should be overridden with environment variables outside local demos. See `.env.example` and [docs/pfe_hardening_notes.md](/c:/Users/ahmed/Desktop/pfe.2/legal-ai-platform/docs/pfe_hardening_notes.md).
 
 ## Feedback Loop (Thumbs Up/Down)
 
