@@ -334,8 +334,26 @@ def _check_legal_search(data: Dict[str, Any]) -> list[str]:
     if not lawyer_note:
         issues.append("Missing lawyer_note in ai_insight block")
 
-    # If the answer itself signals insufficient grounding, grounding must NOT be Case-grounded
     answer = str(data.get("answer", "")).lower()
+
+    # When a case scope is in play, the answer must NOT be the bare "not enough
+    # grounded evidence" clobber message — the service must produce structured output.
+    scope = str(data.get("scope") or "").lower()
+    if scope == "case" and "not enough grounded evidence" in answer:
+        issues.append(
+            "Answer is the bare 'not enough grounded evidence' clobber message "
+            "even though scope=case; service must return structured case-context output"
+        )
+
+    # When scope=case the answer should contain at least the 5-section headers
+    _required_sections = ("case risks", "applicable law", "counsel note")
+    if scope == "case" and not any(sec in answer for sec in _required_sections):
+        issues.append(
+            f"Answer for scope=case is missing expected structured sections "
+            f"(expected at least one of: {_required_sections})"
+        )
+
+    # If the answer itself signals insufficient grounding, grounding must NOT be Case-grounded
     _insufficient_phrases = (
         "not enough grounded evidence",
         "insufficient grounded evidence",

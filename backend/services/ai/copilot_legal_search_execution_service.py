@@ -88,6 +88,41 @@ class CopilotLegalSearchExecutionService:
         # so the logic stays in one place.
         result = runtime._normalize_trust_state(result)
 
+        # ── R5c: case-context structured output when no legal provisions ──
+        # When the trust state normalisation yields insufficient evidence for a
+        # case-scoped query, replace the bare message with a structured 5-section
+        # case-context answer so lawyers always get actionable output.
+        from backend.services.ai.legal_trust_service import INSUFFICIENT_EVIDENCE_MESSAGE as _INSUF_MSG
+        if (
+            result.get("scope") == "case"
+            and result.get("answer") == _INSUF_MSG
+            and case_id is not None
+        ):
+            from backend.models.case import Case as _Case
+            _r5c_case = (
+                db.query(_Case)
+                .filter(_Case.id == case_id, _Case.tenant_id == tenant_id)
+                .first()
+            )
+            _r5c_jurisdiction = result.get("jurisdiction") or {}
+            _r5c_country = (
+                _r5c_jurisdiction.get("country") if isinstance(_r5c_jurisdiction, dict) else None
+            ) or "morocco"
+            _r5c_answer = self.legal_search_mode_service._generate_case_context_fallback_answer(
+                db=db,
+                tenant_id=tenant_id,
+                case=_r5c_case,
+                internal_results=[],
+                country=_r5c_country,
+                query=message,
+            )
+            result["answer"] = _r5c_answer
+            result["fallback_reason"] = "case_context_no_legal_provisions"
+            result["used_fallback"] = True
+            result["confidence"] = "low"
+            result["status"] = "CASE_CONTEXT_ANALYZED"
+            result["verification_status"] = "not_verified_no_direct_source"
+
         duration_ms = (time.perf_counter() - started) * 1000.0
 
         # Probe result for log fields — never log full message/document text

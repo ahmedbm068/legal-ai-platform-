@@ -292,13 +292,34 @@ class LegalSearchModeService:
             return self._with_cache_metadata(payload, key=cache_key, hit=False)
 
         fallback_notice = "No direct legal source found; reasoning based on general legal principles"
-        fallback_answer = self._build_reasoning_fallback(
-            db=db,
-            tenant_id=tenant_id,
-            country=country,
-            query=optimized_query,
-            case=resolved_case,
-        )
+
+        # ── Case-context path: case exists → structured 5-section output ──────
+        # Use a fallback_reason that is NOT in the insufficient-evidence trigger set
+        # {"no_direct_legal_source", "insufficient_evidence"} so _normalize_trust_state
+        # does NOT clobber the answer.
+        if resolved_case is not None or bool(internal_results):
+            fallback_answer = self._generate_case_context_fallback_answer(
+                db=db,
+                tenant_id=tenant_id,
+                case=resolved_case,
+                internal_results=internal_results,
+                country=country,
+                query=optimized_query,
+            )
+            effective_fallback_reason = "case_context_no_legal_provisions"
+            effective_sources: List[Dict[str, Any]] = []  # case docs are not legal provisions
+        else:
+            # Truly blank context: let _normalize_trust_state handle the override.
+            fallback_answer = self._build_reasoning_fallback(
+                db=db,
+                tenant_id=tenant_id,
+                country=country,
+                query=optimized_query,
+                case=resolved_case,
+            )
+            effective_fallback_reason = "no_direct_legal_source"
+            effective_sources = self._to_api_sources(internal_results, fallback_score=0.3)
+
         fallback_answer = self._ensure_default_legal_response_structure(
             answer_body=fallback_answer,
             query=optimized_query,
@@ -319,11 +340,11 @@ class LegalSearchModeService:
                 legal_sources_note=legal_sources_note,
             ),
             "used_fallback": True,
-            "fallback_reason": "no_direct_legal_source",
+            "fallback_reason": effective_fallback_reason,
             "confidence": "low",
             "confidence_reason": "No relevant legal provisions survived the relevance filter. Case-based reasoning used.",
             "scope": scope,
-            "sources": self._to_api_sources(internal_results, fallback_score=0.3),
+            "sources": effective_sources,
             "citations": self._to_api_citations(legal_sources),
             "execution_trace": execution_trace,
             "jurisdiction": jurisdiction,
@@ -1364,6 +1385,96 @@ INTERNAL CASE RETRIEVAL (use only for section 1 and section 4):
             confidence=confidence,
             verification_status=verification_status,
             user_language=normalized_language,
+        )
+
+    def _generate_case_context_fallback_answer(
+        self,
+        *,
+        db: Session,
+        tenant_id: int,
+        case: Optional[Case],
+        internal_results: List[Dict[str, Any]],
+        country: str,
+        query: str,
+    ) -> str:
+        """
+        Generate a structured 5-section answer when case context exists but no
+        corpus-verified legal provisions were found. Uses case_reasoning_agent for
+        risk extraction, then wraps results in the mandatory legal-practice template.
+
+        This path sets fallback_reason="case_context_no_legal_provisions" and is
+        NOT overridden by _normalize_trust_state (the string is not in the
+        insufficient-evidence trigger set).
+        """
+        risks: List[str] = []
+        missing_facts: List[str] = []
+
+        # ── 1. Try to extract risks via case_reasoning_agent ──────────────────
+        if case is not None:
+            try:
+                docs = (
+                    db.query(Document)
+                    .filter(
+                        Document.case_id == case.id,
+                        Document.tenant_id == tenant_id,
+                    )
+                    .order_by(Document.upload_timestamp.asc(), Document.id.asc())
+                    .limit(10)
+                    .all()
+                )
+                if docs:
+                    reasoning_result = case_reasoning_agent.analyze_case(
+                        case=case,
+                        documents=docs,
+                        jurisdiction_country=country,
+                        consultation_requests=[],
+                        voice_recordings=[],
+                    )
+                    if reasoning_result.success:
+                        rp = reasoning_result.payload
+                        risks = (rp.get("legal_risks") or [])[:3]
+                        missing_facts = (
+                            rp.get("missing_facts") or rp.get("open_questions") or []
+                        )[:3]
+            except Exception:
+                pass
+
+        # ── 2. Fallback: extract from internal_results snippets ───────────────
+        if not risks:
+            seen: set = set()
+            for r in (internal_results or [])[:5]:
+                snippet = str(r.get("snippet") or r.get("content") or "").strip()
+                if snippet and snippet not in seen:
+                    seen.add(snippet)
+                    risks.append(snippet[:120])
+            risks = risks[:3]
+
+        # ── 3. Build the 5-section structured answer ──────────────────────────
+        jurisdiction_display = self.COUNTRY_DISPLAY.get(country, country.title())
+        risk_bullets = "\n".join(f"  - {r}" for r in risks) if risks else (
+            "  - Unable to extract specific risks from available case materials."
+        )
+        missing_bullets = "\n".join(f"  - {m}" for m in missing_facts) if missing_facts else (
+            "  - Full contract/document set not available for review.\n"
+            "  - Applicable jurisdiction-specific precedents not confirmed."
+        )
+
+        return (
+            f"**1. Case Risks**\n"
+            f"{risk_bullets}\n\n"
+            f"**2. Applicable Law**\n"
+            f"  No directly applicable legal provision was confidently identified in the "
+            f"{jurisdiction_display} legal corpus for this query. Counsel must verify "
+            f"article-level authority before relying on this analysis.\n\n"
+            f"**3. Legal Assessment**\n"
+            f"  The case file supports a practical risk analysis, but no corpus-verified "
+            f"legal authority was located. The risks identified above are based on case "
+            f"materials only and carry low legal confidence without statutory grounding.\n\n"
+            f"**4. Missing Facts / Verification Needed**\n"
+            f"{missing_bullets}\n\n"
+            f"**5. Counsel Note**\n"
+            f"  Final legal judgment remains with qualified counsel. This output is "
+            f"case-context reasoning only — not a legal opinion. Confidence: low."
         )
 
     def _build_reasoning_fallback(

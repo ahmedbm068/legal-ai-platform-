@@ -1133,6 +1133,7 @@ class RuntimeCopilotOrchestrator:
                 "result_intent": result.get("parsed_intent"),
                 "used_fallback": result.get("used_fallback"),
                 "confidence": result.get("confidence"),
+                "fallback_reason": result.get("fallback_reason"),
             },
             duration_ms=(time.monotonic() - _t0) * 1000,
         )
@@ -1258,6 +1259,7 @@ class RuntimeCopilotOrchestrator:
                 contradiction_detection=trust_result.contradiction_detection,
             )
             result = self.copilot_service._normalize_trust_state(result)
+
             self._append_stage(
                 stage_records,
                 name="legal_trust_engine",
@@ -1327,6 +1329,7 @@ class RuntimeCopilotOrchestrator:
                 "result_intent": result.get("parsed_intent"),
                 "mode": result.get("mode"),
                 "used_fallback": bool(result.get("used_fallback")),
+                "fallback_reason": result.get("fallback_reason"),
             },
         )
         self._append_stage(
@@ -1771,6 +1774,13 @@ class RuntimeCopilotOrchestrator:
         effective_mode: str,
         agent_pack_payload: dict[str, Any],
     ) -> None:
+        # ── R5c: preserve structured case-context answer ─────────────────────
+        # When the legal search service already generated a structured 5-section
+        # case-context answer (fallback_reason="case_context_no_legal_provisions"),
+        # do NOT replace it with the generic final_output_composer output which
+        # uses different section headers ("Matter Understood" vs "Case Risks").
+        if str(result.get("fallback_reason") or "").strip() == "case_context_no_legal_provisions":
+            return
         workflow_kind = str(workflow_plan.get("workflow_kind") or "").strip()
         if workflow_kind != "legal_analysis" and effective_mode != "legal_search":
             return
