@@ -320,14 +320,22 @@ class LegalSearchModeService:
             effective_fallback_reason = "no_direct_legal_source"
             effective_sources = self._to_api_sources(internal_results, fallback_score=0.3)
 
-        fallback_answer = self._ensure_default_legal_response_structure(
-            answer_body=fallback_answer,
-            query=optimized_query,
-            legal_sources=[],
-            confidence="low",
-            verification_status="not_verified_no_direct_source",
-            user_language=detected_user_language,
-        )
+        # ── R5c: skip generic section padding for the structured case-context answer ──
+        # _generate_case_context_fallback_answer() already returns a complete 5-section
+        # answer (**1. Case Risks** … **5. Counsel Note**).  Running it through
+        # _ensure_default_legal_response_structure would append all 10 sections from
+        # DEFAULT_RESPONSE_SECTION_ORDER (Matter Understood, Confirmed Facts, Legal
+        # Issue, …) because none of the case-context headers match those labels —
+        # producing the unwanted duplicate block.
+        if effective_fallback_reason != "case_context_no_legal_provisions":
+            fallback_answer = self._ensure_default_legal_response_structure(
+                answer_body=fallback_answer,
+                query=optimized_query,
+                legal_sources=[],
+                confidence="low",
+                verification_status="not_verified_no_direct_source",
+                user_language=detected_user_language,
+            )
         payload = {
             "answer": self._format_legal_search_output(
                 country=self.COUNTRY_DISPLAY.get(country, country.title()),
