@@ -299,6 +299,7 @@ class CopilotResponseAssemblyService:
             sources_count=sources_count,
             used_fallback=used_fallback,
             legal_sources_note=legal_sources_note,
+            fallback_reason=fallback_reason,
         )
 
         # ── Structured result — merge all quality signals into it ─────────────
@@ -800,11 +801,36 @@ class CopilotResponseAssemblyService:
         sources_count: int,
         used_fallback: bool,
         legal_sources_note: Optional[str],
+        fallback_reason: str = "",
     ) -> Dict[str, Any]:
         """Build a structured AI Insight block for display in the frontend.
 
         All fields are additive — the frontend may render or ignore any subset.
         """
+        # ── R5c-insight: case-context fallback — answer is case-based, not corpus-grounded ──
+        if fallback_reason == "case_context_no_legal_provisions":
+            insight: Dict[str, Any] = {
+                "grounding_type": "Case-context reasoning",
+                "grounding_description": (
+                    "This answer is based on available case context but is not supported by "
+                    "corpus-verified legal provisions. Counsel must verify applicable law."
+                ),
+                "confidence_level": "low",
+                "confidence_reason": confidence_reason,
+                "lawyer_note": (
+                    "The case file indicates partial or fallback evidence for this response. "
+                    "Counsel must review this output before it is relied upon in proceedings "
+                    "or client-facing materials."
+                ),
+                "sources_count": sources_count,
+                "used_fallback": used_fallback,
+                "mode": mode,
+                "intent": intent,
+            }
+            if legal_sources_note:
+                insight["legal_sources_note"] = legal_sources_note
+            return insight
+
         # Grounding type label
         if grounding == _GROUNDING_CASE:
             grounding_type = "Case-grounded"
