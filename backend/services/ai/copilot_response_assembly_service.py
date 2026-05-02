@@ -155,6 +155,15 @@ class CopilotResponseAssemblyService:
         scope: str = str(result.get("scope") or "").strip().lower()
         answer: str = str(result.get("answer") or "")
 
+        # ── R5c-ui: strip metadata sections from case-context fallback answer ──
+        # _format_legal_search_output always appends [Trust Status], [Legal
+        # Authority Status], and [Fallback Notice] blocks. For the structured
+        # case-context path these are internal metadata that should not appear
+        # in the user-facing answer — only the 5 structured sections should remain.
+        if fallback_reason == "case_context_no_legal_provisions":
+            answer = self._strip_legal_metadata_blocks(answer)
+            result["answer"] = answer
+
         # Detect whether this is a doc-indexing fallback (not fully retrieved)
         is_indexing_fallback = (
             used_fallback
@@ -576,6 +585,33 @@ class CopilotResponseAssemblyService:
             return citations
         filtered = [c for c in citations if cls._is_source_relevant_to_answer(c, answer, intent, query)]
         return filtered if filtered else []
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # R5c-ui — strip metadata blocks from case-context legal-search answer
+    # ──────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _strip_legal_metadata_blocks(answer: str) -> str:
+        """Remove [Trust Status], [Legal Authority Status], and [Fallback Notice]
+        blocks from the answer text.
+
+        These blocks are appended by _format_legal_search_output for all Legal
+        Search fallback paths.  For the structured case-context path
+        (fallback_reason="case_context_no_legal_provisions") they are internal
+        metadata that must not appear in the user-facing answer — only the five
+        structured sections (Case Risks … Counsel Note) should be visible.
+
+        The method is a pure text transform: it truncates the answer at the first
+        line that matches one of the metadata block headers.
+        """
+        _METADATA_BLOCK_PATTERN = re.compile(
+            r"^\[(?:Trust Status|Legal Authority Status|Fallback Notice)\]",
+            re.MULTILINE,
+        )
+        m = _METADATA_BLOCK_PATTERN.search(answer)
+        if m:
+            answer = answer[: m.start()].rstrip()
+        return answer
 
     # ──────────────────────────────────────────────────────────────────────────
     # Fix #3 — ask_case concise structured answer
