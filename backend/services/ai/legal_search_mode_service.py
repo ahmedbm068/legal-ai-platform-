@@ -21,6 +21,7 @@ from backend.services.ai.reranker_service import reranker_service
 from backend.services.ai.legal_search_components import (
     JurisdictionRouter,
     LegalDomainClassifier,
+    LegalApplicabilityMapper,
     LegalSourceRelevanceFilter,
     RestrictedLegalCorpusRetriever,
     LegalSearchResponseBuilder,
@@ -95,6 +96,7 @@ class LegalSearchModeService:
         self.model = llm_gateway.default_model
         self.jurisdiction_router = JurisdictionRouter()
         self.domain_classifier = LegalDomainClassifier()
+        self.applicability_mapper = LegalApplicabilityMapper()
         self.relevance_filter = LegalSourceRelevanceFilter()
         self.corpus_retriever = RestrictedLegalCorpusRetriever()
         self.response_builder = LegalSearchResponseBuilder()
@@ -184,6 +186,7 @@ class LegalSearchModeService:
             internal_results=internal_results,
             code_scope=normalized_code_scope,
             country=country,
+            case=resolved_case,
         )
         legal_sources_raw = self._retrieve_jurisdiction_sources(
             country=country,
@@ -197,6 +200,11 @@ class LegalSearchModeService:
             query=optimized_query,
             sources=legal_sources_raw,
             answer_text="",
+            case_focus_terms=case_focus_terms,
+        )
+        applicability_mappings = self.applicability_mapper.map(
+            query=optimized_query,
+            legal_sources=legal_sources,
             case_focus_terms=case_focus_terms,
         )
         local_code_results = sum(1 for item in legal_sources_raw if item.get("source_origin") == "local_code")
@@ -230,6 +238,15 @@ class LegalSearchModeService:
                 "relevant_legal_sources_count": len(legal_sources),
                 "legal_sources_note_present": bool(legal_sources_note),
             },
+            {
+                "stage": "applicability_mapping",
+                "applicability_mapping_count": len(applicability_mappings),
+                "direct_count": sum(1 for m in applicability_mappings if m.get("applicability") == "direct"),
+                "partial_count": sum(1 for m in applicability_mappings if m.get("applicability") == "partial"),
+                "weak_count": sum(1 for m in applicability_mappings if m.get("applicability") == "weak"),
+                "domain_confidence": (case_topic or {}).get("confidence", "unknown"),
+                "domain_reason": (case_topic or {}).get("reason", ""),
+            },
         ]
 
         if legal_sources:
@@ -241,8 +258,13 @@ class LegalSearchModeService:
                 internal_results=internal_results,
                 include_english_summary=multilingual_output,
                 case_topic=case_topic,
+                applicability_mappings=applicability_mappings,
             )
-            confidence = self._confidence_from_sources(legal_sources)
+            confidence, confidence_reason = self._compute_legal_match_confidence(
+                legal_sources=legal_sources,
+                applicability_mappings=applicability_mappings,
+                legal_sources_note=legal_sources_note,
+            )
             verification_status = self._verification_status_from_sources(legal_sources)
             payload = {
                 "answer": self._format_legal_search_output(
@@ -258,6 +280,7 @@ class LegalSearchModeService:
                 "used_fallback": False,
                 "fallback_reason": None,
                 "confidence": confidence,
+                "confidence_reason": confidence_reason,
                 "scope": scope,
                 "sources": self._to_api_sources(legal_sources),
                 "citations": self._to_api_citations(legal_sources),
@@ -298,6 +321,7 @@ class LegalSearchModeService:
             "used_fallback": True,
             "fallback_reason": "no_direct_legal_source",
             "confidence": "low",
+            "confidence_reason": "No relevant legal provisions survived the relevance filter. Case-based reasoning used.",
             "scope": scope,
             "sources": self._to_api_sources(internal_results, fallback_score=0.3),
             "citations": self._to_api_citations(legal_sources),
@@ -1224,70 +1248,82 @@ class LegalSearchModeService:
         internal_results: List[Dict[str, Any]],
         include_english_summary: bool,
         case_topic: Optional[Dict[str, Any]],
+        applicability_mappings: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
         compact_sources = legal_sources[:8]
         compact_internal = internal_results[:4]
         normalized_language = self._normalize_response_language(user_language)
         confidence = self._confidence_from_sources(compact_sources)
         verification_status = self._verification_status_from_sources(compact_sources)
-        analysis_framework = self._build_legal_analysis_framework(
-            country=country,
-            case_topic=case_topic,
-            has_internal_context=bool(compact_internal),
-        )
-        default_structure = self._default_response_structure_guide(normalized_language)
+
+        # Build structured applicability summary for the LLM
+        direct_mappings = [m for m in (applicability_mappings or []) if m.get("applicability") in ("direct", "partial")]
+        applicability_summary = self._build_applicability_summary(direct_mappings)
+        domain_conf_note = ""
+        if (case_topic or {}).get("needs_counsel_domain_verification"):
+            domain_conf_note = (
+                "\nDOMAIN UNCERTAINTY: The legal domain classifier has low confidence. "
+                "Counsel must verify which corpus applies before relying on this analysis.\n"
+            )
 
         if self.client:
-            prompt = f"""
-You are a legal copilot designed to assist lawyers, not replace them.
+            prompt = f"""You are a legal copilot designed to assist lawyers, not replace them.
 
 Core operating principles:
-- The human lawyer remains in control of final legal judgment.
-- You provide structured, source-grounded, reviewable legal assistance.
-- You do not provide definitive legal advice.
+- The human lawyer retains final legal judgment. You provide structured, reviewable legal analysis.
+- You do NOT provide definitive legal advice.
 - Distinguish confirmed facts, inferred facts, missing facts, and assumptions requiring validation.
-- Ground legal statements in retrieved sources only and never fabricate legal authority.
-- If source support is weak, partial, or conflicting, state this explicitly and avoid definitive conclusions.
-- Use careful language such as: "based on the currently available facts", "may apply", "subject to lawyer review", and "this point requires verification".
+- Ground every legal statement in the retrieved sources. Never fabricate articles or citations.
+- If source support is weak, partial, or conflicting, state this explicitly.
+- Use careful language: "based on the currently available facts", "may apply", "subject to lawyer review".
 
-Rules:
-- Use only the provided legal sources as legal citations.
-- Never fabricate legal articles, sections, or citations.
-- If source evidence is partial, explicitly state uncertainty.
-- Prioritize official code-family sources relevant to the case topic.
-- Keep answer concise, professional, and review-oriented.
-- Write the answer in language code: {user_language}.
-- Follow a legal-practice reasoning flow before giving conclusions.
-- If internal case context exists, include a short "Case applicability check" that maps legal rules to known case facts and missing facts.
-- If include_english_summary is true, add a short English summary as the final line.
-- Use the default response structure and keep headings in the specified order unless the user explicitly requested a different format.
+STRICT OUTPUT STRUCTURE — you MUST use exactly these five numbered sections in this order:
 
+1. Case risks
+   Summarise the concrete legal risks present in the case context based on the internal retrieval.
+   If no internal case context: write "Insufficient case context to identify specific risks."
+
+2. Applicable law
+   List only the legal articles/provisions that are directly or partially applicable.
+   For each article: one line — reference, plain-language rule summary, applicability level.
+   If NO directly applicable provision exists, write exactly:
+   "No directly applicable legal provision was confidently identified in the selected jurisdiction/domain corpus."
+
+3. Legal assessment
+   Map each applicable provision to the known case facts.
+   Use the pre-computed applicability analysis below as your starting point.
+   Flag every gap between the legal rule and the current facts.
+   Use cautious language. Do NOT conclude when facts are missing.
+
+4. Missing facts / verification needed
+   Enumerate the specific facts, documents, or evidence that counsel must verify before
+   relying on this analysis. Be specific, not generic.
+
+5. Counsel note
+   Final legal judgment remains with the responsible lawyer.
+   Confidence: {confidence}. Verification status: {verification_status}.
+
+RULES:
+- Write in language code: {user_language}.
+- Use only the provided legal sources as citations. Never invent references.
+- Keep each section concise and professional.
+- If include_english_summary is true, add a brief English summary after section 5.{domain_conf_note}
+
+CONTEXT:
 Jurisdiction: {self.COUNTRY_DISPLAY.get(country, country.title())}
 User query: {query}
-Case topic hypothesis: {(case_topic or {}).get("topic") or "General civil matter"}
+Case topic: {(case_topic or {}).get("topic") or "General civil matter"}
+Domain confidence: {(case_topic or {}).get("confidence", "unknown")} — {(case_topic or {}).get("reason", "")}
 Code families in scope: {(case_topic or {}).get("code_families") or self.DEFAULT_CODE_SCOPE}
 include_english_summary: {str(include_english_summary).lower()}
-Target confidence label: {confidence}
-Verification status: {verification_status}
 
-Required analysis method:
-{analysis_framework}
+PRE-COMPUTED APPLICABILITY ANALYSIS (use to populate section 3):
+{applicability_summary}
 
-Default response structure:
-{default_structure}
-
-Mandatory trust content for serious legal output:
-- Confidence level
-- Legal basis used
-- Missing facts and uncertainties
-- Contradictions or weaknesses
-- Verification status
-- Lawyer review note that final legal judgment remains with counsel
-
-Legal sources JSON:
+LEGAL SOURCES (use only these for section 2 and 3):
 {compact_sources}
 
-Internal case retrieval JSON (context only):
+INTERNAL CASE RETRIEVAL (use only for section 1 and section 4):
 {compact_internal}
 """
             try:
@@ -1297,6 +1333,7 @@ Internal case retrieval JSON (context only):
                 )
                 output = llm_gateway.extract_output_text(response).strip()
                 if output:
+                    _logger.info("[legal_search] legal_output_structure_applied=True")
                     return self._ensure_default_legal_response_structure(
                         answer_body=output,
                         query=query,
@@ -1418,6 +1455,28 @@ Internal case retrieval JSON (context only):
         if any(token in lowered for token in ["bonjour", "tunisie", "droit", "juridique", "code civil"]):
             return "fr"
         return "en"
+
+    @staticmethod
+    def _build_applicability_summary(direct_mappings: List[Dict[str, Any]]) -> str:
+        """Renders the LegalApplicabilityMapper results as a compact string for the LLM prompt."""
+        if not direct_mappings:
+            return "No direct or partial applicability mappings available."
+        lines: List[str] = []
+        for m in direct_mappings[:6]:
+            ref = m.get("source_reference", "Unknown")
+            appl = m.get("applicability", "unknown").upper()
+            rule = m.get("rule_summary", "")
+            facts = ", ".join(m.get("matching_case_facts", [])) or "none identified"
+            missing = ", ".join(m.get("missing_facts", [])) or "none identified"
+            assessment = m.get("assessment", "")
+            lines.append(
+                f"[{appl}] {ref}\n"
+                f"  Rule: {rule}\n"
+                f"  Matching facts: {facts}\n"
+                f"  Missing facts: {missing}\n"
+                f"  Assessment: {assessment}"
+            )
+        return "\n\n".join(lines)
 
     def _build_legal_analysis_framework(
         self,
@@ -1765,6 +1824,47 @@ Internal case retrieval JSON (context only):
         if has_official and has_reference:
             return "high"
         return "medium"
+
+    def _compute_legal_match_confidence(
+        self,
+        *,
+        legal_sources: List[Dict[str, Any]],
+        applicability_mappings: List[Dict[str, Any]],
+        legal_sources_note: Optional[str],
+    ) -> tuple:
+        """Returns (confidence, confidence_reason) based on applicability mappings.
+
+        High   — ≥1 direct-applicability source from correct jurisdiction/domain
+        Medium — ≥1 partial-applicability source; facts incomplete but direction plausible
+        Low    — weak sources only, no survivors, or authority missing
+        """
+        if legal_sources_note or not legal_sources:
+            reason = "No applicable legal provisions identified in the selected jurisdiction/domain corpus."
+            _logger.info("[legal_search] legal_match_confidence=low reason=%r", reason)
+            return "low", reason
+
+        direct = [m for m in applicability_mappings if m.get("applicability") == "direct"]
+        partial = [m for m in applicability_mappings if m.get("applicability") == "partial"]
+
+        if direct:
+            refs = ", ".join(m.get("source_reference", "") for m in direct[:2] if m.get("source_reference"))
+            reason = f"Direct applicability found: {refs}." if refs else "Direct applicability found."
+            _logger.info("[legal_search] legal_match_confidence=high reason=%r", reason)
+            return "high", reason
+
+        if partial:
+            refs = ", ".join(m.get("source_reference", "") for m in partial[:2] if m.get("source_reference"))
+            reason = (
+                f"Partial applicability only: {refs}. Facts incomplete — legal direction is plausible but unconfirmed."
+                if refs
+                else "Partial applicability only. Facts incomplete — legal direction is plausible but unconfirmed."
+            )
+            _logger.info("[legal_search] legal_match_confidence=medium reason=%r", reason)
+            return "medium", reason
+
+        reason = "Only weak source relevance found. Legal basis requires verification by counsel."
+        _logger.info("[legal_search] legal_match_confidence=low reason=%r", reason)
+        return "low", reason
 
     @staticmethod
     def _format_legal_search_output(
