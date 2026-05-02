@@ -1126,7 +1126,6 @@ class RuntimeCopilotOrchestrator:
             prefetched_case_snapshot=state.get("case_snapshot") or state.get("snapshot_payload"),
             prefetched_history=list(state.get("memory_items") or state.get("merged_history") or []),
             prefetched_memory_items=state.get("memory_items"),
-            prefetched_route=state.get("route"),
         )
         log_graph_event(
             "agent_execution", "end", state,

@@ -998,7 +998,6 @@ User message:
         prefetched_memory_items: Optional[list] = None,
         prefetched_parsed_intent: Optional[Dict[str, Any]] = None,
         prefetched_mode: Optional[str] = None,
-        prefetched_route: Optional[str] = None,
     ) -> Dict[str, Any]:
         # ── Step 3A: resolve prefetched graph context ────────────────────────
         _case_ctx = prefetched_case_context if prefetched_case_context is not None else case_context
@@ -2908,25 +2907,6 @@ User message:
         }
 
     @staticmethod
-    def _optimize_prompt_for_query(
-        *,
-        question: str,
-        intent: str | None,
-        target_type: str | None,
-        target_id: int | None,
-        allow_llm: bool = False,
-    ) -> str:
-        optimized = prompt_optimizer_agent.optimize_query(
-            raw_query=question,
-            intent=intent,
-            target_type=target_type,
-            target_id=target_id,
-            allow_llm=allow_llm,
-        )
-        candidate = optimized.payload.get("optimized_query") if optimized.success else ""
-        return str(candidate or question).strip()
-
-    @staticmethod
     def _coerce_unit_score(value: Any) -> float:
         try:
             parsed = float(value)
@@ -3646,140 +3626,6 @@ Return JSON only with this schema:
             return True
         return False
 
-    @staticmethod
-    def _looks_like_material_breach_clause_question(question: str) -> bool:
-        lowered = str(question or "").lower()
-        if not lowered:
-            return False
-
-        if any(keyword in lowered for keyword in CopilotService.MATERIAL_BREACH_QUERY_KEYWORDS):
-            return True
-
-        if "clause" in lowered and any(token in lowered for token in ["breach", "termination", "notice", "cure", "invoice", "sla"]):
-            return True
-
-        return False
-
-    def _synthesize_answer_with_external_research(
-        self,
-        *,
-        question: str,
-        internal_answer: str,
-        internal_sources: List[Dict[str, Any]],
-        external_results: List[Dict[str, Any]],
-        jurisdiction_prompt_block: str,
-    ) -> str:
-        if not self.client:
-            return self._build_fallback_external_answer(
-                internal_answer=internal_answer,
-                external_results=external_results,
-            )
-
-        compact_internal_sources = internal_sources[:6]
-        compact_external = external_results[:6]
-
-        prompt = f"""
-You are a legal AI copilot.
-Synthesize one practical answer to the user's question using:
-1) internal case/document evidence
-2) external web research snippets
-
-Rules:
-- Prioritize internal evidence when there is conflict.
-- Do not invent facts.
-- Keep the answer concise and professional.
-- End with a short "Web references" line listing up to 3 URLs.
-- Respect the jurisdiction guardrails when applicable.
-
-Jurisdiction context:
-{jurisdiction_prompt_block or "No specific jurisdiction scope was provided."}
-
-Question:
-{question}
-
-Internal grounded answer:
-{internal_answer}
-
-Internal sources (JSON):
-{json.dumps(compact_internal_sources, ensure_ascii=False)}
-
-External research snippets (JSON):
-{json.dumps(compact_external, ensure_ascii=False)}
-"""
-        try:
-            response = self.client.responses.create(
-                model=self.model,
-                input=prompt,
-            )
-            output = llm_gateway.extract_output_text(response).strip()
-            if output:
-                return output
-        except Exception:
-            pass
-
-        return self._build_fallback_external_answer(
-            internal_answer=internal_answer,
-            external_results=external_results,
-        )
-
-    @staticmethod
-    def _external_results_to_sources(external_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        sources: List[Dict[str, Any]] = []
-        for item in external_results:
-            title = str(item.get("title") or item.get("domain") or "Web Research").strip()
-            url = str(item.get("url") or "").strip()
-            snippet = str(item.get("snippet") or "").strip()
-
-            source_text = snippet
-            if url:
-                source_text = f"{source_text} (source: {url})".strip()
-
-            sources.append(
-                {
-                    "chunk_id": None,
-                    "document_id": None,
-                    "case_id": None,
-                    "filename": title[:120] or "Web Research",
-                    "chunk_index": None,
-                    "score": 0.35,
-                    "snippet": source_text[:300],
-                }
-            )
-        return sources
-
-    @staticmethod
-    def _external_results_to_citations(external_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        citations: List[Dict[str, Any]] = []
-        for item in external_results[:6]:
-            title = str(item.get("title") or item.get("domain") or "Web Research").strip()
-            snippet = str(item.get("snippet") or "").strip()
-            url = str(item.get("url") or "").strip()
-            citations.append(
-                {
-                    "label": title[:120] or "Web Research",
-                    "document_id": None,
-                    "case_id": None,
-                    "snippet": snippet[:280],
-                    "url": url or None,
-                }
-            )
-        return citations
-
-    @staticmethod
-    def _build_fallback_external_answer(*, internal_answer: str, external_results: List[Dict[str, Any]]) -> str:
-        lines = [internal_answer.strip() or "No internal answer was generated."]
-        lines.append("")
-        lines.append("External web findings:")
-        for item in external_results[:5]:
-            title = str(item.get("title") or item.get("domain") or "Web Result").strip()
-            snippet = str(item.get("snippet") or "").strip()
-            url = str(item.get("url") or "").strip()
-            combined = f"- {title}: {snippet}"
-            if url:
-                combined += f" ({url})"
-            lines.append(combined[:360])
-        return "\n".join(lines).strip()
-
     def _resolve_case_for_context(
         self,
         *,
@@ -4105,67 +3951,6 @@ External research snippets (JSON):
             "constitutional_references": jurisdiction_context.get("constitutional_references") or [],
             "used_llm": False,
         }
-
-    @staticmethod
-    def _format_case_reasoning_answer(reasoning_payload: Dict[str, Any]) -> str:
-        sections: List[str] = []
-
-        jurisdiction_name = (reasoning_payload.get("jurisdiction_display_name") or "").strip()
-        constitutional_refs = reasoning_payload.get("constitutional_references") or []
-
-        narrative_summary = (reasoning_payload.get("narrative_summary") or "").strip()
-        if narrative_summary:
-            sections.append(narrative_summary)
-        else:
-            overview = (reasoning_payload.get("overview") or "").strip()
-            if overview:
-                sections.append("Overview:")
-                sections.append(overview)
-
-        if jurisdiction_name:
-            sections.append("")
-            sections.append(f"Jurisdiction Lens: {jurisdiction_name}")
-            if constitutional_refs:
-                sections.append("Constitution references:")
-                sections.extend(f"- {item}" for item in constitutional_refs[:2])
-
-        sections.append("")
-        sections.append("Main Issues:")
-        main_issues = reasoning_payload.get("main_issues") or []
-        if main_issues:
-            sections.extend(f"- {item}" for item in main_issues[:8])
-        else:
-            sections.append("- No major issues were clearly extracted.")
-
-        sections.append("")
-        sections.append("Key Dates:")
-        key_dates = reasoning_payload.get("key_dates") or []
-        if key_dates:
-            sections.extend(
-                f"- {item['label']}: {item['value']}"
-                for item in key_dates[:10]
-                if item.get("label") and item.get("value")
-            )
-        else:
-            sections.append("- No major dates were clearly detected.")
-
-        sections.append("")
-        sections.append("Legal Risks:")
-        legal_risks = reasoning_payload.get("legal_risks") or []
-        if legal_risks:
-            sections.extend(f"- {item}" for item in legal_risks[:8])
-        else:
-            sections.append("- No major legal risks were clearly detected.")
-
-        sections.append("")
-        sections.append("Recommended Next Steps:")
-        next_steps = reasoning_payload.get("recommended_next_steps") or []
-        if next_steps:
-            sections.extend(f"- {item}" for item in next_steps[:8])
-        else:
-            sections.append("- Review the case evidence manually.")
-
-        return "\n".join(sections).strip()
 
     @staticmethod
     def _normalize_risk_items(items: List[str]) -> List[str]:
@@ -4929,45 +4714,6 @@ Uploaded case document context:
 
         return self._ensure_bullet_source_citations(bullets[:target], evidence_sources)
 
-    def _build_case_dispute_posture(
-        self,
-        *,
-        evidence_sources: List[str],
-        main_points: List[str],
-        summary_text: str,
-    ) -> List[str]:
-        lowered_sources = [str(name or "").strip().lower() for name in evidence_sources]
-        combined_points = " ".join([summary_text] + [str(item or "") for item in main_points]).lower()
-        posture: List[str] = []
-
-        if any("notice" in name for name in lowered_sources) and any("response" in name for name in lowered_sources):
-            posture.append(
-                "Both sides have exchanged formal position documents, indicating an active pre-escalation dispute record rather than an early-stage complaint."
-            )
-        if any("kpi" in name or "dashboard" in name for name in lowered_sources):
-            posture.append(
-                "Operational performance evidence appears central, so SLA methodology and source-log integrity will likely determine breach credibility."
-            )
-        if any("invoice" in name or "reconciliation" in name for name in lowered_sources):
-            posture.append(
-                "Financial exposure is tied to invoice line-item reconciliation, surcharge cap compliance, and proof for challenged charges."
-            )
-        if any("settlement" in name for name in lowered_sources):
-            posture.append(
-                "A settlement channel is already active, suggesting a dual-track strategy can preserve leverage while avoiding premature hard escalation."
-            )
-        if any("transcript" in name or "call" in name for name in lowered_sources):
-            posture.append(
-                "Call records may contain admissions or commitments that can materially affect negotiation narrative and evidentiary posture."
-            )
-
-        if not posture and any(token in combined_points for token in ["breach", "dispute", "invoice", "sla"]):
-            posture.append(
-                "The matter appears to combine operational-performance allegations with monetary disputes, requiring synchronized legal and quantitative analysis."
-            )
-
-        return posture[:4]
-
     def _build_case_overall_overview(
         self,
         *,
@@ -5087,62 +4833,6 @@ Uploaded case document context:
             takeaways.append("Key disputes and risk signals are present but require additional processed evidence for sharper extraction.")
 
         return self._dedupe_ordered(takeaways)[:6]
-
-    def _build_case_executive_summary(
-        self,
-        *,
-        summary_text: str,
-        parties: List[str],
-        evidence_sources: List[str],
-        key_dates: List[Dict[str, str]],
-    ) -> str:
-        sentences: List[str] = []
-
-        base = self._normalize_text(summary_text).rstrip(".")
-        if base:
-            sentences.append(base)
-
-        normalized_parties = [self._normalize_text(item) for item in parties if self._normalize_text(item)]
-        if len(normalized_parties) >= 2:
-            sentences.append(
-                f"Primary counterparties are {normalized_parties[0]} and {normalized_parties[1]}, with obligations anchored in the service agreement framework"
-            )
-
-        lowered_sources = [str(name or "").strip().lower() for name in evidence_sources]
-        if any("master_service_agreement" in name or "service_agreement" in name or "msa" in name for name in lowered_sources):
-            if any("notice" in name for name in lowered_sources) and any("response" in name for name in lowered_sources):
-                sentences.append(
-                    "The record includes the contract baseline, formal breach notice, and counterparty response, creating a mature dispute file for strategy decisions"
-                )
-
-        actionable_date_bits: List[str] = []
-        fallback_date_bits: List[str] = []
-        for item in key_dates[:6]:
-            label = self._normalize_text(item.get("label"))
-            value = self._normalize_text(item.get("value"))
-            if not label or not value:
-                continue
-            entry = f"{label} ({value})"
-            lowered_label = label.lower()
-            if "effective date" in lowered_label:
-                fallback_date_bits.append(entry)
-                continue
-            if any(token in lowered_label for token in ["notice", "due", "deadline", "cure", "response", "hearing"]):
-                actionable_date_bits.append(entry)
-            else:
-                fallback_date_bits.append(entry)
-
-        date_bits = (actionable_date_bits + fallback_date_bits)[:4]
-        if date_bits:
-            sentences.append("Immediate timeline anchors include " + "; ".join(date_bits))
-
-        paragraph = ". ".join(item.strip(" .") for item in sentences if item.strip())
-        paragraph = re.sub(r"\s+", " ", paragraph).strip()
-        if paragraph and paragraph[-1] not in ".!?":
-            paragraph += "."
-        if len(paragraph) > 920:
-            paragraph = paragraph[:920].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
-        return paragraph or summary_text
 
     def _build_contextual_case_next_steps(
         self,
