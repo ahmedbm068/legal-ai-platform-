@@ -218,6 +218,73 @@ export interface CalendarAppointmentActionResponse {
   message: string;
   appointment: CalendarAppointment;
 }
+
+export type LegalCalendarEventType =
+  | "hearing"
+  | "deadline"
+  | "meeting"
+  | "task"
+  | "document_date"
+  | "limitation_period"
+  | "filing_deadline"
+  | "payment_due"
+  | "contract_date"
+  | "reminder"
+  | "other";
+
+export type LegalCalendarStatus = "scheduled" | "completed" | "cancelled" | "missed" | "tentative" | "rejected";
+export type LegalCalendarPriority = "low" | "medium" | "high" | "critical";
+
+export interface CalendarEvent {
+  id: number;
+  tenant_id: number;
+  case_id?: number | null;
+  client_id?: number | null;
+  lawyer_id?: number | null;
+  title: string;
+  description?: string | null;
+  event_type: LegalCalendarEventType | string;
+  status: LegalCalendarStatus | string;
+  priority: LegalCalendarPriority | string;
+  start_datetime: string;
+  end_datetime?: string | null;
+  all_day: boolean;
+  timezone: string;
+  location?: string | null;
+  source_type: "manual" | "document_extraction" | "ai_generated" | "task" | "external_sync" | string;
+  source_document_id?: number | null;
+  source_chunk_id?: number | null;
+  source_quote?: string | null;
+  extraction_confidence?: number | null;
+  requires_review: boolean;
+  reviewed_by?: number | null;
+  reviewed_at?: string | null;
+  created_by?: number | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at?: string | null;
+  case_title?: string | null;
+  client_name?: string | null;
+  document_filename?: string | null;
+  reminder_count: number;
+}
+
+export interface CalendarEventActionResponse {
+  message: string;
+  event: CalendarEvent;
+}
+
+export interface CalendarReminder {
+  id: number;
+  tenant_id: number;
+  event_id: number;
+  remind_at: string;
+  method: string;
+  status: string;
+  created_at: string;
+  event_title?: string | null;
+}
+
 export interface ConsultationRequest {
   id: number;
   case_id: number;
@@ -523,6 +590,58 @@ export interface CopilotResponse {
   vision_result?: VisionResult | null;
   saved_asset_ids?: number[];
   review_record_id?: number | null;
+  open_editor?: boolean;
+  draft_document?: DraftDocumentPayload | null;
+}
+
+export interface DraftDocumentPayload {
+  title: string;
+  document_type: string;
+  case_id?: number | null;
+  content_json?: Record<string, unknown>;
+  content_html: string;
+  content_text?: string;
+  citations?: CitationItem[];
+  source_context?: Record<string, unknown>;
+}
+
+export interface DraftDocument {
+  id: number;
+  tenant_id: number;
+  case_id: number | null;
+  created_by_user_id: number | null;
+  title: string;
+  document_type: string;
+  content_json: Record<string, unknown>;
+  content_html: string;
+  content_text: string;
+  status: "draft" | "review" | "final" | "sent" | "archived";
+  source_context_json: Record<string, unknown>;
+  citations_json: CitationItem[];
+  version: number;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface DraftDocumentVersion {
+  id: number;
+  draft_document_id: number;
+  version_number: number;
+  content_json: Record<string, unknown>;
+  content_html: string;
+  content_text: string;
+  created_by_user_id: number | null;
+  change_summary: string | null;
+  created_at: string;
+}
+
+export interface DraftDocumentAiEditResponse {
+  proposed_text: string;
+  explanation: string;
+  confidence: string;
+  citations_used: CitationItem[];
+  diff: Record<string, unknown>;
 }
 
 export interface CopilotFeedback {
@@ -686,6 +805,25 @@ export interface UploadedDocumentResponse {
   job?: BackgroundJobItem;
 }
 
+export interface AssistantUploadedFile {
+  id: string;
+  document_id?: number | null;
+  filename: string;
+  file_size: number;
+  mime_type: string;
+  processing_status: string;
+  extracted_text_status: "ready" | "pending" | "failed" | "unsupported";
+  case_id?: number | null;
+  temporary: boolean;
+  error?: string | null;
+}
+
+export interface AssistantUploadResponse {
+  uploaded_document_ids: string[];
+  files: AssistantUploadedFile[];
+  errors: AssistantUploadedFile[];
+}
+
 export interface UploadedVoiceRecordingResponse {
   recording: VoiceRecording;
   message: string;
@@ -724,6 +862,8 @@ export interface ChatMessage {
     visionResult?: VisionResult | null;
     savedAssetIds?: number[];
     reviewRecordId?: number | null;
+    openEditor?: boolean;
+    draftDocument?: DraftDocumentPayload | null;
     attachments?: Array<{
       clientId: string;
       name: string;

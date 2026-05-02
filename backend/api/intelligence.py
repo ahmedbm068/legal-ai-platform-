@@ -12,6 +12,7 @@ from backend.models.document import Document
 from backend.models.document_entity import DocumentEntity
 from backend.services.ai.pii_redaction_service import redact_pii
 from backend.services.ai.runtime_services import shared_document_pipeline
+from backend.services.legal_date_extraction_service import legal_date_extraction_service
 from backend.services.ai.summarization_service import summarization_service
 from backend.api.intelligence_schema import (
     ProcessDocumentResponse,
@@ -97,6 +98,7 @@ def process_document_intelligence(
         )
 
     db.refresh(document)
+    calendar_sync = legal_date_extraction_service.extract_events_from_document(db=db, document=document)
 
     entities = (
         db.query(DocumentEntity)
@@ -113,7 +115,8 @@ def process_document_intelligence(
         "entities": entities,
         "redacted_preview": (document.redacted_text or "")[:500],
         "status": document.processing_status,
-        "pii_items_count": len(pii_result["pii_items"])
+        "pii_items_count": len(pii_result["pii_items"]),
+        "calendar_sync": calendar_sync,
     }
 
 

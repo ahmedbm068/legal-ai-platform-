@@ -51,7 +51,7 @@ def _dispatch(*, job: BackgroundJob, payload: dict[str, Any], db: Session) -> di
         from backend.models.document import Document
         from backend.services.ai.case_snapshot_service import case_snapshot_service
         from backend.services.ai.runtime_services import shared_document_pipeline
-        from backend.services.document_calendar_sync_service import document_calendar_sync_service
+        from backend.services.legal_date_extraction_service import legal_date_extraction_service
 
         document_id = int(payload["document_id"])
         document = db.query(Document).filter(Document.id == document_id).first()
@@ -66,7 +66,7 @@ def _dispatch(*, job: BackgroundJob, payload: dict[str, Any], db: Session) -> di
         }
         if bool(result.get("success")) and str(document.processing_status or "") == "processed":
             try:
-                calendar_sync_result = document_calendar_sync_service.sync_document_key_dates(
+                calendar_sync_result = legal_date_extraction_service.extract_events_from_document(
                     db=db,
                     document=document,
                 )

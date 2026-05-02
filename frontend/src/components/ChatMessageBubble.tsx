@@ -20,6 +20,7 @@ interface ChatMessageBubbleProps {
   onRegenerate: (message: ChatMessage) => void;
   onFeedback: (message: ChatMessage, value: FeedbackValue, rootCause?: FeedbackRootCause | null) => void;
   onAskMissingInfo?: (message: ChatMessage, missingInfo: string) => void;
+  onEditInLegalEditor?: (message: ChatMessage) => void;
   onGenerateDocument?: (message: ChatMessage) => void;
   onTrustReview?: (message: ChatMessage, decision: "approved" | "needs_revision") => void;
 }
@@ -28,6 +29,12 @@ interface MessageSection {
   title: string;
   paragraphs: string[];
   bullets: string[];
+  tables: MessageTable[];
+}
+
+interface MessageTable {
+  headers: string[];
+  rows: string[][];
 }
 
 type TagKey = "highRisk" | "mediumRisk" | "deadline" | "contradiction" | "missingInfo" | "legalSource";
@@ -107,6 +114,7 @@ const BUBBLE_TEXT: Record<UiLanguage, Record<string, string>> = {
     confidence: "Confidence",
     basedOnSources: "Based on {count} sources",
     copy: "Copy",
+    edit: "Edit",
     regenerate: "Regenerate",
     saving: "Saving...",
     saved: "Saved",
@@ -335,6 +343,30 @@ const DOWNVOTE_REASON_OPTIONS: Array<{ value: FeedbackRootCause; labelKey: strin
 
 const KEYWORD_PATTERN = /\b(risk|deadline|urgent|liability|evidence|article|section|compliance|penalty)\b/gi;
 const KNOWN_BARE_SECTION_TITLES = new Set([
+  "case brief / summary",
+  "strict chronology",
+  "priority deadlines / action dates",
+  "full dated chronology",
+  "relative deadlines / time references",
+  "contradictions between medcare and bioserve positions",
+  "contradiction summary",
+  "follow-up questions",
+  "evidence strength for medcare",
+  "evidence strength assessment",
+  "assessment summary",
+  "strongest evidence",
+  "weakest / vulnerable evidence",
+  "next evidence to request",
+  "ranked legal risks",
+  "risk matrix",
+  "name of case & source record",
+  "type and level of case",
+  "main persons / roles",
+  "facts",
+  "issue(s)",
+  "current position / procedural posture",
+  "evidence / source materials",
+  "important dates / deadlines",
   "summary",
   "document inventory",
   "claim trace",
@@ -371,65 +403,120 @@ function formatMessageTime(value: string, language: UiLanguage): string {
 function parseSections(content: string, defaultTitle: string): MessageSection[] {
   const lines = content.split(/\r?\n/);
   const sections: MessageSection[] = [];
-  let current: MessageSection = { title: defaultTitle, paragraphs: [], bullets: [] };
+  let current: MessageSection = { title: defaultTitle, paragraphs: [], bullets: [], tables: [] };
 
   const isBareSectionTitle = (line: string): boolean => {
-    const normalized = line.trim().toLowerCase();
-    if (!normalized || normalized.length > 48) return false;
+    const normalized = line
+      .trim()
+      .replace(/^#{1,6}\s+/, "")
+      .replace(/^\*\*(.+?)\*\*$/, "$1")
+      .replace(/^\d+[\).]\s+/, "")
+      .toLowerCase();
+    if (!normalized || normalized.length > 72) return false;
     return KNOWN_BARE_SECTION_TITLES.has(normalized);
   };
 
-  for (const rawLine of lines) {
+  const hasContent = (section: MessageSection): boolean => (
+    section.paragraphs.length > 0 || section.bullets.length > 0 || section.tables.length > 0
+  );
+
+  const isTableRow = (value: string): boolean => /^\s*\|.+\|\s*$/.test(value);
+  const isTableSeparator = (value: string): boolean => {
+    const cells = value.trim().replace(/^\|/, "").replace(/\|$/, "").split("|");
+    return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+  };
+  const parseTableRow = (value: string): string[] => (
+    value.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim())
+  );
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const rawLine = lines[lineIndex];
     const line = rawLine.trim();
     if (!line) continue;
+    const displayLine = line
+      .replace(/^#{1,6}\s+/, "")
+      .replace(/^\*\*(.+?)\*\*$/, "$1")
+      .trim();
 
-    const bracketHeader = line.match(/^\[(.+?)\]$/);
-    const colonHeader = line.match(/^([A-Za-z][A-Za-z ]{2,32}):$/);
-    const inlineHeader = line.match(/^([A-Za-z][A-Za-z ]{2,32}):\s+(.+)$/);
-    const numberedKnownHeader = line.match(/^\d+[\).]\s+(.+)$/);
-    if (numberedKnownHeader && isBareSectionTitle(numberedKnownHeader[1])) {
-      if (current.paragraphs.length || current.bullets.length) {
+    const bracketHeader = displayLine.match(/^\[(.+?)\]$/);
+    const colonHeader = displayLine.match(/^([A-Za-z][A-Za-z &/()]{2,60}):$/);
+    const inlineHeader = displayLine.match(/^([A-Za-z][A-Za-z &/()]{2,60}):\s+(.+)$/);
+    const numberedKnownHeader = displayLine.match(/^\d+[\).]\s+(.+)$/);
+    const boldNumberedHeader = line.match(/^\*\*\d+[\).]\s+(.+?)\*\*$/);
+    const nextLine = lines[lineIndex + 1]?.trim() || "";
+    if (isTableRow(line) && isTableSeparator(nextLine)) {
+      const headers = parseTableRow(line);
+      const rows: string[][] = [];
+      lineIndex += 2;
+      while (lineIndex < lines.length && isTableRow(lines[lineIndex].trim())) {
+        const row = parseTableRow(lines[lineIndex]);
+        rows.push(headers.map((_, cellIndex) => row[cellIndex] || ""));
+        lineIndex += 1;
+      }
+      lineIndex -= 1;
+      current.tables.push({ headers, rows });
+      continue;
+    }
+
+    if (boldNumberedHeader) {
+      if (hasContent(current)) {
         sections.push(current);
       }
       current = {
-        title: numberedKnownHeader[1].trim(),
+        title: displayLine,
         paragraphs: [],
         bullets: [],
+        tables: [],
+      };
+      continue;
+    }
+    if (numberedKnownHeader && isBareSectionTitle(numberedKnownHeader[1])) {
+      if (hasContent(current)) {
+        sections.push(current);
+      }
+      current = {
+        title: displayLine.trim(),
+        paragraphs: [],
+        bullets: [],
+        tables: [],
       };
       continue;
     }
     if (bracketHeader || colonHeader) {
-      if (current.paragraphs.length || current.bullets.length) {
+      if (hasContent(current)) {
         sections.push(current);
       }
       current = {
         title: (bracketHeader?.[1] || colonHeader?.[1] || "Section").trim(),
         paragraphs: [],
         bullets: [],
+        tables: [],
       };
       continue;
     }
 
     if (inlineHeader) {
-      if (current.paragraphs.length || current.bullets.length) {
+      if (hasContent(current)) {
         sections.push(current);
       }
       current = {
         title: inlineHeader[1].trim(),
         paragraphs: [inlineHeader[2].trim()],
         bullets: [],
+        tables: [],
       };
       continue;
     }
 
     if (isBareSectionTitle(line)) {
-      if (current.paragraphs.length || current.bullets.length) {
+      if (hasContent(current)) {
         sections.push(current);
       }
       current = {
-        title: line,
+        title: displayLine,
         paragraphs: [],
         bullets: [],
+        tables: [],
       };
       continue;
     }
@@ -448,11 +535,11 @@ function parseSections(content: string, defaultTitle: string): MessageSection[] 
     current.paragraphs.push(line);
   }
 
-  if (current.paragraphs.length || current.bullets.length) {
+  if (hasContent(current)) {
     sections.push(current);
   }
 
-  return sections.length ? sections : [{ title: defaultTitle, paragraphs: [content.trim()], bullets: [] }];
+  return sections.length ? sections : [{ title: defaultTitle, paragraphs: [content.trim()], bullets: [], tables: [] }];
 }
 
 function extractTags(content: string): TagKey[] {
@@ -843,6 +930,20 @@ function toTitleCase(value: string): string {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
+function evidenceTableRowTone(row: string[]): "strong" | "medium" | "weak" | "neutral" {
+  const strength = String(row[0] || "").toLowerCase();
+  if (strength === "high" || strength.includes("high vulnerability") || strength.includes("weak")) {
+    return "weak";
+  }
+  if (strength.includes("medium")) {
+    return "medium";
+  }
+  if (strength === "low" || strength.includes("strong")) {
+    return "strong";
+  }
+  return "neutral";
+}
+
 function verificationSeverity(value: string): "low" | "medium" | "high" {
   const token = String(value || "").trim().toLowerCase();
   if (token === "verified") return "low";
@@ -851,7 +952,7 @@ function verificationSeverity(value: string): "low" | "medium" | "high" {
 }
 
 function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
-  const { language, message, feedback, onCopy, onRegenerate, onFeedback, onAskMissingInfo, onGenerateDocument, onTrustReview } = props;
+  const { language, message, feedback, onCopy, onRegenerate, onFeedback, onAskMissingInfo, onEditInLegalEditor, onGenerateDocument, onTrustReview } = props;
   const [showDownvoteReasonSelector, setShowDownvoteReasonSelector] = useState(false);
   const copy = BUBBLE_TEXT[language] || BUBBLE_TEXT.en;
   const tb = (key: string, fallback: string) => copy[key] || BUBBLE_TEXT.en[key] || fallback;
@@ -864,6 +965,20 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
   const citationCount = safeCitations.length;
   const confidence = message.meta?.confidence;
   const trustPanel = useMemo(() => extractLegalTrustPanelData(message), [message]);
+  const trustState = sourceCount > 0 || citationCount > 0
+    ? trustPanel?.verificationStatus === "verified"
+      ? "Grounded"
+      : "Partial"
+    : "Not grounded";
+  const answerType = message.meta?.permissionDenied
+    ? "Action blocked"
+    : message.meta?.actionCategory === "document_generation"
+      ? "Draft"
+      : sourceCount > 0 || citationCount > 0
+        ? "Case-grounded"
+        : "General legal info";
+  const jurisdictionLabel = String(message.meta?.jurisdiction?.country_display_name || message.meta?.jurisdiction?.country_code || "Not confirmed");
+  const missingEvidenceCount = (trustPanel?.missingInformation.length || 0) + (trustPanel?.unsupportedClaims.length || 0);
   const reasoningResult = message.meta?.reasoningResult;
   const rankedCandidates = Array.isArray(reasoningResult?.candidates) ? reasoningResult.candidates : [];
   const secondBestCandidate = rankedCandidates.find((candidate) => Number(candidate?.rank) === 2) || null;
@@ -904,7 +1019,8 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
         </div>
         {message.role === "assistant" ? (
           <header className="assistant-meta">
-            <span className="assistant-meta-badge ai">{tb("aiInsight", "AI Insight")}</span>
+            <span className="assistant-meta-badge ai">{answerType}</span>
+            <span className={`assistant-meta-badge trust-${trustState.toLowerCase().replace(/\s+/g, "-")}`}>{trustState}</span>
             {confidence ? <span className="assistant-meta-badge">{tb("confidence", "Confidence")}: {confidence}</span> : null}
             {sourceCount > 0 ? <span className="assistant-meta-badge">{tb("basedOnSources", "Based on {count} sources").replace("{count}", String(sourceCount))}</span> : null}
             {citationCount > 0 ? <span className="assistant-meta-badge">Citations: {citationCount}</span> : null}
@@ -917,6 +1033,37 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
           </header>
         ) : null}
 
+        {message.role === "assistant" ? (
+          <div className="legal-quality-strip" aria-label="Legal answer quality">
+            <span><strong>{sourceCount}</strong> sources</span>
+            <span><strong>{jurisdictionLabel}</strong> jurisdiction</span>
+            <span><strong>{String(confidence || "medium")}</strong> confidence</span>
+            <span><strong>{missingEvidenceCount}</strong> missing evidence</span>
+            <span><strong>Required</strong> human review</span>
+          </div>
+        ) : null}
+
+        {message.role === "assistant" && sourceCount === 0 && citationCount === 0 ? (
+          <div className="assistant-grounding-warning">
+            This answer is not grounded in uploaded case documents. Lawyer review required before legal reliance.
+          </div>
+        ) : message.role === "assistant" ? (
+          <div className="assistant-grounding-warning grounded">
+            Lawyer review required before relying on this output.
+          </div>
+        ) : null}
+
+        {message.meta?.attachments?.length ? (
+          <div className="message-attachment-chips" aria-label="Attached files">
+            {message.meta.attachments.map((attachment) => (
+              <span key={attachment.clientId || attachment.name}>
+                <strong>{attachment.name}</strong>
+                <em>{attachment.mimeType}</em>
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         <div className="assistant-sections">
           {sections.map((section, index) => (
             <section key={`${section.title}-${index}`} className="assistant-section">
@@ -926,6 +1073,36 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
                 <p key={`${section.title}-p-${paragraphIndex}`}>
                   {renderHighlightedWithLinks(paragraph, `${section.title}-p-${paragraphIndex}`)}
                 </p>
+              ))}
+
+              {section.tables.map((table, tableIndex) => (
+                <div className="assistant-table-wrap" key={`${section.title}-t-${tableIndex}`}>
+                  <table className="assistant-table">
+                    <thead>
+                      <tr>
+                        {table.headers.map((header, headerIndex) => (
+                          <th key={`${section.title}-t-${tableIndex}-h-${headerIndex}`}>
+                            {renderHighlightedWithLinks(header, `${section.title}-t-${tableIndex}-h-${headerIndex}`)}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {table.rows.map((row, rowIndex) => (
+                        <tr
+                          key={`${section.title}-t-${tableIndex}-r-${rowIndex}`}
+                          className={`assistant-table-row-${evidenceTableRowTone(row)}`}
+                        >
+                          {table.headers.map((_, cellIndex) => (
+                            <td key={`${section.title}-t-${tableIndex}-r-${rowIndex}-c-${cellIndex}`}>
+                              {renderHighlightedWithLinks(row[cellIndex] || "", `${section.title}-t-${tableIndex}-r-${rowIndex}-c-${cellIndex}`)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               ))}
 
               {section.bullets.length ? (
@@ -1164,34 +1341,32 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
         ) : null}
 
         {canShowActions && safeCitations.length ? (
-          <div className="assistant-sections">
-            <section className="assistant-section">
-              <h4>Citations</h4>
-              <ul className="citation-list">
-                {safeCitations.slice(0, 5).map((citation, citationIndex) => {
-                  const label = String(citation?.label || `Source ${citationIndex + 1}`);
-                  const snippet = String(citation?.snippet || "");
-                  const url = typeof citation?.url === "string" ? citation.url : null;
-                  return (
-                    <li key={`${label}-${citationIndex}`} className="citation-item">
-                      <strong>{label}</strong>
-                      <span>{renderLinkifiedText(` ${snippet}`, `${label}-snippet`)}</span>
-                      {(url || extractFirstUrl(snippet)) ? (
-                        <a
-                          className="citation-source-link"
-                          href={(url || extractFirstUrl(snippet)) || ""}
-                          target="_blank"
-                          rel="noreferrer noopener"
-                        >
-                          Open source
-                        </a>
-                      ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          </div>
+          <details className="citation-disclosure">
+            <summary>View sources ({Math.min(safeCitations.length, 5)})</summary>
+            <ul className="citation-list">
+              {safeCitations.slice(0, 5).map((citation, citationIndex) => {
+                const label = String(citation?.label || `Source ${citationIndex + 1}`);
+                const snippet = String(citation?.snippet || "");
+                const url = typeof citation?.url === "string" ? citation.url : null;
+                return (
+                  <li key={`${label}-${citationIndex}`} className="citation-item">
+                    <strong>{label}</strong>
+                    <span>{renderLinkifiedText(` ${snippet}`, `${label}-snippet`)}</span>
+                    {(url || extractFirstUrl(snippet)) ? (
+                      <a
+                        className="citation-source-link"
+                        href={(url || extractFirstUrl(snippet)) || ""}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        Open source
+                      </a>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
         ) : null}
 
         {canShowActions ? (
@@ -1200,6 +1375,11 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
               <button type="button" onClick={() => onCopy(message)}>
                 {tb("copy", "Copy")}
               </button>
+              {onEditInLegalEditor ? (
+                <button type="button" onClick={() => onEditInLegalEditor(message)}>
+                  {tb("edit", "Edit")}
+                </button>
+              ) : null}
               <button type="button" onClick={() => onRegenerate(message)}>
                 {tb("regenerate", "Regenerate")}
               </button>

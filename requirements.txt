@@ -26,6 +26,8 @@ python-jose==3.5.0
 python-multipart==0.0.20
 rsa==4.9.1
 requests==2.32.3
+joblib==1.5.2
+scikit-learn==1.8.0
 sentence-transformers==5.1.1
 six==1.17.0
 SQLAlchemy==2.0.48

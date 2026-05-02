@@ -1,0 +1,31 @@
+case_summary,label
+"Fully signed contract invoice matches purchase order payment delay is minor and counterparty confirms willingness to pay.",low
+"Routine lease renewal with complete identity documents no dispute over rent and deadline is two weeks away.",low
+"Client requests document review before signing no breach alleged no urgent court deadline and evidence is complete.",low
+"Paid invoice reconciliation shows small accounting mismatch and both parties agree to correct the statement.",low
+"Simple consultation about standard employment contract clauses with no active conflict or missed deadline.",low
+"Settlement draft has agreed amount and only formatting comments remain before signature.",low
+"Court judgment is favorable payment schedule is documented and enforcement deadline is not urgent.",low
+"Compliance memo identifies no violation and recommends ordinary record keeping.",low
+"Supplier delivered late but buyer still negotiates and damages evidence is partial.",medium
+"Lease dispute includes unpaid rent and repair complaints but tenant is still communicating.",medium
+"Formal notice deadline expires next week and proof of delivery exists but damages are not fully quantified.",medium
+"Contract has ambiguous termination language and counterparty response partially denies breach.",medium
+"Invoice dispute has conflicting amounts between invoice and reconciliation sheet but payment history exists.",medium
+"Client missed one procedural reminder but court filing deadline can still be met.",medium
+"Employment matter includes possible unfair dismissal claim with incomplete witness evidence.",medium
+"Settlement talks are active but counterparty proposes a much lower payment than claimed losses.",medium
+"Counterparty denies liability multiple deadlines are expired and core delivery evidence is missing.",high
+"Court filing deadline passed yesterday and client has not preserved key documents.",high
+"Large unpaid invoice has no signed acceptance and counterparty alleges fraud.",high
+"Lease termination involves eviction risk unpaid rent property damage and urgent hearing date.",high
+"Complaint seeks major damages and internal documents contradict the client's version of events.",high
+"Confidential data disclosure occurred and there is no incident record or notification plan.",high
+"Settlement collapsed after threats of litigation and limitation period expires this week.",high
+"Judgment enforcement is urgent because debtor is transferring assets and payment remains unpaid.",high
+"Client wants to rely on an unsigned contract while witnesses disagree on the main obligation.",high
+"Regulatory notice threatens penalty and the response deadline is tomorrow with missing records.",high
+"Dispute has moderate damages complete contract and a deadline in ten days.",medium
+"Consultation concerns notarized identity documents and routine company registration.",low
+"Contradictory payment receipts and emails create serious uncertainty about who performed first.",high
+"Minor contract amendment request with clear parties and no dispute.",low

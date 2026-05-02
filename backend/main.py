@@ -10,11 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.api import auth, cases, clients, users
+from backend.api.assistant import router as assistant_router
 from backend.api.appointments import router as appointments_router
+from backend.api.calendar_events import router as legal_calendar_router
 from backend.api.calls import router as calls_router
 from backend.api.client_portal import router as client_portal_router
 from backend.api.consultations import router as consultations_router
 from backend.api.document_router import router as document_router
+from backend.api.draft_documents import router as draft_documents_router
 from backend.api.evidence_reviews import router as evidence_reviews_router
 from backend.api.integrations import router as integrations_router
 from backend.api.intelligence import router as intelligence_router
@@ -31,6 +34,11 @@ from backend.models.case import Case
 from backend.models.appointment import Appointment
 from backend.models.ai_response_audit_log import AIResponseAuditLog
 from backend.models.call_session import CallSession
+from backend.models.calendar_event import CalendarEvent
+from backend.models.calendar_event_attendee import CalendarEventAttendee
+from backend.models.calendar_event_source import CalendarEventSource
+from backend.models.calendar_reminder import CalendarReminder
+from backend.models.calendar_sync_provider import CalendarSyncProvider
 from backend.models.case_context_snapshot import CaseContextSnapshot
 from backend.models.case_image_asset import CaseImageAsset
 from backend.models.case_memory_entry import CaseMemoryEntry
@@ -42,6 +50,8 @@ from backend.models.copilot_feedback import CopilotFeedback
 from backend.models.document import Document
 from backend.models.document_chunk import DocumentChunk
 from backend.models.document_entity import DocumentEntity
+from backend.models.draft_document import DraftDocument
+from backend.models.draft_document_version import DraftDocumentVersion
 from backend.models.evidence_analysis_review import EvidenceAnalysisReview
 from backend.models.generated_artifact_version import GeneratedArtifactVersion
 from backend.models.image_document_batch import ImageDocumentBatch
@@ -82,12 +92,15 @@ app.include_router(users.router)
 app.include_router(clients.router)
 app.include_router(cases.router)
 app.include_router(appointments_router)
+app.include_router(legal_calendar_router)
 app.include_router(calls_router)
 app.include_router(consultations_router)
 app.include_router(integrations_router)
 app.include_router(public_router)
 app.include_router(prompt_library_router)
 app.include_router(document_router)
+app.include_router(draft_documents_router)
+app.include_router(assistant_router)
 app.include_router(evidence_reviews_router)
 app.include_router(rag_router)
 app.include_router(intelligence_router)
@@ -166,3 +179,19 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+import logging
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+logging.getLogger("copilot.graph").setLevel(logging.DEBUG)
+logging.getLogger("copilot.retrieval").setLevel(logging.DEBUG)
+logging.getLogger("copilot.drafting").setLevel(logging.DEBUG)
+logging.getLogger("copilot.legal_search").setLevel(logging.DEBUG)
+logging.getLogger("copilot.response").setLevel(logging.DEBUG)
+logging.getLogger("copilot").setLevel(logging.DEBUG)
+logging.getLogger("backend.services.ai.copilot_service").setLevel(logging.DEBUG)

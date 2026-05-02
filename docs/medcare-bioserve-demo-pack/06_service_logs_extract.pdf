@@ -1,0 +1,81 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 1526 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(SERVICE LOGS EXTRACT) Tj
+0 -12 Td
+(Source: BioServe shared portal and MedCare facility records) Tj
+0 -12 Td
+(Period: February 1 to March 27, 2026) Tj
+0 -12 Td
+(February Preventive Maintenance) Tj
+0 -12 Td
+(- Tunis CT unit: completed February 8, signed by site manager) Tj
+0 -12 Td
+(- Sousse ultrasound unit: completed February 14, signed by biomedical lead) Tj
+0 -12 Td
+(- Ariana MRI unit: no signed preventive maintenance sheet located) Tj
+0 -12 Td
+(- Remote telemetry note for Ariana MRI: February 26, status marked incomplete) Tj
+0 -12 Td
+(March Events) Tj
+0 -12 Td
+(- March 17, 07:52: Ariana MRI warning C-417 generated) Tj
+0 -12 Td
+(- March 19, 18:12: Second C-417 warning generated) Tj
+0 -12 Td
+(- March 21, 08:28: MedCare ticket opened) Tj
+0 -12 Td
+(- March 21, 09:10: BioServe ticket accepted) Tj
+0 -12 Td
+(- March 21, 14:30: BioServe technician onsite) Tj
+0 -12 Td
+(- March 21, 17:40: Limited operation restored) Tj
+0 -12 Td
+(- March 24, 16:05: Calibration stability test failed once, then passed) Tj
+0 -12 Td
+(Log Integrity Concerns) Tj
+0 -12 Td
+(The portal export does not contain a technician signature for the February) Tj
+0 -12 Td
+(Ariana entry. Two March warning events were automatically closed by remote) Tj
+0 -12 Td
+(monitoring without MedCare confirmation.) Tj
+0 -12 Td
+(Potentially Helpful Evidence) Tj
+0 -12 Td
+(The system event timestamps are machine-generated. They may be stronger evidence) Tj
+0 -12 Td
+(than later email narratives if authenticity is preserved.) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1888
+%%EOF

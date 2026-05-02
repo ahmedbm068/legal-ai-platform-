@@ -13,6 +13,7 @@ type EditorSection = {
     id: string;
     title: string;
     body: string;
+    html?: string;
     trust: SectionTrust;
     sources: string[];
     citations?: SectionCitation[];
@@ -62,6 +63,8 @@ type EditorVersion = {
         missing: number;
     };
 };
+
+type SmartPanelTab = "trust" | "sources" | "review" | "assistant";
 
 const DOCUMENT_TYPES: Array<{ id: EditorDocumentType; label: string; description: string }> = [
     {
@@ -124,6 +127,37 @@ function joinLines(lines: Array<string | null | undefined>) {
     return lines.map((line) => String(line || "").trim()).filter(Boolean).join("\n");
 }
 
+function escapeHtml(value: string) {
+    return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function plainTextToEditorHtml(value: string) {
+    const blocks = value.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+    if (!blocks.length) return "<p><br></p>";
+    return blocks.map((block) => {
+        const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+        if (lines.length > 1 && lines.every((line) => /^([-*]|\d+\.)\s+/.test(line))) {
+            const ordered = lines.every((line) => /^\d+\.\s+/.test(line));
+            const items = lines.map((line) => `<li>${escapeHtml(line.replace(/^([-*]|\d+\.)\s+/, ""))}</li>`).join("");
+            return ordered ? `<ol>${items}</ol>` : `<ul>${items}</ul>`;
+        }
+        const escaped = escapeHtml(lines.join(" ")).replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+        if (/^[A-Z][A-Z0-9\s/&-]{5,}$/.test(lines[0] || "")) return `<h2>${escaped}</h2>`;
+        return `<p>${escaped}</p>`;
+    }).join("");
+}
+
+function htmlToPlainText(value: string) {
+    if (typeof document === "undefined") return value.replace(/<[^>]+>/g, " ");
+    const element = document.createElement("div");
+    element.innerHTML = value;
+    return (element.innerText || element.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function sourceLabelFromSeed(source: SourceItem) {
     return [
         source.filename,
@@ -174,7 +208,7 @@ function collaborationStorageKey(caseId: number) {
 
 function wordCountFromSections(sections: EditorSection[]) {
     return sections.reduce((total, section) => {
-        const words = section.body.trim().split(/\s+/).filter(Boolean).length;
+        const words = (section.body || htmlToPlainText(section.html || "")).trim().split(/\s+/).filter(Boolean).length;
         return total + words;
     }, 0);
 }
@@ -202,6 +236,30 @@ function shareModeLabel(value: ShareMode) {
     if (value === "client_review") return "Client review";
     if (value === "internal_review") return "Internal review";
     return "Private draft";
+}
+
+function sourceKind(value: string) {
+    const normalized = value.toLowerCase();
+    if (normalized.includes("voice")) return "audio";
+    if (normalized.includes("intake")) return "intake";
+    return "pdf";
+}
+
+function sourceRelevance(value: string) {
+    const normalized = value.toLowerCase();
+    if (normalized.includes("document")) return "Evidence";
+    if (normalized.includes("voice")) return "Transcript";
+    if (normalized.includes("intake")) return "Client intake";
+    return "Matter record";
+}
+
+function TrustBadge({ trust, score }: { trust: SectionTrust; score: number }) {
+    return (
+        <span className={`trust-badge ${trust}`} title="Grounding score based on citations, sources, and review state.">
+            <span aria-hidden="true">{trust === "grounded" ? "OK" : trust === "review" ? "RV" : "ME"}</span>
+            {trustLabel(trust)} | {score}%
+        </span>
+    );
 }
 
 export default function LegalEditorPage() {
@@ -243,6 +301,10 @@ export default function LegalEditorPage() {
     const [commentDraft, setCommentDraft] = useState("");
     const [comments, setComments] = useState<EditorComment[]>([]);
     const [notice, setNotice] = useState<string | null>(null);
+    const [smartPanelTab, setSmartPanelTab] = useState<SmartPanelTab>("trust");
+    const [smartPanelOpen, setSmartPanelOpen] = useState(true);
+    const [exportMenuOpen, setExportMenuOpen] = useState(false);
+    const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
 
     useEffect(() => {
         if (routeCaseId && routeCaseId !== selectedCaseId) {
@@ -430,16 +492,28 @@ export default function LegalEditorPage() {
         ]);
     }
 
-    function captureTextSelection(section: EditorSection, element: HTMLTextAreaElement) {
-        const start = element.selectionStart;
-        const end = element.selectionEnd;
-        const text = element.value.slice(start, end);
+    function sectionHtml(section: EditorSection) {
+        return section.html || plainTextToEditorHtml(section.body);
+    }
+
+    function captureEditableSelection(section: EditorSection, element: HTMLElement) {
+        const selection = window.getSelection();
+        const text = selection?.toString() || "";
         setSelectedSectionId(section.id);
-        if (end > start && text.trim()) {
-            setTextSelection({ sectionId: section.id, start, end, text });
+        if (selection?.rangeCount && text.trim() && element.contains(selection.anchorNode) && element.contains(selection.focusNode)) {
+            const body = element.innerText || section.body;
+            const start = body.indexOf(text);
+            setTextSelection({ sectionId: section.id, start: Math.max(0, start), end: Math.max(0, start) + text.length, text });
             return;
         }
         setTextSelection((current) => current?.sectionId === section.id ? null : current);
+    }
+
+    function syncEditableSection(sectionId: string, element: HTMLElement) {
+        const body = (element.innerText || element.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+        const html = element.innerHTML.trim();
+        setSections((current) => current.map((section) => section.id === sectionId ? { ...section, body, html } : section));
+        setActiveVersionId(null);
     }
 
     function getVersionStats(version: EditorVersion) {
@@ -628,6 +702,7 @@ export default function LegalEditorPage() {
                 id: makeId("section"),
                 title: "Assistant-generated analysis",
                 body: answer || "No assistant answer was attached. Generate a case draft, then revise this section with the case assistant.",
+                html: plainTextToEditorHtml(answer || "No assistant answer was attached. Generate a case draft, then revise this section with the case assistant."),
                 trust: hasGrounding ? "grounded" : "missing",
                 sources: sourceFallback,
                 citations: assistantCitations,
@@ -676,7 +751,12 @@ export default function LegalEditorPage() {
     }
 
     function updateSection(sectionId: string, body: string) {
-        setSections((current) => current.map((section) => section.id === sectionId ? { ...section, body } : section));
+        setSections((current) => current.map((section) => section.id === sectionId ? { ...section, body, html: plainTextToEditorHtml(body) } : section));
+        setActiveVersionId(null);
+    }
+
+    function updateSectionTitle(sectionId: string, title: string) {
+        setSections((current) => current.map((section) => section.id === sectionId ? { ...section, title: title.trim() || section.title } : section));
         setActiveVersionId(null);
     }
 
@@ -764,6 +844,26 @@ export default function LegalEditorPage() {
         const target = activeTextSelection;
         setSuggestionTarget(target);
         setSuggestion(buildSuggestedRewrite(target?.text || selectedSection.body, selectedCitations));
+        setSmartPanelOpen(true);
+        setSmartPanelTab("assistant");
+    }
+
+    function suggestSectionRevision(section: EditorSection) {
+        setSelectedSectionId(section.id);
+        setSuggestionTarget(null);
+        setSuggestion(buildSuggestedRewrite(section.body, getSectionCitations(section)));
+        setSmartPanelOpen(true);
+        setSmartPanelTab("assistant");
+    }
+
+    function scrollToSection(sectionId: string) {
+        setSelectedSectionId(sectionId);
+        window.requestAnimationFrame(() => {
+            document.getElementById(`editor-section-${sectionId}`)?.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+            });
+        });
     }
 
     function acceptSuggestion() {
@@ -791,6 +891,69 @@ export default function LegalEditorPage() {
         setNotice(t("suggestionAccepted", "Suggested edit accepted."));
     }
 
+    function execEditorCommand(command: string, value?: string) {
+        document.execCommand(command, false, value);
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLElement) {
+            const editable = activeElement.closest<HTMLElement>("[data-editor-section-id]");
+            const sectionId = editable?.dataset.editorSectionId;
+            if (editable && sectionId) syncEditableSection(sectionId, editable);
+        }
+    }
+
+    function polishText(value: string, mode: "enhance" | "concise" | "client") {
+        const clean = value.replace(/\s+/g, " ").trim();
+        if (!clean) return clean;
+        if (mode === "concise") {
+            return clean
+                .replace(/\bcurrently\b/gi, "")
+                .replace(/\bin order to\b/gi, "to")
+                .replace(/\bat this stage\b/gi, "now")
+                .replace(/\s+/g, " ")
+                .trim();
+        }
+        if (mode === "client") {
+            return clean
+                .replace(/\bshall\b/gi, "will")
+                .replace(/\bherein\b/gi, "in this document")
+                .replace(/\bnotwithstanding\b/gi, "despite")
+                .replace(/\s+/g, " ")
+                .trim();
+        }
+        const sentence = clean.endsWith(".") || clean.endsWith("?") || clean.endsWith("!") ? clean : `${clean}.`;
+        return sentence
+            .replace(/\bwe think\b/gi, "the current record indicates")
+            .replace(/\bmaybe\b/gi, "may")
+            .replace(/\bkind of\b/gi, "")
+            .replace(/\s+/g, " ")
+            .trim();
+    }
+
+    function applyAiPolish(mode: "enhance" | "concise" | "client") {
+        if (!selectedSection) return;
+        const selection = window.getSelection();
+        const selectedText = selection?.toString().trim() || "";
+        const editable = selection?.anchorNode instanceof Node
+            ? (selection.anchorNode.nodeType === Node.ELEMENT_NODE ? selection.anchorNode as HTMLElement : selection.anchorNode.parentElement)?.closest<HTMLElement>("[data-editor-section-id]")
+            : null;
+        const sectionId = editable?.dataset.editorSectionId;
+
+        if (selection?.rangeCount && selectedText && editable && sectionId === selectedSection.id) {
+            const replacement = polishText(selectedText, mode);
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(document.createTextNode(replacement));
+            selection.removeAllRanges();
+            syncEditableSection(selectedSection.id, editable);
+            setNotice(mode === "concise" ? "Selected text tightened." : mode === "client" ? "Selected text rewritten for client readability." : "Selected text enhanced.");
+            return;
+        }
+
+        const currentText = selectedSection.body || htmlToPlainText(selectedSection.html || "");
+        updateSection(selectedSection.id, polishText(currentText, mode));
+        setNotice(mode === "concise" ? "Active section tightened." : mode === "client" ? "Active section rewritten for client readability." : "Active section enhanced.");
+    }
+
     async function copyDocument() {
         const text = renderPlainDocument();
         await navigator.clipboard.writeText(text);
@@ -806,7 +969,7 @@ export default function LegalEditorPage() {
             "",
             ...sections.flatMap((section, index) => [
                 `${index + 1}. ${section.title}`,
-                section.body,
+                section.body || htmlToPlainText(section.html || ""),
                 getSectionCitations(section).length
                     ? `Citations: ${getSectionCitations(section).map((citation, citationIndex) => `[${citationIndex + 1}] ${citation.label}`).join("; ")}`
                     : "Citations: Missing evidence",
@@ -876,7 +1039,7 @@ export default function LegalEditorPage() {
                 })
             );
 
-            section.body.split(/\n+/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+            (section.body || htmlToPlainText(section.html || "")).split(/\n+/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
                 children.push(new Paragraph({
                     children: [new TextRun(line)],
                     spacing: { after: 120 },
@@ -941,18 +1104,33 @@ export default function LegalEditorPage() {
     }, [activeCase?.id]);
 
     return (
-        <section className="shell-page legal-editor-page">
-            <header className="shell-page-header legal-editor-header">
+        <section className={`shell-page legal-editor-page ${smartPanelOpen ? "" : "smart-collapsed"}`}>
+            <header className="legal-editor-topbar">
                 <div>
                     <p className="shell-page-kicker">{t("legalEditorKicker", "Legal Editor")}</p>
-                    <h2>{t("legalEditorTitle", "Case-to-document drafting workspace")}</h2>
-                    <p>{t("legalEditorSubtitle", "Generate, edit, verify, version, and export legal documents without leaving the case workspace.")}</p>
+                    <h2>{t("legalEditorTitle", "Document editor")}</h2>
+                    <p>{t("legalEditorSubtitle", "Edit the draft on a document page, format text, polish selected wording with AI, and export when ready.")}</p>
                 </div>
-                <div className="editor-header-actions">
+                <div className="editor-header-actions editor-toolbar">
                     <button onClick={() => generateDraft()} type="button">{t("generateDraft", "Generate draft")}</button>
                     <button disabled={!sections.length} onClick={() => saveVersion()} type="button">{t("saveVersion", "Save version")}</button>
                     <button disabled={!sections.length} onClick={copyDocument} type="button">{t("copyDocument", "Copy")}</button>
-                    <button disabled={!sections.length} onClick={() => { void exportDocx(); }} type="button">{t("exportDocx", "Export DOCX")}</button>
+                    <div className="editor-export-menu">
+                        <button disabled={!sections.length} onClick={() => setExportMenuOpen((current) => !current)} type="button">
+                            {t("export", "Export")}
+                        </button>
+                        {exportMenuOpen ? (
+                            <div className="editor-export-popover">
+                                <button onClick={() => { setExportPreviewOpen(true); setExportMenuOpen(false); }} type="button">Preview export</button>
+                                <button onClick={() => { setExportMenuOpen(false); void exportDocx(); }} type="button">Export DOCX</button>
+                                <button disabled type="button">Export PDF soon</button>
+                                <button onClick={() => { setExportMenuOpen(false); void copyDocument(); }} type="button">Copy formatted text</button>
+                            </div>
+                        ) : null}
+                    </div>
+                    <button className="editor-panel-toggle" onClick={() => setSmartPanelOpen((current) => !current)} type="button">
+                        {smartPanelOpen ? "Hide panel" : "Show panel"}
+                    </button>
                 </div>
             </header>
 
@@ -964,10 +1142,10 @@ export default function LegalEditorPage() {
                 </article>
             ) : (
                 <div className="legal-editor-grid">
-                    <aside className="editor-sidebar">
-                        <article className="shell-card">
-                            <h3>{t("draftSetup", "Draft setup")}</h3>
-                            <label className="editor-field">
+                    <aside className="editor-sidebar editor-left-rail">
+                        <article className="shell-card editor-rail-card">
+                            <p className="shell-page-kicker">Document setup</p>
+                            <label className="editor-field editor-doc-type">
                                 <span>{t("documentType", "Document type")}</span>
                                 <select
                                     value={documentType}
@@ -990,25 +1168,64 @@ export default function LegalEditorPage() {
                             </div>
                         </article>
 
-                        <article className="shell-card">
-                            <h3>{t("trustCoverage", "Trust coverage")}</h3>
-                            <div className="editor-trust-grid">
-                                <span><strong>{editorStats.groundedSections}</strong>{t("grounded", "grounded")}</span>
-                                <span><strong>{editorStats.reviewSections}</strong>{t("needsReview", "review")}</span>
-                                <span><strong>{editorStats.missingSections}</strong>{t("missingEvidence", "missing")}</span>
-                                <span><strong>{editorStats.sourceCount}</strong>{t("sources", "sources")}</span>
-                                <span><strong>{editorStats.citationCount}</strong>{t("citations", "citations")}</span>
-                                <span><strong>{reviewStats.approved}</strong>{t("approved", "approved")}</span>
-                            </div>
+                        <article className="shell-card editor-rail-card">
+                            <p className="shell-page-kicker">Sections</p>
+                            <h3>Document navigator</h3>
+                            <nav className="editor-section-nav" aria-label="Document sections">
+                                {sections.map((section, index) => {
+                                    const decision = reviewDecisions[section.id] || "pending";
+                                    return (
+                                        <button
+                                            className={selectedSection?.id === section.id ? "active" : ""}
+                                            key={section.id}
+                                            onClick={() => scrollToSection(section.id)}
+                                            type="button"
+                                        >
+                                            <span>{index + 1}</span>
+                                            <strong>{section.title}</strong>
+                                            <em className={`nav-trust-dot ${section.trust}`}>{trustLabel(section.trust)}</em>
+                                            <small>{reviewDecisionLabel(decision)}</small>
+                                        </button>
+                                    );
+                                })}
+                            </nav>
                         </article>
 
-                        <article className="shell-card">
-                            <h3>{t("sourceBinder", "Source binder")}</h3>
-                            <ul className="editor-source-list">
-                                {evidenceSources.length ? evidenceSources.map((source) => (
-                                    <li key={source}>{source}</li>
+                        <article className="shell-card editor-rail-card">
+                            <p className="shell-page-kicker">Versions</p>
+                            <div className="version-current-card">
+                                <div>
+                                    <strong>{hasUnsavedVersionChanges ? t("unsavedDraft", "Unsaved draft") : t("savedDraft", "Saved draft")}</strong>
+                                    <span>{currentVersionStats.words} words | {currentVersionStats.citations} citations</span>
+                                </div>
+                                <em>{versions.length} saved</em>
+                            </div>
+                            <label className="editor-field version-name-field">
+                                <span>{t("versionName", "Version name")}</span>
+                                <input
+                                    value={versionLabel}
+                                    onChange={(event) => setVersionLabel(event.target.value)}
+                                    placeholder={t("versionNamePlaceholder", "Evidence review snapshot")}
+                                />
+                            </label>
+                            <button className="version-save-button" disabled={!sections.length} onClick={() => saveVersion()} type="button">
+                                {hasUnsavedVersionChanges ? t("saveCurrentVersion", "Save current version") : t("saveAnotherVersion", "Save another version")}
+                            </button>
+                            <ul className="editor-version-list editor-version-timeline">
+                                {versions.length ? versions.map((version) => (
+                                    <li className={activeVersionId === version.id ? "active" : ""} key={version.id}>
+                                        <div className="version-row-main">
+                                            <strong>{version.label}</strong>
+                                            <span>{formatDate(version.createdAt, locale, "No date")}</span>
+                                            <small>{getVersionStats(version).words} words | {changedSectionCount(version)} changed</small>
+                                        </div>
+                                        <div className="version-row-actions">
+                                            <button onClick={() => restoreVersion(version)} type="button">{t("restore", "Restore")}</button>
+                                            <button onClick={() => deleteVersion(version.id)} type="button">{t("delete", "Delete")}</button>
+                                        </div>
+                                    </li>
                                 )) : (
-                                    <li>{t("noSourcesYet", "No sources yet. Upload documents or intake notes to strengthen drafts.")}</li>
+                                    <li>{t("noVersionsYet", "No versions saved yet.")}</li>
                                 )}
                             </ul>
                         </article>
@@ -1017,80 +1234,56 @@ export default function LegalEditorPage() {
                     <main className="editor-document-shell">
                         {caseContextError ? <p className="shell-error-text">{caseContextError}</p> : null}
                         {caseContextLoading ? <p>{t("loadingCaseContext", "Loading selected case context...")}</p> : null}
-                        {notice ? <p className="shell-success-text">{notice}</p> : null}
+                        {notice ? <p className="shell-success-text editor-notice">{notice}</p> : null}
 
-                        <article className="review-matrix-card" aria-label={t("reviewMatrix", "Review matrix")}>
-                            <div className="review-matrix-head">
-                                <div>
-                                    <p className="shell-page-kicker">{t("reviewMatrix", "Review Matrix")}</p>
-                                    <h3>{t("preExportQualityGate", "Pre-export quality gate")}</h3>
-                                </div>
-                                <div className="review-matrix-stats">
-                                    <span><strong>{reviewStats.approved}</strong>{t("approved", "approved")}</span>
-                                    <span><strong>{reviewStats.pending}</strong>{t("pending", "pending")}</span>
-                                    <span><strong>{reviewStats.needsRevision}</strong>{t("needsRevision", "needs revision")}</span>
-                                    <span><strong>{reviewStats.blocked}</strong>{t("blocked", "blocked")}</span>
-                                </div>
+                        <div className="editor-document-toolbar">
+                            <div>
+                                <p className="shell-page-kicker">Draft workspace</p>
+                                <h3>{DOCUMENT_TYPES.find((item) => item.id === documentType)?.label}</h3>
                             </div>
+                            <div className="editor-paper-stats">
+                                <span>{currentVersionStats.words} words</span>
+                                <span>{editorStats.citationCount} citations</span>
+                                <span>{reviewStats.blocked} blockers</span>
+                            </div>
+                        </div>
 
-                            <div className="review-matrix-table-wrap">
-                                <table className="review-matrix-table">
-                                    <thead>
-                                        <tr>
-                                            <th>{t("section", "Section")}</th>
-                                            <th>{t("trust", "Trust")}</th>
-                                            <th>{t("evidence", "Evidence")}</th>
-                                            <th>{t("blockers", "Blockers")}</th>
-                                            <th>{t("review", "Review")}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {reviewMatrixRows.map((row) => (
-                                            <tr
-                                                className={selectedSectionId === row.section.id ? "active" : ""}
-                                                key={row.section.id}
-                                                onClick={() => setSelectedSectionId(row.section.id)}
-                                            >
-                                                <td>
-                                                    <strong>{row.index + 1}. {row.section.title}</strong>
-                                                    <small>{wordCountFromSections([row.section])} {t("words", "words")}</small>
-                                                </td>
-                                                <td>
-                                                    <em className={`trust-badge ${row.section.trust}`}>
-                                                        {trustLabel(row.section.trust)} | {row.trustScore}%
-                                                    </em>
-                                                </td>
-                                                <td>
-                                                    <span>{row.citations.length} {t("citations", "citations")}</span>
-                                                    <small>{row.section.sources.length} {t("sources", "sources")}</small>
-                                                </td>
-                                                <td>
-                                                    {row.blockers.length ? row.blockers.map((blocker) => (
-                                                        <span className="review-blocker-chip" key={blocker}>{blocker}</span>
-                                                    )) : (
-                                                        <span className="review-clear-chip">{t("clear", "Clear")}</span>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    <div className="review-decision-control" onClick={(event) => event.stopPropagation()}>
-                                                        {(["pending", "approved", "needs_revision"] as ReviewDecision[]).map((decision) => (
-                                                            <button
-                                                                className={row.decision === decision ? "active" : ""}
-                                                                key={decision}
-                                                                onClick={() => updateReviewDecision(row.section.id, decision)}
-                                                                type="button"
-                                                            >
-                                                                {reviewDecisionLabel(decision)}
-                                                            </button>
-                                                        ))}
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </article>
+                        <div className="docs-format-toolbar" role="toolbar" aria-label="Document formatting toolbar">
+                            <select aria-label="Paragraph style" onChange={(event) => execEditorCommand("formatBlock", event.target.value)} defaultValue="p">
+                                <option value="p">Normal</option>
+                                <option value="h1">Heading 1</option>
+                                <option value="h2">Heading 2</option>
+                                <option value="blockquote">Quote</option>
+                            </select>
+                            <select aria-label="Font family" onChange={(event) => execEditorCommand("fontName", event.target.value)} defaultValue="Times New Roman">
+                                <option value="Times New Roman">Times New Roman</option>
+                                <option value="Arial">Arial</option>
+                                <option value="Georgia">Georgia</option>
+                                <option value="Calibri">Calibri</option>
+                            </select>
+                            <select aria-label="Font size" onChange={(event) => execEditorCommand("fontSize", event.target.value)} defaultValue="4">
+                                <option value="2">12</option>
+                                <option value="3">14</option>
+                                <option value="4">16</option>
+                                <option value="5">18</option>
+                                <option value="6">22</option>
+                            </select>
+                            <span className="docs-toolbar-divider" />
+                            <button type="button" onClick={() => execEditorCommand("undo")} title="Undo">Undo</button>
+                            <button type="button" onClick={() => execEditorCommand("redo")} title="Redo">Redo</button>
+                            <button type="button" onClick={() => execEditorCommand("bold")} title="Bold"><strong>B</strong></button>
+                            <button type="button" onClick={() => execEditorCommand("italic")} title="Italic"><em>I</em></button>
+                            <button type="button" onClick={() => execEditorCommand("underline")} title="Underline"><u>U</u></button>
+                            <button type="button" onClick={() => execEditorCommand("justifyLeft")} title="Align left">Left</button>
+                            <button type="button" onClick={() => execEditorCommand("justifyCenter")} title="Center">Center</button>
+                            <button type="button" onClick={() => execEditorCommand("justifyRight")} title="Align right">Right</button>
+                            <button type="button" onClick={() => execEditorCommand("insertUnorderedList")} title="Bulleted list">Bullets</button>
+                            <button type="button" onClick={() => execEditorCommand("insertOrderedList")} title="Numbered list">Numbered</button>
+                            <span className="docs-toolbar-divider" />
+                            <button className="docs-ai-button" disabled={!selectedSection} type="button" onClick={() => applyAiPolish("enhance")}>Enhance selection</button>
+                            <button className="docs-ai-button" disabled={!selectedSection} type="button" onClick={() => applyAiPolish("concise")}>Make concise</button>
+                            <button className="docs-ai-button" disabled={!selectedSection} type="button" onClick={() => applyAiPolish("client")}>Client tone</button>
+                        </div>
 
                         <article className="editor-paper" aria-label={t("draftDocument", "Draft document")}>
                             <header className="editor-paper-title">
@@ -1101,243 +1294,251 @@ export default function LegalEditorPage() {
                             {sections.map((section, index) => {
                                 const sectionCitations = getSectionCitations(section);
                                 const openCommentCount = getSectionCommentCount(section.id);
+                                const isActive = selectedSection?.id === section.id;
                                 return (
                                     <section
+                                        id={`editor-section-${section.id}`}
                                         key={section.id}
-                                        className={`editor-section ${selectedSection?.id === section.id ? "active" : ""}`}
+                                        className={`editor-section editor-section-card ${isActive ? "active" : ""}`}
                                         onClick={() => setSelectedSectionId(section.id)}
                                     >
+                                        <div className="section-floating-actions" onClick={(event) => event.stopPropagation()}>
+                                            <button onClick={() => setSelectedSectionId(section.id)} type="button" title="Edit section">Edit</button>
+                                            <button onClick={() => suggestSectionRevision(section)} type="button" title="Suggest AI revision">AI</button>
+                                            <button onClick={() => updateReviewDecision(section.id, "approved")} type="button" title="Mark approved">Approve</button>
+                                            <button onClick={() => { setSelectedSectionId(section.id); setSmartPanelOpen(true); setSmartPanelTab("assistant"); }} type="button" title="Add comment">Comment</button>
+                                        </div>
                                         <div className="editor-section-head">
                                             <div>
                                                 <span>{index + 1}</span>
-                                                <h4>{section.title}</h4>
+                                                <h4
+                                                    contentEditable
+                                                    onBlur={(event) => updateSectionTitle(section.id, event.currentTarget.innerText)}
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    suppressContentEditableWarning
+                                                >
+                                                    {section.title}
+                                                </h4>
                                             </div>
                                             <div className="section-trust-stack">
-                                                <em className={`trust-badge ${section.trust}`}>
-                                                    {trustLabel(section.trust)} | {trustScore(section)}%
-                                                </em>
-                                                <small>
-                                                    {sectionCitations.length} {t("sectionCitations", "citation(s)")}
-                                                    {" | "}
-                                                    {openCommentCount} {t("comments", "comment(s)")}
-                                                </small>
+                                                <TrustBadge trust={section.trust} score={trustScore(section)} />
+                                                <small>{sectionCitations.length} citations | {openCommentCount} open comments</small>
                                             </div>
                                         </div>
+                                        <div className="trust-confidence-bar" aria-hidden="true">
+                                            <span style={{ width: `${trustScore(section)}%` }} />
+                                        </div>
                                         <p className="section-trust-reason">{trustReason(section)}</p>
-                                        <textarea
-                                            value={section.body}
-                                            onChange={(event) => updateSection(section.id, event.target.value)}
-                                            onKeyUp={(event) => captureTextSelection(section, event.currentTarget)}
-                                            onMouseUp={(event) => captureTextSelection(section, event.currentTarget)}
-                                            onSelect={(event) => captureTextSelection(section, event.currentTarget)}
+                                        <div
+                                            className="editor-section-body"
+                                            contentEditable
+                                            data-editor-section-id={section.id}
+                                            onBlur={(event) => syncEditableSection(section.id, event.currentTarget)}
+                                            onInput={(event) => syncEditableSection(section.id, event.currentTarget)}
+                                            onKeyUp={(event) => captureEditableSelection(section, event.currentTarget)}
+                                            onMouseUp={(event) => captureEditableSelection(section, event.currentTarget)}
+                                            suppressContentEditableWarning
+                                            dangerouslySetInnerHTML={{ __html: sectionHtml(section) }}
                                         />
-                                        <div className="section-citation-panel" aria-label={t("sectionCitations", "Section citations")}>
-                                            {sectionCitations.length ? sectionCitations.slice(0, 5).map((citation, citationIndex) => (
-                                                <span className={`section-citation-chip ${citation.kind}`} key={`${citation.label}-${citationIndex}`}>
-                                                    <strong>[{citationIndex + 1}] {citation.label}</strong>
-                                                    {citation.snippet ? <small>{citation.snippet}</small> : null}
-                                                </span>
-                                            )) : (
-                                                <span className="section-citation-chip missing">
-                                                    <strong>{t("missingSource", "Missing source")}</strong>
-                                                    <small>{t("missingSourceHint", "Attach evidence before final use.")}</small>
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div className="section-source-row">
-                                            {section.sources.length ? section.sources.map((source) => (
-                                                <span key={source}>{source}</span>
-                                            )) : (
-                                                <span>{t("missingSource", "Missing source")}</span>
-                                            )}
-                                        </div>
+                                        <details className="section-citation-details">
+                                            <summary>{sectionCitations.length ? `${sectionCitations.length} citations and source references` : "Missing citation anchors"}</summary>
+                                            <div className="section-citation-panel" aria-label={t("sectionCitations", "Section citations")}>
+                                                {sectionCitations.length ? sectionCitations.slice(0, 5).map((citation, citationIndex) => (
+                                                    <span className={`section-citation-chip ${citation.kind}`} key={`${citation.label}-${citationIndex}`}>
+                                                        <strong>[{citationIndex + 1}] {citation.label}</strong>
+                                                        {citation.snippet ? <small>{citation.snippet}</small> : null}
+                                                    </span>
+                                                )) : (
+                                                    <span className="section-citation-chip missing">
+                                                        <strong>{t("missingSource", "Missing source")}</strong>
+                                                        <small>{t("missingSourceHint", "Attach evidence before final use.")}</small>
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="section-source-row">
+                                                {section.sources.length ? section.sources.map((source) => (
+                                                    <span key={source}>{source}</span>
+                                                )) : (
+                                                    <span>{t("missingSource", "Missing source")}</span>
+                                                )}
+                                            </div>
+                                        </details>
                                     </section>
                                 );
                             })}
                         </article>
                     </main>
 
-                    <aside className="editor-ai-panel">
-                        <article className="shell-card">
-                            <h3>{t("aiRevisionPanel", "AI revision panel")}</h3>
-                            <p className="editor-muted">
-                                {selectedSection
-                                    ? `${t("selectedSection", "Selected")}: ${selectedSection.title}`
-                                    : t("selectSectionToRevise", "Select a section to revise.")}
-                            </p>
-                            {activeTextSelection ? (
-                                <div className="selected-text-preview">
-                                    <span>{t("highlightedText", "Highlighted text")}</span>
-                                    <p>{activeTextSelection.text}</p>
+                    {smartPanelOpen ? (
+                        <aside className="editor-ai-panel editor-smart-panel">
+                            <div className="smart-panel-head">
+                                <div>
+                                    <p className="shell-page-kicker">Smart panel</p>
+                                    <h3>{selectedSection?.title || "Document intelligence"}</h3>
                                 </div>
-                            ) : (
-                                <p className="editor-muted">{t("highlightTextHint", "Highlight text inside the document to suggest a focused edit.")}</p>
-                            )}
-                            <label className="editor-field">
-                                <span>{t("revisionInstruction", "Revision instruction")}</span>
-                                <textarea
-                                    value={refineInstruction}
-                                    onChange={(event) => setRefineInstruction(event.target.value)}
-                                />
-                            </label>
-                            <button disabled={!selectedSection} onClick={suggestEdit} type="button">
-                                {activeTextSelection ? t("suggestHighlightedEdit", "Suggest edit for highlight") : t("suggestEdits", "Suggest edits")}
-                            </button>
-                            {suggestion ? (
-                                <div className="suggestion-box">
-                                    <strong>
-                                        {suggestionTarget
-                                            ? t("suggestedHighlightedRevision", "Suggested replacement")
-                                            : t("suggestedRevision", "Suggested revision")}
-                                    </strong>
-                                    <pre>{suggestion}</pre>
-                                    <div className="editor-button-row">
-                                        <button onClick={acceptSuggestion} type="button">{t("accept", "Accept")}</button>
-                                        <button onClick={() => setSuggestion(null)} type="button">{t("reject", "Reject")}</button>
+                                <button onClick={() => setSmartPanelOpen(false)} type="button">Close</button>
+                            </div>
+                            <div className="smart-panel-tabs" role="tablist" aria-label="Legal editor smart panel">
+                                {(["trust", "sources", "review", "assistant"] as SmartPanelTab[]).map((tab) => (
+                                    <button
+                                        className={smartPanelTab === tab ? "active" : ""}
+                                        key={tab}
+                                        onClick={() => setSmartPanelTab(tab)}
+                                        type="button"
+                                    >
+                                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {smartPanelTab === "trust" ? (
+                                <article className="smart-panel-section">
+                                    <div className="trust-score-hero">
+                                        <strong>{selectedSection ? trustScore(selectedSection) : 0}%</strong>
+                                        <span>{selectedSection ? trustLabel(selectedSection.trust) : "No section selected"}</span>
+                                        <div className="trust-confidence-bar"><span style={{ width: `${selectedSection ? trustScore(selectedSection) : 0}%` }} /></div>
                                     </div>
-                                </div>
+                                    <div className="editor-trust-grid">
+                                        <span><strong>{editorStats.groundedSections}</strong>{t("grounded", "grounded")}</span>
+                                        <span><strong>{editorStats.reviewSections}</strong>{t("needsReview", "review")}</span>
+                                        <span><strong>{editorStats.missingSections}</strong>{t("missingEvidence", "missing")}</span>
+                                        <span><strong>{reviewStats.blocked}</strong>{t("blocked", "blocked")}</span>
+                                    </div>
+                                    <p className="editor-muted">{selectedSection ? trustReason(selectedSection) : "Select a section to see trust reasoning."}</p>
+                                </article>
                             ) : null}
-                        </article>
 
-                        <article className="shell-card collaboration-card">
-                            <h3>{t("shareCommentWorkflow", "Share / comment workflow")}</h3>
-                            <div className="share-status-card">
-                                <div>
-                                    <span>{t("shareStatus", "Share status")}</span>
-                                    <strong>{shareModeLabel(shareMode)}</strong>
-                                </div>
-                                <em>
-                                    {collaborationStats.open} {t("openComments", "open")}
-                                    {" | "}
-                                    {collaborationStats.resolved} {t("resolved", "resolved")}
-                                </em>
-                            </div>
-                            <label className="editor-field">
-                                <span>{t("accessMode", "Access mode")}</span>
-                                <select value={shareMode} onChange={(event) => setShareMode(event.target.value as ShareMode)}>
-                                    <option value="private">{t("privateDraft", "Private draft")}</option>
-                                    <option value="internal_review">{t("internalReview", "Internal review")}</option>
-                                    <option value="client_review">{t("clientReview", "Client review")}</option>
-                                </select>
-                            </label>
-                            <label className="editor-field">
-                                <span>{t("shareNote", "Share note")}</span>
-                                <textarea
-                                    value={shareNote}
-                                    onChange={(event) => setShareNote(event.target.value)}
-                                    placeholder={t("shareNotePlaceholder", "Ask for review on evidence, remedy language, or client-facing tone.")}
-                                />
-                            </label>
-                            <button disabled={!activeCaseId || shareMode === "private"} onClick={() => { void copyShareLink(); }} type="button">
-                                {t("copyShareLink", "Copy share link")}
-                            </button>
+                            {smartPanelTab === "sources" ? (
+                                <article className="smart-panel-section">
+                                    <p className="editor-muted">Evidence binder for this draft. Use these anchors to check wording before export.</p>
+                                    <ul className="editor-source-list source-binder-upgrade">
+                                        {evidenceSources.length ? evidenceSources.map((source) => (
+                                            <li key={source}>
+                                                <span className={`source-kind ${sourceKind(source)}`}>{sourceKind(source).toUpperCase()}</span>
+                                                <strong>{source}</strong>
+                                                <em>{sourceRelevance(source)}</em>
+                                            </li>
+                                        )) : (
+                                            <li>{t("noSourcesYet", "No sources yet. Upload documents or intake notes to strengthen drafts.")}</li>
+                                        )}
+                                    </ul>
+                                </article>
+                            ) : null}
 
-                            <div className="comment-composer">
-                                <strong>{selectedSection ? selectedSection.title : t("selectSection", "Select a section")}</strong>
-                                <textarea
-                                    disabled={!selectedSection}
-                                    value={commentDraft}
-                                    onChange={(event) => setCommentDraft(event.target.value)}
-                                    placeholder={t("commentPlaceholder", "Leave a section-level comment for review.")}
-                                />
-                                <button disabled={!selectedSection || !commentDraft.trim()} onClick={addComment} type="button">
-                                    {t("addComment", "Add comment")}
-                                </button>
-                            </div>
-
-                            <ul className="editor-comment-list">
-                                {selectedSectionComments.length ? selectedSectionComments.map((comment) => (
-                                    <li className={comment.resolved ? "resolved" : ""} key={comment.id}>
-                                        <div>
-                                            <strong>{comment.author}</strong>
-                                            <span>{formatDate(comment.createdAt, locale, "No date")}</span>
-                                        </div>
-                                        <p>{comment.body}</p>
-                                        <div className="comment-actions">
-                                            <button onClick={() => toggleCommentResolved(comment.id)} type="button">
-                                                {comment.resolved ? t("reopen", "Reopen") : t("resolve", "Resolve")}
+                            {smartPanelTab === "review" ? (
+                                <article className="smart-panel-section">
+                                    <div className="review-matrix-stats compact">
+                                        <span><strong>{reviewStats.approved}</strong>{t("approved", "approved")}</span>
+                                        <span><strong>{reviewStats.pending}</strong>{t("pending", "pending")}</span>
+                                        <span><strong>{reviewStats.needsRevision}</strong>{t("needsRevision", "needs revision")}</span>
+                                        <span><strong>{reviewStats.blocked}</strong>{t("blocked", "blocked")}</span>
+                                    </div>
+                                    <div className="review-card-list">
+                                        {reviewMatrixRows.map((row) => (
+                                            <button className={selectedSectionId === row.section.id ? "active" : ""} key={row.section.id} onClick={() => scrollToSection(row.section.id)} type="button">
+                                                <strong>{row.section.title}</strong>
+                                                <span>{row.citations.length} citations | {row.blockers.length ? `${row.blockers.length} blocker(s)` : "clear"}</span>
+                                                <em>{reviewDecisionLabel(row.decision)}</em>
                                             </button>
-                                            <button onClick={() => deleteComment(comment.id)} type="button">{t("delete", "Delete")}</button>
-                                        </div>
-                                    </li>
-                                )) : (
-                                    <li>{t("noSectionComments", "No comments on the selected section.")}</li>
-                                )}
-                            </ul>
-                        </article>
+                                        ))}
+                                    </div>
+                                </article>
+                            ) : null}
 
-                        <article className="shell-card">
-                            <h3>{t("versionHistory", "Version history")}</h3>
-                            <div className="version-current-card">
-                                <div>
-                                    <strong>{hasUnsavedVersionChanges ? t("unsavedDraft", "Unsaved draft") : t("savedDraft", "Saved draft")}</strong>
-                                    <span>
-                                        {currentVersionStats.words} {t("words", "words")}
-                                        {" | "}
-                                        {currentVersionStats.citations} {t("citations", "citations")}
-                                    </span>
-                                </div>
-                                <em>{versions.length} {t("savedVersions", "saved")}</em>
-                            </div>
-                            <label className="editor-field version-name-field">
-                                <span>{t("versionName", "Version name")}</span>
-                                <input
-                                    value={versionLabel}
-                                    onChange={(event) => setVersionLabel(event.target.value)}
-                                    placeholder={t("versionNamePlaceholder", "Client letter after evidence review")}
-                                />
-                            </label>
-                            <button
-                                className="version-save-button"
-                                disabled={!sections.length}
-                                onClick={() => saveVersion()}
-                                type="button"
-                            >
-                                {hasUnsavedVersionChanges ? t("saveCurrentVersion", "Save current version") : t("saveAnotherVersion", "Save another version")}
-                            </button>
-                            <ul className="editor-version-list">
-                                {versions.length ? versions.map((version) => {
-                                    const stats = getVersionStats(version);
-                                    const changedSections = changedSectionCount(version);
-                                    return (
-                                        <li className={activeVersionId === version.id ? "active" : ""} key={version.id}>
-                                            <div className="version-row-main">
-                                                <strong>{version.label}</strong>
-                                                <span>{formatDate(version.createdAt, locale, "No date")}</span>
-                                                <small>
-                                                    {stats.sections} {t("sections", "sections")}
-                                                    {" | "}
-                                                    {stats.words} {t("words", "words")}
-                                                    {" | "}
-                                                    {stats.citations} {t("citations", "citations")}
-                                                </small>
-                                                <small>
-                                                    {stats.grounded} {t("grounded", "grounded")}
-                                                    {" | "}
-                                                    {stats.review} {t("needsReview", "review")}
-                                                    {" | "}
-                                                    {stats.missing} {t("missingEvidence", "missing")}
-                                                </small>
-                                                <em>
-                                                    {activeVersionId === version.id && !hasUnsavedVersionChanges
-                                                        ? t("currentVersion", "Current version")
-                                                        : `${changedSections} ${t("sectionChanges", "section change(s)")}`}
-                                                </em>
+                            {smartPanelTab === "assistant" ? (
+                                <article className="smart-panel-section collaboration-card">
+                                    <p className="editor-muted">
+                                        {selectedSection ? `Selected: ${selectedSection.title}` : t("selectSectionToRevise", "Select a section to revise.")}
+                                    </p>
+                                    {activeTextSelection ? (
+                                        <div className="selected-text-preview">
+                                            <span>{t("highlightedText", "Highlighted text")}</span>
+                                            <p>{activeTextSelection.text}</p>
+                                        </div>
+                                    ) : (
+                                        <p className="editor-muted">{t("highlightTextHint", "Highlight text inside the document to suggest a focused edit.")}</p>
+                                    )}
+                                    <div className="assistant-action-grid">
+                                        {["Strengthen argument", "Simplify", "Summarize", "Rewrite formally"].map((instruction) => (
+                                            <button key={instruction} disabled={!selectedSection} onClick={() => { setRefineInstruction(instruction); suggestEdit(); }} type="button">
+                                                {instruction}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <label className="editor-field">
+                                        <span>{t("revisionInstruction", "Revision instruction")}</span>
+                                        <textarea value={refineInstruction} onChange={(event) => setRefineInstruction(event.target.value)} />
+                                    </label>
+                                    <button disabled={!selectedSection} onClick={suggestEdit} type="button">
+                                        {activeTextSelection ? t("suggestHighlightedEdit", "Suggest edit for highlight") : t("suggestEdits", "Suggest edits")}
+                                    </button>
+                                    {suggestion ? (
+                                        <div className="suggestion-box">
+                                            <strong>{suggestionTarget ? t("suggestedHighlightedRevision", "Suggested replacement") : t("suggestedRevision", "Suggested revision")}</strong>
+                                            <pre>{suggestion}</pre>
+                                            <div className="editor-button-row">
+                                                <button onClick={acceptSuggestion} type="button">{t("accept", "Accept")}</button>
+                                                <button onClick={() => setSuggestion(null)} type="button">{t("reject", "Reject")}</button>
                                             </div>
-                                            <div className="version-row-actions">
-                                                <button onClick={() => restoreVersion(version)} type="button">{t("restore", "Restore")}</button>
-                                                <button onClick={() => deleteVersion(version.id)} type="button">{t("delete", "Delete")}</button>
-                                            </div>
-                                        </li>
-                                    );
-                                }) : (
-                                    <li>{t("noVersionsYet", "No versions saved yet.")}</li>
-                                )}
-                            </ul>
-                        </article>
-                    </aside>
+                                        </div>
+                                    ) : null}
+                                    <div className="share-status-card">
+                                        <div>
+                                            <span>{t("shareStatus", "Share status")}</span>
+                                            <strong>{shareModeLabel(shareMode)}</strong>
+                                        </div>
+                                        <em>{collaborationStats.open} open | {collaborationStats.resolved} resolved</em>
+                                    </div>
+                                    <label className="editor-field">
+                                        <span>{t("accessMode", "Access mode")}</span>
+                                        <select value={shareMode} onChange={(event) => setShareMode(event.target.value as ShareMode)}>
+                                            <option value="private">{t("privateDraft", "Private draft")}</option>
+                                            <option value="internal_review">{t("internalReview", "Internal review")}</option>
+                                            <option value="client_review">{t("clientReview", "Client review")}</option>
+                                        </select>
+                                    </label>
+                                    <div className="comment-composer">
+                                        <strong>{selectedSection ? selectedSection.title : t("selectSection", "Select a section")}</strong>
+                                        <textarea disabled={!selectedSection} value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} placeholder={t("commentPlaceholder", "Leave a section-level comment for review.")} />
+                                        <button disabled={!selectedSection || !commentDraft.trim()} onClick={addComment} type="button">{t("addComment", "Add comment")}</button>
+                                    </div>
+                                    <ul className="editor-comment-list">
+                                        {selectedSectionComments.length ? selectedSectionComments.map((comment) => (
+                                            <li className={comment.resolved ? "resolved" : ""} key={comment.id}>
+                                                <div><strong>{comment.author}</strong><span>{formatDate(comment.createdAt, locale, "No date")}</span></div>
+                                                <p>{comment.body}</p>
+                                                <div className="comment-actions">
+                                                    <button onClick={() => toggleCommentResolved(comment.id)} type="button">{comment.resolved ? t("reopen", "Reopen") : t("resolve", "Resolve")}</button>
+                                                    <button onClick={() => deleteComment(comment.id)} type="button">{t("delete", "Delete")}</button>
+                                                </div>
+                                            </li>
+                                        )) : <li>{t("noSectionComments", "No comments on the selected section.")}</li>}
+                                    </ul>
+                                </article>
+                            ) : null}
+                        </aside>
+                    ) : null}
                 </div>
             )}
+
+            {exportPreviewOpen ? (
+                <div className="calendar-modal-backdrop" role="presentation">
+                    <div className="calendar-event-modal editor-export-preview" role="dialog" aria-modal="true" aria-label="Export preview">
+                        <div className="calendar-modal-head">
+                            <div>
+                                <p className="shell-page-kicker">Export preview</p>
+                                <h3>{DOCUMENT_TYPES.find((item) => item.id === documentType)?.label}</h3>
+                            </div>
+                            <button onClick={() => setExportPreviewOpen(false)} type="button" aria-label="Close">×</button>
+                        </div>
+                        <pre>{renderPlainDocument()}</pre>
+                        <div className="calendar-modal-actions">
+                            <button className="shell-secondary-button" onClick={() => setExportPreviewOpen(false)} type="button">Close</button>
+                            <button className="shell-primary-button" onClick={() => { setExportPreviewOpen(false); void exportDocx(); }} type="button">Export DOCX</button>
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </section>
     );
 }

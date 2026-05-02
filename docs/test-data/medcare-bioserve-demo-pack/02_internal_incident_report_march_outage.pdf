@@ -1,0 +1,89 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 1700 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(INTERNAL INCIDENT REPORT) Tj
+0 -12 Td
+(Report ID: IR-MEDCARE-2026-03-21) Tj
+0 -12 Td
+(Prepared by: MedCare Operations and Compliance) Tj
+0 -12 Td
+(Date: March 22, 2026) Tj
+0 -12 Td
+(Incident Summary) Tj
+0 -12 Td
+(On March 21, 2026, the Ariana clinic MRI unit was unavailable from 08:15 to) Tj
+0 -12 Td
+(17:40. Twenty-three patient appointments were delayed or moved. The incident was) Tj
+0 -12 Td
+(classified as critical because the affected unit supports urgent neurological) Tj
+0 -12 Td
+(diagnostic referrals.) Tj
+0 -12 Td
+(Timeline) Tj
+0 -12 Td
+(- 08:15: Radiology coordinator reported boot failure and calibration error C-417) Tj
+0 -12 Td
+(- 08:28: Helpdesk ticket opened with BioServe) Tj
+0 -12 Td
+(- 09:10: BioServe acknowledged ticket and requested log export) Tj
+0 -12 Td
+(- 11:55: MedCare escalated because no technician was onsite) Tj
+0 -12 Td
+(- 14:30: BioServe technician arrived) Tj
+0 -12 Td
+(- 16:50: Temporary workaround applied) Tj
+0 -12 Td
+(- 17:40: Unit returned to limited operation) Tj
+0 -12 Td
+(Initial Findings) Tj
+0 -12 Td
+(The BioServe response exceeded the 6 business hour onsite response standard.) Tj
+0 -12 Td
+(Preventive maintenance records for February 2026 do not show completion for the) Tj
+0 -12 Td
+(Ariana MRI unit. The unit had generated calibration warnings on March 17 and) Tj
+0 -12 Td
+(March 19 that were not escalated by BioServe.) Tj
+0 -12 Td
+(Business Impact) Tj
+0 -12 Td
+(- 23 patient appointments disrupted) Tj
+0 -12 Td
+(- 9 outsourced scans booked at partner clinic) Tj
+0 -12 Td
+(- Estimated direct outsourcing cost: 8,920 TND) Tj
+0 -12 Td
+(- Potential regulator concern if repeat downtime affects continuity of care) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2062
+%%EOF

@@ -1,9 +1,31 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
 import { APP_ROUTES } from "../router/appRoutes";
 
+const SIDEBAR_STORAGE_KEY = "legal-ai-shell-sidebar-expanded";
+
 function navClassName(isActive: boolean) {
     return isActive ? "shell-nav-link active" : "shell-nav-link";
+}
+
+function routeIcon(path: string) {
+    const iconPathByRoute: Record<string, string[]> = {
+        "/dashboard": ["M4 10.5 10 5l6 5.5", "M6.5 9.5v6h7v-6"],
+        "/cases": ["M4.5 6.5h11", "M6.5 4.5h7l1.5 2v9h-10v-9l1.5-2Z", "M7.5 10h5"],
+        "/assistant": ["M5 5.5h10v7H9l-4 3v-10Z", "M8 8.5h4", "M8 10.5h2.5"],
+        "/documents": ["M6 3.8h5l3 3v9.4H6V3.8Z", "M11 3.8v3h3", "M8 10h4", "M8 12.3h4"],
+        "/editor": ["M5 14.5h10", "M7 12.5l5.8-5.8 1.5 1.5-5.8 5.8H7v-1.5Z"],
+        "/calendar": ["M5 6.5h10v9H5v-9Z", "M7.5 4.5v3", "M12.5 4.5v3", "M5 9h10"],
+        "/settings": ["M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z", "M10 3.5v2", "M10 14.5v2", "M3.5 10h2", "M14.5 10h2"],
+    };
+    const paths = iconPathByRoute[path] || ["M5 5h10v10H5z"];
+
+    return (
+        <svg aria-hidden="true" viewBox="0 0 20 20">
+            {paths.map((value) => <path d={value} key={value} />)}
+        </svg>
+    );
 }
 
 export default function WorkspaceShell() {
@@ -17,6 +39,11 @@ export default function WorkspaceShell() {
         setLanguage,
         t,
     } = useRoutedWorkspace();
+    const [sidebarExpanded, setSidebarExpanded] = useState(() => localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true");
+
+    useEffect(() => {
+        localStorage.setItem(SIDEBAR_STORAGE_KEY, sidebarExpanded ? "true" : "false");
+    }, [sidebarExpanded]);
 
     const routeCopyByPath: Record<string, { label: string; description: string }> = {
         "/dashboard": {
@@ -57,9 +84,25 @@ export default function WorkspaceShell() {
     }
 
     return (
-        <div className="shell-root">
+        <div className={`shell-root ${sidebarExpanded ? "sidebar-expanded" : "sidebar-collapsed"}`}>
             <aside className="shell-sidebar">
+                <button
+                    aria-label={sidebarExpanded ? t("collapseSidebar", "Collapse sidebar") : t("expandSidebar", "Expand sidebar")}
+                    className="shell-sidebar-toggle"
+                    onClick={() => setSidebarExpanded((current) => !current)}
+                    title={sidebarExpanded ? t("collapseSidebar", "Collapse sidebar") : t("expandSidebar", "Expand sidebar")}
+                    type="button"
+                >
+                    <svg aria-hidden="true" viewBox="0 0 20 20">
+                        {sidebarExpanded ? (
+                            <path d="M12.5 5.5 8 10l4.5 4.5" />
+                        ) : (
+                            <path d="M7.5 5.5 12 10l-4.5 4.5" />
+                        )}
+                    </svg>
+                </button>
                 <div className="shell-brand">
+                    <span className="shell-mini-logo">WL</span>
                     <p className="shell-kicker">{t("legalAiPlatform", "Legal AI Platform")}</p>
                     <h1>{t("lawyerWorkspace", "Lawyer Workspace")}</h1>
                     <p className="shell-subtitle">
@@ -72,15 +115,29 @@ export default function WorkspaceShell() {
                     ) : null}
                 </div>
 
+                <div className="shell-status-card" aria-label={t("workspaceStatus", "Workspace status")}>
+                    <div className="shell-status-row">
+                        <p className="shell-status-kicker">{t("secureWorkspace", "Secure workspace")}</p>
+                        <span className="shell-secure-badge">{t("encrypted", "Secure")}</span>
+                    </div>
+                    <strong>{user ? user.name : t("guestUser", "Guest user")}</strong>
+                    <span>{user ? `${user.role} | ${t("lawFirmWorkspace", "Law firm workspace")}` : t("signInRequired", "Sign in required for case-aware features")}</span>
+                    <span>{selectedCaseId ? `${t("currentWorkspace", "Current workspace")}: Case #${selectedCaseId}` : t("noCaseWorkspace", "No case selected yet")}</span>
+                </div>
+
                 <nav className="shell-nav" aria-label="Primary workspace navigation">
                     {APP_ROUTES.map((route) => (
                         <NavLink
                             key={route.path}
                             className={({ isActive }) => navClassName(isActive)}
+                            title={routeCopyByPath[route.path]?.label || route.label}
                             to={buildRoutePath(route.path, route.useSelectedCase)}
                         >
-                            <strong>{routeCopyByPath[route.path]?.label || route.label}</strong>
-                            <span>{routeCopyByPath[route.path]?.description || route.description}</span>
+                            <span className="shell-nav-icon">{routeIcon(route.path)}</span>
+                            <span className="shell-nav-copy">
+                                <strong>{routeCopyByPath[route.path]?.label || route.label}</strong>
+                                <span>{routeCopyByPath[route.path]?.description || route.description}</span>
+                            </span>
                         </NavLink>
                     ))}
                 </nav>
@@ -93,7 +150,12 @@ export default function WorkspaceShell() {
                         {t("classicRolloutNote", "Classic keeps the current monolith unchanged while this routed workspace is being rolled out.")}
                     </p>
                     <button className="shell-logout-button" onClick={logout} type="button">
-                        {t("logout", "Logout")}
+                        <svg aria-hidden="true" viewBox="0 0 20 20">
+                            <path d="M8.5 5H5.8a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2.7" />
+                            <path d="M11.5 6.5 15 10l-3.5 3.5" />
+                            <path d="M7.8 10H15" />
+                        </svg>
+                        <span>{t("logout", "Logout")}</span>
                     </button>
                 </div>
             </aside>

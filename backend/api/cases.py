@@ -9,6 +9,8 @@ from backend.models.case import Case
 from backend.models.user import User
 from backend.models.client import Client
 from backend.api.case_schema import CaseCreate, CaseUpdate, CaseOut
+from backend.services.ai.agents.summarization_agent import summarization_agent
+from backend.services.ai.agents.chronology_agent import chronology_agent
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
@@ -165,3 +167,70 @@ def delete_case(
     db.commit()
 
     return {"message": "Case archived successfully"}
+
+
+@router.post("/{case_id}/summarize", response_model=dict)
+def summarize_case(
+    case_id: int,
+    num_bullets: int = 8,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    query = db.query(Case).filter(
+        Case.id == case_id,
+        Case.deleted_at.is_(None)
+    )
+    case = apply_tenant_scope(query, Case.tenant_id, current_user).first()
+
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    documents = []
+    for doc in case.documents:
+        if doc.extracted_text:
+            documents.append({"filename": doc.filename, "content": doc.extracted_text})
+
+    if not documents:
+        raise HTTPException(status_code=400, detail="No documents with extracted text found for this case.")
+
+    summary = summarization_agent.summarize_case(
+        case_id=case_id, documents=documents, num_bullets=num_bullets
+    )
+
+    if not summary:
+        raise HTTPException(status_code=500, detail="Failed to generate summary.")
+
+    return summary
+
+
+@router.post("/{case_id}/chronology", response_model=dict)
+def get_case_chronology(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    query = db.query(Case).filter(
+        Case.id == case_id,
+        Case.deleted_at.is_(None)
+    )
+    case = apply_tenant_scope(query, Case.tenant_id, current_user).first()
+
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    documents = []
+    for doc in case.documents:
+        if doc.extracted_text:
+            documents.append({"filename": doc.filename, "content": doc.extracted_text})
+
+    if not documents:
+        raise HTTPException(status_code=400, detail="No documents with extracted text found for this case.")
+
+    chronology = chronology_agent.extract_chronology_from_case(
+        case_id=case_id, documents=documents
+    )
+
+    if not chronology:
+        raise HTTPException(status_code=500, detail="Failed to generate chronology.")
+
+    return chronology

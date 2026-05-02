@@ -1,13 +1,34 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import ChatMessageBubble, { type MessageFeedbackState } from "../components/ChatMessageBubble";
-import { workspaceApi } from "../workspaceApi";
+import LegalEditorPanel from "../components/LegalEditorPanel";
 import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
 import { saveEditorDraftSeed } from "../editorDraftSeed";
-import type { ChatMessage, FeedbackRootCause } from "../types";
+import type { ChatMessage, DraftDocument, DraftDocumentPayload, FeedbackRootCause } from "../types";
+import { workspaceApi } from "../workspaceApi";
 
 type WorkspaceMode = "chat" | "agent" | "legal_search";
 type ReasoningLevel = "low" | "medium" | "high";
+type AssistantMode = "chat" | "agent" | "legal_search" | "external";
+type AttachmentStatus = "ready" | "uploading" | "uploaded" | "error";
+type DraftDocumentType = "Email" | "Client update letter" | "Demand letter" | "Legal memo" | "Strategy note" | "Contract clause" | "General draft";
+
+type PendingAssistantFile = {
+    id: string;
+    file: File;
+    status: AttachmentStatus;
+    error?: string | null;
+    uploadedId?: string | null;
+    temporary?: boolean;
+};
+
+type AssistantDraftDocument = {
+    title: string;
+    documentType: DraftDocumentType;
+    content: string;
+    updatedAt: string;
+    caseId: number | null;
+};
 
 const REASONING_TOP_K: Record<ReasoningLevel, number> = {
     low: 4,
@@ -38,11 +59,16 @@ declare global {
     }
 }
 
+const ASSISTANT_MODES: Array<{ id: AssistantMode; label: string; description: string }> = [
+    { id: "chat", label: "Chat Mode", description: "Fast legal discussion" },
+    { id: "agent", label: "Agent Mode", description: "Step-by-step execution" },
+    { id: "legal_search", label: "Legal Search Mode", description: "Source-grounded legal answers" },
+    { id: "external", label: "External Mode", description: "Web-enhanced legal research" },
+];
+
 function parseCaseId(value?: string) {
     const parsed = Number(value);
-    if (!value || Number.isNaN(parsed) || parsed <= 0) {
-        return null;
-    }
+    if (!value || Number.isNaN(parsed) || parsed <= 0) return null;
     return parsed;
 }
 
@@ -55,12 +81,90 @@ function formatTimestamp(value: string, locale: string) {
     }).format(new Date(value));
 }
 
+function workspaceModeFromAssistantMode(mode: AssistantMode): WorkspaceMode {
+    if (mode === "agent") return "agent";
+    if (mode === "legal_search" || mode === "external") return "legal_search";
+    return "chat";
+}
+
+function caseJurisdictionLabel(value?: string | null) {
+    if (value === "tunisia") return "Tunisia";
+    if (value === "germany") return "Germany";
+    return value || "Unconfirmed";
+}
+
+function groundingLabel(state: "grounded" | "partial" | "not-grounded") {
+    if (state === "grounded") return "Grounded";
+    if (state === "partial") return "Partial";
+    return "Not grounded";
+}
+
+function formatFileSize(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isSupportedAssistantFile(file: File) {
+    const extension = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+    const mimeType = (file.type || "").toLowerCase();
+    return [".pdf", ".txt", ".md"].includes(extension)
+        || ["application/pdf", "text/plain", "text/markdown", "text/x-markdown"].includes(mimeType);
+}
+
+function isDraftIntent(message: string): boolean {
+    const text = message.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!text) return false;
+    if (/^(summari[sz]e|analy[sz]e|explain|list|identify|compare|what is|what are|what happened|give me legal analysis)\b/.test(text)) {
+        return false;
+    }
+    return /\b(draft|write|prepare)\b/.test(text)
+        || /\bgenerate\s+(a\s+)?(letter|email|memo|document|response)\b/.test(text)
+        || /\bcreate\s+(an?\s+)?(email|letter|memo|response|client update)\b/.test(text)
+        || /\b(demand letter|client update|legal memo|response letter|strategy note|internal note|contract clause|summary email)\b/.test(text);
+}
+
+function isDraftRevisionIntent(message: string): boolean {
+    const text = message.toLowerCase().replace(/\s+/g, " ").trim();
+    if (!text) return false;
+    if (/^(what|why|when|where|who|summari[sz]e|analy[sz]e|explain|list|identify|compare)\b/.test(text)) return false;
+    return /\b(make|shorten|lengthen|add|remove|rewrite|revise|edit|translate|formal|professional|client-friendly|stronger|softer|tone|paragraph|clause|section)\b/.test(text);
+}
+
+function detectDraftDocumentType(message: string): DraftDocumentType {
+    const text = message.toLowerCase();
+    if (text.includes("demand letter")) return "Demand letter";
+    if (text.includes("client update")) return "Client update letter";
+    if (text.includes("legal memo") || text.includes("memorandum")) return "Legal memo";
+    if (text.includes("strategy note")) return "Strategy note";
+    if (text.includes("contract clause") || text.includes("clause")) return "Contract clause";
+    if (text.includes("email")) return "Email";
+    return "General draft";
+}
+
+function draftTitleFromType(documentType: DraftDocumentType, caseTitle?: string | null) {
+    const prefix = caseTitle ? `${caseTitle} - ` : "";
+    return `${prefix}${documentType}`;
+}
+
+function cleanDraftContent(value: string) {
+    return value
+        .replace(/^I drafted it and opened it in the editor\.?\s*/i, "")
+        .replace(/^Here(?:'s| is) (?:a|the) draft[:.\s-]*/i, "")
+        .trim();
+}
+
+function filenameSafe(value: string) {
+    return (value || "assistant-draft").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 120) || "assistant-draft";
+}
+
 function TypingIndicator() {
     return (
-        <div className="typing-indicator">
+        <div className="typing-indicator legal-typing-state minimal-typing-state">
             <span />
             <span />
             <span />
+            <em>Checking sources...</em>
         </div>
     );
 }
@@ -72,6 +176,7 @@ export default function AssistantPage() {
 
     const {
         token,
+        user,
         selectedCaseId,
         setSelectedCaseId,
         selectedCase,
@@ -82,8 +187,10 @@ export default function AssistantPage() {
         selectChatSession,
         removeChatSession,
         sendCaseMessage,
+        loadCaseContext,
         copilotLoading,
         stopCopilotRequest,
+        clients,
         language,
         locale,
         t,
@@ -92,20 +199,31 @@ export default function AssistantPage() {
     const [draft, setDraft] = useState("");
     const [notice, setNotice] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [chatHistoryOpen, setChatHistoryOpen] = useState(true);
-    const [historySidebarOpen, setHistorySidebarOpen] = useState(true);
-    const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+    const [historySidebarOpen, setHistorySidebarOpen] = useState(false);
+    const [historySearch, setHistorySearch] = useState("");
+    const [assistantMode, setAssistantMode] = useState<AssistantMode>("chat");
+    const [pendingFiles, setPendingFiles] = useState<PendingAssistantFile[]>([]);
     const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("chat");
     const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("medium");
     const [externalModeEnabled, setExternalModeEnabled] = useState(false);
     const [optimizingPrompt, setOptimizingPrompt] = useState(false);
     const [composerRecording, setComposerRecording] = useState(false);
+    const [dragActive, setDragActive] = useState(false);
+    const [draftDocument, setDraftDocument] = useState<AssistantDraftDocument | null>(null);
+    const [draftPanelOpen, setDraftPanelOpen] = useState(false);
+    const [editorDraftPayload, setEditorDraftPayload] = useState<DraftDocumentPayload | null>(null);
+    const [editorFocusMode, setEditorFocusMode] = useState(false);
     const [chatFeedback, setChatFeedback] = useState<Record<string, MessageFeedbackState>>({});
     const messageEndRef = useRef<HTMLDivElement | null>(null);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const dragDepthRef = useRef(0);
+    const pendingDraftRef = useRef<{ mode: "create" | "revision"; documentType: DraftDocumentType; title: string } | null>(null);
+    const openedEditorMessageIdRef = useRef<string | null>(null);
     const composerRecognitionRef = useRef<BrowserSpeechRecognition | null>(null);
     const composerDictationSeedRef = useRef("");
     const composerDictationFinalRef = useRef("");
     const activeCaseId = routeCaseId ?? selectedCaseId;
+    const activeChatScopeId = activeCaseId ?? 0;
 
     useEffect(() => {
         if (routeCaseId && routeCaseId !== selectedCaseId) {
@@ -113,15 +231,47 @@ export default function AssistantPage() {
         }
     }, [routeCaseId, selectedCaseId, setSelectedCaseId]);
 
-    const sessions = useMemo(() => (activeCaseId ? getSessionsForCase(activeCaseId) : []), [activeCaseId, getSessionsForCase]);
-    const activeSessionId = useMemo(
-        () => (activeCaseId ? getActiveSessionId(activeCaseId) : null),
-        [activeCaseId, getActiveSessionId]
+    const sessions = useMemo(() => getSessionsForCase(activeChatScopeId), [activeChatScopeId, getSessionsForCase]);
+    const activeSessionId = useMemo(() => getActiveSessionId(activeChatScopeId), [activeChatScopeId, getActiveSessionId]);
+    const activeMessages = useMemo(() => getActiveMessages(activeChatScopeId), [activeChatScopeId, getActiveMessages]);
+    const activeClient = useMemo(
+        () => (selectedCase ? clients.find((client) => client.id === selectedCase.client_id) || null : null),
+        [clients, selectedCase]
     );
-    const activeMessages = useMemo(
-        () => (activeCaseId ? getActiveMessages(activeCaseId) : []),
-        [activeCaseId, getActiveMessages]
+    const latestAssistantMessage = useMemo(
+        () => [...activeMessages].reverse().find((message) => message.role === "assistant") || null,
+        [activeMessages]
     );
+    const filteredSessions = useMemo(() => {
+        const query = historySearch.trim().toLowerCase();
+        if (!query) return sessions;
+        return sessions.filter((session) =>
+            `${session.title} ${session.messages.map((message) => message.content).join(" ")}`.toLowerCase().includes(query)
+        );
+    }, [historySearch, sessions]);
+
+    const canSend = Boolean(token);
+    const hasConversation = activeMessages.length > 0 || copilotLoading;
+    const sourceCount = latestAssistantMessage?.meta?.sources?.length || latestAssistantMessage?.meta?.citations?.length || 0;
+    const assistantGroundingState: "grounded" | "partial" | "not-grounded" = !activeCaseId
+        ? "not-grounded"
+        : sourceCount > 0
+            ? "grounded"
+            : assistantMode === "legal_search" || assistantMode === "external"
+                ? "partial"
+                : "not-grounded";
+    const caseTitle = selectedCase?.title || t("generalAssistant", "General Assistant");
+    const topbarCaseLabel = activeCaseId ? caseTitle : t("generalAssistant", "General Assistant");
+    const compactModes = ASSISTANT_MODES;
+    const composerPlaceholder = editorDraftPayload || draftPanelOpen
+        ? t("draftRevisionPlaceholder", "Ask for a revision to this draft...")
+        : assistantMode === "agent"
+        ? t("agentPlaceholder", "Describe the action to review before execution...")
+        : assistantMode === "legal_search"
+            ? t("researchPlaceholder", "Ask a source-grounded legal question...")
+            : assistantMode === "external"
+                ? t("externalPlaceholder", "Ask for web-enhanced legal research...")
+                : t("askPlaceholder", "Ask about your case, risks, deadlines, or draft something...");
 
     useEffect(() => {
         if (!activeCaseId) return;
@@ -135,6 +285,42 @@ export default function AssistantPage() {
     }, [activeMessages, copilotLoading]);
 
     useEffect(() => {
+        if (copilotLoading || !pendingDraftRef.current) return;
+        const latestAssistant = [...activeMessages].reverse().find((message) => message.role === "assistant");
+        if (!latestAssistant?.content.trim()) return;
+
+        const pendingDraft = pendingDraftRef.current;
+        pendingDraftRef.current = null;
+        const nextContent = cleanDraftContent(latestAssistant.meta?.rawAnswer || latestAssistant.content);
+        if (!nextContent) return;
+
+        setDraftDocument((current) => ({
+            title: current?.title || pendingDraft.title,
+            documentType: pendingDraft.documentType,
+            content: nextContent,
+            updatedAt: new Date().toISOString(),
+            caseId: activeCaseId,
+        }));
+        setDraftPanelOpen(false);
+        setNotice(
+            pendingDraft.mode === "revision"
+                ? t("draftUpdatedNotice", "Draft updated. Use Edit under the assistant answer to open it in the Legal Editor.")
+                : t("draftOpenedNotice", "Draft ready. Use Edit under the assistant answer to open it in the Legal Editor.")
+        );
+    }, [activeCaseId, activeMessages, copilotLoading, t]);
+
+    useEffect(() => {
+        if (copilotLoading) return;
+        const latestAssistant = [...activeMessages].reverse().find((message) => message.role === "assistant");
+        if (!latestAssistant?.meta?.openEditor || !latestAssistant.meta.draftDocument) return;
+        if (openedEditorMessageIdRef.current === latestAssistant.id) return;
+        openedEditorMessageIdRef.current = latestAssistant.id;
+        setEditorDraftPayload(latestAssistant.meta.draftDocument);
+        setDraftPanelOpen(false);
+        setNotice(t("draftOpenedNotice", "I drafted it and opened it in the editor."));
+    }, [activeMessages, copilotLoading, t]);
+
+    useEffect(() => {
         return () => {
             if (composerRecognitionRef.current) {
                 composerRecognitionRef.current.abort();
@@ -142,8 +328,6 @@ export default function AssistantPage() {
             }
         };
     }, []);
-
-    const canSend = useMemo(() => Boolean(activeCaseId), [activeCaseId]);
 
     function stopComposerRecording() {
         composerRecognitionRef.current?.abort();
@@ -184,18 +368,12 @@ export default function AssistantPage() {
                     const transcript = String(result?.[0]?.transcript || "").trim();
                     if (!transcript) continue;
 
-                    if (result?.isFinal) {
-                        finalTranscript = `${finalTranscript}${transcript} `;
-                    } else {
-                        interimTranscript = `${interimTranscript}${transcript} `;
-                    }
+                    if (result?.isFinal) finalTranscript = `${finalTranscript}${transcript} `;
+                    else interimTranscript = `${interimTranscript}${transcript} `;
                 }
 
                 composerDictationFinalRef.current = finalTranscript;
-                const nextValue = `${composerDictationSeedRef.current}${finalTranscript}${interimTranscript}`
-                    .replace(/\s+/g, " ")
-                    .trim();
-                setDraft(nextValue);
+                setDraft(`${composerDictationSeedRef.current}${finalTranscript}${interimTranscript}`.replace(/\s+/g, " ").trim());
             };
 
             recognition.onerror = (event) => {
@@ -206,7 +384,6 @@ export default function AssistantPage() {
                     setError(t("voiceRecognitionFailed", "Unable to transcribe voice input."));
                 }
             };
-
             recognition.onend = () => {
                 setComposerRecording(false);
                 composerRecognitionRef.current = null;
@@ -222,26 +399,197 @@ export default function AssistantPage() {
         }
     }
 
-    async function submitPrompt(promptText: string) {
-        if (!canSend || !activeCaseId) return;
+    function addPendingFiles(fileList: FileList | null) {
+        const incoming = Array.from(fileList || []);
+        if (!incoming.length) return;
+
+        if (pendingFiles.length + incoming.length > 10) {
+            setError(t("assistantUploadMaxFiles", "You can attach up to 10 files per message."));
+            return;
+        }
+
+        const accepted: PendingAssistantFile[] = [];
+        const rejected: string[] = [];
+        incoming.forEach((file) => {
+            if (!isSupportedAssistantFile(file)) {
+                rejected.push(file.name);
+                return;
+            }
+            accepted.push({
+                id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                file,
+                status: "ready",
+                error: null,
+            });
+        });
+
+        if (accepted.length) {
+            setPendingFiles((current) => [...current, ...accepted].slice(0, 10));
+        }
+        if (rejected.length) {
+            setError(
+                t("assistantUploadUnsupported", "Unsupported files: {files}. Upload PDF, TXT, or MD.")
+                    .replace("{files}", rejected.join(", "))
+            );
+        } else {
+            setError(null);
+        }
+    }
+
+    function removePendingFile(fileId: string) {
+        setPendingFiles((current) => current.filter((item) => item.id !== fileId));
+    }
+
+    function dragEventHasFiles(event: DragEvent<HTMLElement>) {
+        return Array.from(event.dataTransfer?.types || []).includes("Files");
+    }
+
+    function handleComposerDragEnter(event: DragEvent<HTMLElement>) {
+        if (!dragEventHasFiles(event)) return;
+        event.preventDefault();
+        dragDepthRef.current += 1;
+        setDragActive(true);
+    }
+
+    function handleComposerDragOver(event: DragEvent<HTMLElement>) {
+        if (!dragEventHasFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+        setDragActive(true);
+    }
+
+    function handleComposerDragLeave(event: DragEvent<HTMLElement>) {
+        if (!dragEventHasFiles(event)) return;
+        event.preventDefault();
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (dragDepthRef.current === 0) setDragActive(false);
+    }
+
+    function handleComposerDrop(event: DragEvent<HTMLElement>) {
+        if (!dragEventHasFiles(event)) return;
+        event.preventDefault();
+        dragDepthRef.current = 0;
+        setDragActive(false);
+        addPendingFiles(event.dataTransfer.files);
+    }
+
+    async function uploadPendingFiles(promptText: string, chatSessionId: string) {
+        if (!token || !pendingFiles.length) return { uploadedIds: [] as string[], uploadedFiles: [] as PendingAssistantFile[] };
+
+        setPendingFiles((current) => current.map((item) => ({ ...item, status: "uploading", error: null })));
+        const response = await workspaceApi.uploadAssistantFiles(
+            token,
+            pendingFiles.map((item) => item.file),
+            {
+                caseId: activeCaseId,
+                chatSessionId,
+                message: promptText,
+            }
+        );
+
+        const uploadedByName = new Map(response.files.map((item) => [item.filename, item]));
+        const errorsByName = new Map(response.errors.map((item) => [item.filename, item]));
+        const nextFiles = pendingFiles.map((item) => {
+            const uploaded = uploadedByName.get(item.file.name);
+            const failed = errorsByName.get(item.file.name);
+            if (uploaded) {
+                return {
+                    ...item,
+                    status: "uploaded" as AttachmentStatus,
+                    uploadedId: uploaded.id,
+                    temporary: uploaded.temporary,
+                    error: null,
+                };
+            }
+            return {
+                ...item,
+                status: "error" as AttachmentStatus,
+                error: failed?.error || t("assistantUploadFailed", "Upload failed."),
+            };
+        });
+        setPendingFiles(nextFiles);
+
+        if (response.errors.length) {
+            setError(response.errors.map((item) => `${item.filename}: ${item.error || "Upload failed"}`).join(" | "));
+        }
+
+        return {
+            uploadedIds: response.uploaded_document_ids,
+            uploadedFiles: nextFiles.filter((item) => item.status === "uploaded"),
+        };
+    }
+
+    async function submitPrompt(promptText: string): Promise<boolean> {
+        if (!canSend) {
+            setError(t("loginRequired", "Sign in to use the assistant."));
+            return false;
+        }
         const outbound = promptText.trim();
-        if (!outbound) return;
+        if (!outbound) return false;
         setError(null);
         setNotice(null);
-        await sendCaseMessage(activeCaseId, outbound, {
+        const draftRequest = isDraftIntent(outbound);
+        const revisionRequest = Boolean(draftPanelOpen && draftDocument && isDraftRevisionIntent(outbound) && !draftRequest);
+        const documentType = draftRequest
+            ? detectDraftDocumentType(outbound)
+            : draftDocument?.documentType || "General draft";
+        const draftRequestPrompt = revisionRequest && draftDocument
+            ? [
+                "Revise the existing draft below. Return only the updated draft text, without commentary.",
+                "",
+                `Revision instruction: ${outbound}`,
+                "",
+                "Current draft:",
+                draftDocument.content,
+            ].join("\n")
+            : outbound;
+
+        if (draftRequest || revisionRequest) {
+            pendingDraftRef.current = {
+                mode: revisionRequest ? "revision" : "create",
+                documentType,
+                title: draftDocument?.title || draftTitleFromType(documentType, selectedCase?.title),
+            };
+        } else {
+            pendingDraftRef.current = null;
+        }
+
+        const chatSessionId = activeSessionId || createChatSession(activeChatScopeId, outbound);
+        const uploadResult = pendingFiles.length ? await uploadPendingFiles(outbound, chatSessionId) : { uploadedIds: [] as string[], uploadedFiles: [] as PendingAssistantFile[] };
+        if (pendingFiles.length && uploadResult.uploadedIds.length === 0) return false;
+
+        await sendCaseMessage(activeChatScopeId, draftRequestPrompt, {
             workspaceMode,
             externalModeEnabled,
             topK: REASONING_TOP_K[reasoningLevel],
             reasoningLevel,
+            displayPrompt: outbound,
+            uploadedDocumentIds: uploadResult.uploadedIds,
+            uploadedFiles: uploadResult.uploadedFiles.map((item) => ({
+                id: item.uploadedId || item.id,
+                filename: item.file.name,
+                mimeType: item.file.type || "application/octet-stream",
+                temporary: item.temporary,
+            })),
         });
+        if (uploadResult.uploadedIds.length) {
+            setPendingFiles([]);
+            if (activeCaseId) void loadCaseContext(activeCaseId);
+        }
+        return true;
+    }
+
+    function selectAssistantMode(mode: AssistantMode) {
+        setAssistantMode(mode);
+        setWorkspaceMode(workspaceModeFromAssistantMode(mode));
+        setExternalModeEnabled(mode === "external");
     }
 
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (!draft.trim() || copilotLoading || composerRecording) return;
         const outbound = draft;
-        setDraft("");
-        await submitPrompt(outbound);
+        if (await submitPrompt(outbound)) setDraft("");
     }
 
     function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -253,47 +601,29 @@ export default function AssistantPage() {
         }
         if (!draft.trim() || composerRecording) return;
         const outbound = draft;
-        setDraft("");
-        void submitPrompt(outbound);
+        void submitPrompt(outbound).then((sent) => {
+            if (sent) setDraft("");
+        });
     }
 
     async function optimizePromptDraft() {
-        if (!token || !activeCaseId) return;
+        if (!token) return;
         const trimmed = draft.trim();
         if (!trimmed || optimizingPrompt || copilotLoading || composerRecording) return;
 
         setOptimizingPrompt(true);
         setError(null);
-
         try {
             const response = await workspaceApi.optimizePrompt(token, {
                 prompt: trimmed,
                 workspaceCaseId: activeCaseId,
                 workspaceDocumentId: null,
             });
-
             const optimizedPrompt = String(response.optimized_prompt || trimmed).trim() || trimmed;
-            const unchanged = Boolean(response.unchanged) || optimizedPrompt === trimmed;
-
-            if (!unchanged) {
-                setDraft(optimizedPrompt);
-            }
-
-            const strategyLabel = response.used_llm
-                ? "LLM"
-                : String(response.strategy || "heuristic").toUpperCase();
-            const note = response.notes?.trim() || (unchanged
-                ? t("promptAlreadyStrong", "Prompt already strong.")
-                : t("promptOptimizedNotice", "Prompt optimized for clearer legal reasoning."));
-            const improvements = (response.applied_improvements || []).slice(0, 2);
-            const improvementText = improvements.length ? ` ${improvements.join(" ")}` : "";
-            setNotice(`[${strategyLabel}] ${note}${improvementText}`);
+            if (optimizedPrompt !== trimmed && !response.unchanged) setDraft(optimizedPrompt);
+            setNotice(response.notes?.trim() || t("promptOptimizedNotice", "Prompt improved."));
         } catch (caught) {
-            if (caught instanceof Error && caught.message.trim()) {
-                setError(caught.message);
-            } else {
-                setError(t("optimizeFailed", "Unable to optimize the prompt."));
-            }
+            setError(caught instanceof Error && caught.message.trim() ? caught.message : t("optimizeFailed", "Unable to optimize the prompt."));
         } finally {
             setOptimizingPrompt(false);
         }
@@ -313,11 +643,9 @@ export default function AssistantPage() {
         if (!activeCaseId) return;
         const index = activeMessages.findIndex((item) => item.id === message.id);
         if (index < 1) return;
-
         for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
             if (activeMessages[cursor].role === "user") {
-                const prompt = activeMessages[cursor].content;
-                await submitPrompt(prompt);
+                await submitPrompt(activeMessages[cursor].content);
                 return;
             }
         }
@@ -363,12 +691,8 @@ export default function AssistantPage() {
                     mode: workspaceMode,
                     action_category: message.meta?.actionCategory || null,
                     action_status: message.meta?.actionStatus || null,
-                    root_cause: value === "down" ? (rootCause || null) : null,
-                    legal_domain: true,
-                    jurisdiction: selectedCase?.jurisdiction_country || null,
                 },
             });
-
             setChatFeedback((current) => ({
                 ...current,
                 [message.id]: { value, status: "submitted", rootCause: value === "down" ? (rootCause || null) : null },
@@ -382,18 +706,20 @@ export default function AssistantPage() {
     }
 
     function handleAskMissingInfo(_message: ChatMessage, missingInfo: string) {
-        const prompt = [
+        void submitPrompt([
             "Missing information follow-up:",
             missingInfo,
             "",
-            "Explain why this missing fact matters, what document or fact the lawyer should request, and how it could change the analysis.",
-        ].join("\n");
-        void submitPrompt(prompt);
+            "Explain why this missing fact matters and what document or fact the lawyer should request.",
+        ].join("\n"));
     }
 
     function handleGenerateDocument(message: ChatMessage) {
-        if (!activeCaseId || message.role !== "assistant") return;
+        handleEditInLegalEditor(message);
+    }
 
+    function handleEditInLegalEditor(message: ChatMessage) {
+        if (!activeCaseId || message.role !== "assistant") return;
         const index = activeMessages.findIndex((row) => row.id === message.id);
         let promptText: string | null = null;
         for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
@@ -408,7 +734,7 @@ export default function AssistantPage() {
             caseId: activeCaseId,
             caseTitle: selectedCase?.title || null,
             prompt: promptText,
-            answer: message.meta?.rawAnswer || message.content,
+            answer: cleanDraftContent(message.meta?.rawAnswer || message.content),
             sources: message.meta?.sources || [],
             citations: message.meta?.citations || [],
             createdAt: new Date().toISOString(),
@@ -417,150 +743,307 @@ export default function AssistantPage() {
     }
 
     async function handleTrustReview(message: ChatMessage, decision: "approved" | "needs_revision") {
-        if (!token || !activeCaseId) return;
-        const index = activeMessages.findIndex((row) => row.id === message.id);
-        if (index < 0) return;
+        await handleFeedback(message, decision === "approved" ? "up" : "down", decision === "needs_revision" ? "other" : null);
+        setNotice(decision === "approved" ? "AI output marked reviewed." : "AI output marked for correction.");
+    }
 
-        let promptText = t("noPromptContext", "No prompt context");
-        for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-            if (activeMessages[cursor].role === "user") {
-                promptText = activeMessages[cursor].content;
-                break;
-            }
-        }
+    function saveQuickDraft() {
+        if (!draftDocument) return;
+        localStorage.setItem(`assistant-quick-draft:${activeChatScopeId}`, JSON.stringify(draftDocument));
+        setNotice(t("draftSavedNotice", "Draft saved locally."));
+    }
 
-        setChatFeedback((current) => ({
-            ...current,
-            [message.id]: {
-                value: decision === "approved" ? "up" : "down",
-                status: "saving",
-                rootCause: decision === "needs_revision" ? "other" : null,
-            },
-        }));
-
+    async function copyQuickDraft() {
+        if (!draftDocument) return;
         try {
-            await workspaceApi.createCopilotFeedback(token, {
-                message_id: message.id,
-                case_id: activeCaseId,
-                document_id: null,
-                prompt_text: promptText,
-                response_text: message.content,
-                parsed_intent: message.meta?.parsedIntent || null,
-                confidence: message.meta?.confidence || null,
-                feedback_value: decision === "approved" ? "up" : "down",
-                root_cause: decision === "needs_revision" ? "other" : null,
-                legal_domain: true,
-                jurisdiction: selectedCase?.jurisdiction_country || null,
-                source_count: message.meta?.sources?.length || 0,
-                metadata: {
-                    review_decision: decision,
-                    review_surface: "trust_panel",
-                    trust_panel: message.meta?.trustPanel || null,
-                    mode: workspaceMode,
-                },
-            });
-            setChatFeedback((current) => ({
-                ...current,
-                [message.id]: {
-                    value: decision === "approved" ? "up" : "down",
-                    status: "submitted",
-                    rootCause: decision === "needs_revision" ? "other" : null,
-                },
-            }));
-            setNotice(decision === "approved" ? "AI output marked reviewed." : "AI output marked for correction.");
+            await navigator.clipboard.writeText(`${draftDocument.title}\n\n${draftDocument.content}`);
+            setNotice(t("copiedToClipboard", "Copied to clipboard."));
         } catch {
-            setChatFeedback((current) => ({
-                ...current,
-                [message.id]: {
-                    value: decision === "approved" ? "up" : "down",
-                    status: "error",
-                    rootCause: decision === "needs_revision" ? "other" : null,
-                },
-            }));
+            setError(t("copyFailed", "Unable to copy message."));
         }
     }
 
+    async function exportQuickDraftDocx() {
+        if (!draftDocument) return;
+        const { Document: DocxDocument, HeadingLevel, Packer, Paragraph, TextRun } = await import("docx");
+        const paragraphs = [
+            new Paragraph({
+                text: draftDocument.title,
+                heading: HeadingLevel.TITLE,
+            }),
+            new Paragraph({
+                children: [new TextRun({ text: draftDocument.documentType, italics: true })],
+            }),
+            ...draftDocument.content.split(/\n{2,}/).flatMap((block) => {
+                const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+                if (!lines.length) return [];
+                if (lines.length > 1 && lines.every((line) => /^[-*•]\s+/.test(line))) {
+                    return lines.map((line) => new Paragraph({ text: line.replace(/^[-*•]\s+/, ""), bullet: { level: 0 } }));
+                }
+                return [new Paragraph({ text: lines.join("\n"), spacing: { after: 180 } })];
+            }),
+        ];
+        const doc = new DocxDocument({ sections: [{ children: paragraphs }] });
+        const blob = await Packer.toBlob(doc);
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        const stamp = new Date().toISOString().slice(0, 10);
+        anchor.href = url;
+        anchor.download = `${filenameSafe(`${selectedCase?.title || "assistant"}_${draftDocument.title}_${stamp}`)}.docx`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function openQuickDraftInLegalEditor() {
+        if (!draftDocument || !activeCaseId) return;
+        saveEditorDraftSeed({
+            source: "assistant",
+            caseId: activeCaseId,
+            caseTitle: selectedCase?.title || null,
+            prompt: null,
+            answer: draftDocument.content,
+            sources: [],
+            citations: [],
+            createdAt: new Date().toISOString(),
+        });
+        navigate(`/editor/${activeCaseId}`);
+    }
+
     const starterPrompts = [
-        t("starterPrompt1", "Summarize this case in 8 bullet points with contractual context."),
-        t("starterPrompt2", "Identify top legal and operational risks with evidence anchors."),
-        t("starterPrompt3", "Draft a concise client email explaining current posture and next steps."),
+        t("starterPrompt1", "Summarize this case"),
+        t("starterPrompt2", "Identify legal risks"),
+        t("starterPrompt3", "Draft a client email"),
+        t("starterPrompt4", "List deadlines"),
+        t("starterPrompt5", "Analyze contract"),
     ];
 
+    const composer = (
+        <footer
+            className={`minimal-composer-shell ${hasConversation ? "dock" : "hero"} ${dragActive ? "drag-active" : ""}`}
+            onDragEnter={handleComposerDragEnter}
+            onDragLeave={handleComposerDragLeave}
+            onDragOver={handleComposerDragOver}
+            onDrop={handleComposerDrop}
+        >
+            {dragActive ? (
+                <div className="minimal-drop-hint">
+                    {t("dropFilesToAttach", "Drop files to attach")}
+                </div>
+            ) : null}
+            {pendingFiles.length ? (
+                <div className="minimal-file-chips" aria-label={t("attachedFiles", "Attached files")}>
+                    {pendingFiles.map((item) => (
+                        <span className={`minimal-file-chip ${item.status}`} key={item.id}>
+                            <strong>{item.file.name}</strong>
+                            <em>{item.status === "error" ? item.error : `${formatFileSize(item.file.size)} | ${item.status}`}</em>
+                            <button
+                                aria-label={t("removeFile", "Remove file")}
+                                disabled={item.status === "uploading"}
+                                onClick={() => removePendingFile(item.id)}
+                                type="button"
+                            >
+                                x
+                            </button>
+                        </span>
+                    ))}
+                </div>
+            ) : null}
+
+            <form
+                className={`minimal-composer ${copilotLoading || optimizingPrompt ? "busy" : ""}`}
+                onSubmit={(event) => {
+                    void handleSubmit(event);
+                }}
+            >
+                <input
+                    ref={fileInputRef}
+                    accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown,text/x-markdown"
+                    multiple
+                    onChange={(event) => {
+                        addPendingFiles(event.target.files);
+                        event.target.value = "";
+                    }}
+                    type="file"
+                    hidden
+                />
+                <button
+                    aria-label={t("attachFiles", "Attach files")}
+                    className="minimal-icon-button"
+                    disabled={copilotLoading || optimizingPrompt || composerRecording || pendingFiles.some((item) => item.status === "uploading")}
+                    onClick={() => fileInputRef.current?.click()}
+                    title={t("attachFilesMax", "Attach files (10 max)")}
+                    type="button"
+                >
+                    +
+                </button>
+                <textarea
+                    disabled={!canSend || pendingFiles.some((item) => item.status === "uploading")}
+                    onKeyDown={handleComposerKeyDown}
+                    onChange={(event) => setDraft(event.target.value)}
+                    placeholder={canSend ? composerPlaceholder : t("loginRequired", "Sign in to use the assistant...")}
+                    value={draft}
+                />
+                <button
+                    aria-label={optimizingPrompt ? t("optimizing", "Optimizing...") : t("optimize", "Improve prompt")}
+                    className={`minimal-icon-button minimal-improve-button ${optimizingPrompt ? "busy" : ""}`}
+                    disabled={!draft.trim() || copilotLoading || optimizingPrompt || composerRecording || !canSend || pendingFiles.some((item) => item.status === "uploading")}
+                    onClick={() => {
+                        void optimizePromptDraft();
+                    }}
+                    title={optimizingPrompt ? t("optimizing", "Optimizing...") : t("optimize", "Improve prompt")}
+                    type="button"
+                >
+                    <svg aria-hidden="true" viewBox="0 0 20 20">
+                        <path d="M10 2.8 11.2 6l3.2 1.2-3.2 1.2L10 11.6 8.8 8.4 5.6 7.2 8.8 6 10 2.8Z" />
+                        <path d="M15.2 11.2 15.9 13l1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z" />
+                        <path d="M5.1 11.9 5.7 13.3l1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6.6-1.4Z" />
+                    </svg>
+                </button>
+                <button
+                    aria-label={composerRecording ? t("stopVoiceInput", "Stop voice input") : t("voiceInput", "Voice input")}
+                    className={`minimal-icon-button ${composerRecording ? "recording" : ""}`}
+                    disabled={!token || copilotLoading || optimizingPrompt || pendingFiles.some((item) => item.status === "uploading")}
+                    onClick={() => {
+                        if (composerRecording) stopComposerRecording();
+                        else void startComposerRecording();
+                    }}
+                    title={composerRecording ? t("stopVoiceInput", "Stop voice input") : t("voiceInput", "Voice input")}
+                    type="button"
+                >
+                    <svg aria-hidden="true" viewBox="0 0 20 20">
+                        <rect x="7" y="3.2" width="6" height="9.2" rx="3" />
+                        <path d="M5.5 9.5a4.5 4.5 0 0 0 9 0" />
+                        <path d="M10 14v3" />
+                        <path d="M7 17h6" />
+                    </svg>
+                </button>
+                <button
+                    aria-label={copilotLoading ? t("stopRequest", "Stop request") : t("send", "Send")}
+                    className={`minimal-send-button ${copilotLoading ? "is-stop" : ""}`}
+                    disabled={!copilotLoading && (!draft.trim() || optimizingPrompt || composerRecording || !canSend || pendingFiles.some((item) => item.status === "uploading"))}
+                    onClick={copilotLoading ? stopCopilotRequest : undefined}
+                    title={copilotLoading ? t("stopRequest", "Stop request") : t("send", "Send")}
+                    type={copilotLoading ? "button" : "submit"}
+                >
+                    {copilotLoading ? (
+                        <svg aria-hidden="true" viewBox="0 0 20 20">
+                            <rect x="5.5" y="5.5" width="9" height="9" rx="1.6" />
+                        </svg>
+                    ) : (
+                        <svg aria-hidden="true" viewBox="0 0 20 20">
+                            <path d="M4.5 10h9.8" />
+                            <path d="m10.2 5.2 4.8 4.8-4.8 4.8" />
+                        </svg>
+                    )}
+                </button>
+            </form>
+
+            <div className="minimal-composer-meta">
+                <span className={`minimal-grounding-badge ${assistantGroundingState}`}>{groundingLabel(assistantGroundingState)}</span>
+                <span>{activeCaseId ? `${caseTitle}${activeClient?.name ? ` | ${activeClient.name}` : ""}` : t("generalAssistant", "General Assistant")}</span>
+                <label>
+                    <span>{t("modes", "Mode")}</span>
+                    <select disabled={copilotLoading || optimizingPrompt || composerRecording} onChange={(event) => selectAssistantMode(event.target.value as AssistantMode)} value={assistantMode}>
+                        {ASSISTANT_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
+                    </select>
+                </label>
+                <label>
+                    <span>{t("reasoningLabel", "Reasoning")}</span>
+                    <select disabled={copilotLoading || optimizingPrompt || composerRecording} onChange={(event) => setReasoningLevel(event.target.value as ReasoningLevel)} value={reasoningLevel}>
+                        <option value="low">Fast</option>
+                        <option value="medium">Balanced</option>
+                        <option value="high">Deep</option>
+                    </select>
+                </label>
+                {assistantMode === "agent" ? <span>{t("agentModeSafe", "Write actions require confirmation.")}</span> : null}
+            </div>
+        </footer>
+    );
+
+    const draftEditorPanel = draftPanelOpen && draftDocument ? (
+        <aside className="assistant-draft-panel" aria-label={t("draftEditor", "Draft editor")}>
+            <div className="assistant-draft-toolbar">
+                <div className="assistant-draft-title-group">
+                    <input
+                        aria-label={t("draftTitle", "Draft title")}
+                        onChange={(event) => setDraftDocument((current) => current ? { ...current, title: event.target.value, updatedAt: new Date().toISOString() } : current)}
+                        value={draftDocument.title}
+                    />
+                    <span>{draftDocument.documentType}</span>
+                </div>
+                <div className="assistant-draft-actions">
+                    <button onClick={saveQuickDraft} type="button">{t("save", "Save")}</button>
+                    <button onClick={() => void exportQuickDraftDocx()} type="button">{t("exportDocx", "Export DOCX")}</button>
+                    <button onClick={() => void copyQuickDraft()} type="button">{t("copy", "Copy")}</button>
+                    {activeCaseId ? (
+                        <button onClick={openQuickDraftInLegalEditor} type="button">{t("openInLegalEditor", "Open in Legal Editor")}</button>
+                    ) : null}
+                    <button aria-label={t("closePanel", "Close panel")} onClick={() => setDraftPanelOpen(false)} type="button">x</button>
+                </div>
+            </div>
+            <div className="assistant-draft-canvas">
+                <textarea
+                    aria-label={t("editableDraft", "Editable draft")}
+                    onChange={(event) => setDraftDocument((current) => current ? { ...current, content: event.target.value, updatedAt: new Date().toISOString() } : current)}
+                    value={draftDocument.content}
+                />
+            </div>
+        </aside>
+    ) : null;
+
+    function handleEditorSaved(document: DraftDocument) {
+        setNotice(`${document.title} saved.`);
+    }
+
+    const legalEditorPanel = editorDraftPayload && token ? (
+        <LegalEditorPanel
+            key={`${editorDraftPayload.title}-${editorDraftPayload.content_text?.length || editorDraftPayload.content_html.length}`}
+            token={token}
+            payload={editorDraftPayload}
+            onClose={() => {
+                setEditorFocusMode(false);
+                setEditorDraftPayload(null);
+            }}
+            onSaved={handleEditorSaved}
+            onFocusModeChange={setEditorFocusMode}
+        />
+    ) : draftEditorPanel;
+
     return (
-        <section className="shell-page assistant-route-page">
-            <section className="copilot-shell chat-only-shell assistant-route-shell">
-                <header className="assistant-topbar">
-                    <div>
-                        <p className="meta">{t("caseContext", "Case Context")}</p>
-                        <h2>{selectedCase?.title || t("assistantDefaultTitle", "Assistant")}</h2>
-                        <p className="workspace-subtitle">
-                            {canSend
-                                ? `Case #${activeCaseId} · ${sessions.length} ${t("sessionCount", "chat session(s)")}`
-                                : t("selectCaseForAssistant", "Select a case to activate full assistant context.")}
-                        </p>
+        <section className="shell-page assistant-route-page legal-copilot-page minimal-assistant-page">
+            <section className="minimal-assistant-shell">
+                <header className="assistant-minimal-topbar">
+                    <div className="assistant-minimal-brand">
+                        <span>AI</span>
+                        <strong>{t("navAssistantLabel", "Assistant")}</strong>
                     </div>
-                    <div className="assistant-topbar-actions">
+                    <button className="assistant-minimal-case" onClick={() => navigate(activeCaseId ? `/cases/${activeCaseId}` : "/cases")} type="button">
+                        <span>{activeCaseId ? topbarCaseLabel : t("generalAssistant", "General Assistant")}</span>
+                        {activeCaseId ? <em>{caseJurisdictionLabel(selectedCase?.jurisdiction_country)}</em> : null}
+                    </button>
+                    <div className="assistant-minimal-actions">
                         <button
                             onClick={() => {
-                                if (!activeCaseId) return;
-                                const sessionId = createChatSession(activeCaseId);
-                                selectChatSession(activeCaseId, sessionId);
+                                const sessionId = createChatSession(activeChatScopeId);
+                                selectChatSession(activeChatScopeId, sessionId);
                             }}
                             type="button"
                         >
                             {t("newChat", "New chat")}
                         </button>
+                        <button onClick={() => setHistorySidebarOpen((current) => !current)} type="button">{t("history", "History")}</button>
+                        <span className="assistant-avatar">{(user?.name || "U").slice(0, 1).toUpperCase()}</span>
                     </div>
                 </header>
 
-                {notice ? <div className="notice-banner">{notice}</div> : null}
-                {error ? <div className="error-banner">{error}</div> : null}
+                {notice ? <div className="minimal-toast">{notice}</div> : null}
+                {error ? <div className="minimal-toast error">{error}</div> : null}
 
-                {!canSend ? (
-                    <div className="chat-surface chat-surface-minimal">
-                        <div className="empty-chat conversation-empty assistant-no-case">
-                            <h3>{t("noCaseSelected", "No case selected")}</h3>
-                            <p>{t("openCaseFirst", "Open a case first to get the full assistant workspace.")}</p>
-                            <div className="empty-chat-actions">
-                                <button onClick={() => navigate("/cases")} type="button">{t("openCases", "Open Cases")}</button>
-                                <Link className="shell-inline-link" to="/dashboard">{t("goDashboard", "Go to Dashboard")}</Link>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    <div className={`assistant-workbench ${historySidebarOpen ? "" : "history-hidden"}`}>
-                        <div className="chat-surface assistant-main-surface">
-                            <details
-                                className="workspace-collapsible chat-history-collapsible chat-history-collapsible-main"
-                                onToggle={(event) => setChatHistoryOpen((event.currentTarget as HTMLDetailsElement).open)}
-                                open={chatHistoryOpen}
-                            >
-                                <summary>{t("conversationOutputs", "Conversation and outputs")}</summary>
+                <div className={`assistant-draft-split ${legalEditorPanel ? "is-open" : ""} ${editorFocusMode ? "editor-focus-mode" : ""}`}>
+                    <main className={`assistant-minimal-workspace ${hasConversation ? "has-conversation" : "is-empty"}`}>
+                        {hasConversation ? (
+                            <div className="assistant-minimal-chat">
                                 <div className="message-stream">
-                                    {!activeMessages.length && !copilotLoading ? (
-                                        <div className="empty-chat conversation-empty">
-                                            <h3>{t("noConversationYet", "No conversation yet")}</h3>
-                                            <p>{t("startWithPrompt", "Use the prompt box below to start.")}</p>
-                                            <p className="starter-prompt-note">{t("starterPrompts", "Starter prompts")}</p>
-                                            <div className="empty-chat-actions starter-prompt-actions">
-                                                {starterPrompts.map((prompt) => (
-                                                    <button
-                                                        className="starter-prompt-chip"
-                                                        disabled={copilotLoading}
-                                                        key={prompt}
-                                                        onClick={() => {
-                                                            if (!activeCaseId) return;
-                                                            void submitPrompt(prompt);
-                                                        }}
-                                                        type="button"
-                                                    >
-                                                        {prompt}
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ) : null}
-
                                     {activeMessages.map((message) => (
                                         <ChatMessageBubble
                                             feedback={chatFeedback[message.id]}
@@ -574,6 +1057,7 @@ export default function AssistantPage() {
                                                 void handleFeedback(msg, value, rootCause);
                                             }}
                                             onAskMissingInfo={handleAskMissingInfo}
+                                            onEditInLegalEditor={handleEditInLegalEditor}
                                             onGenerateDocument={handleGenerateDocument}
                                             onRegenerate={() => {
                                                 void handleRegenerate(message);
@@ -583,258 +1067,74 @@ export default function AssistantPage() {
                                             }}
                                         />
                                     ))}
-
                                     {copilotLoading ? <TypingIndicator /> : null}
                                     <div ref={messageEndRef} aria-hidden="true" />
                                 </div>
-                            </details>
-
-                            <footer className="composer-shell">
-                                {attachmentMenuOpen ? (
-                                    <div className="attachment-menu">
-                                        <div className="menu-group">
-                                            <small className="menu-group-title">{t("modes", "Modes")}</small>
-                                            <button
-                                                className={`menu-item mode ${workspaceMode === "chat" ? "active" : ""}`}
-                                                onClick={() => {
-                                                    setWorkspaceMode("chat");
-                                                    setAttachmentMenuOpen(false);
-                                                }}
-                                                type="button"
-                                            >
-                                                <strong>{t("modeChat", "Chat Mode")}</strong>
-                                                <small>{t("modeChatDesc", "Fast legal discussion")}</small>
-                                            </button>
-                                            <button
-                                                className={`menu-item mode ${workspaceMode === "agent" ? "active" : ""}`}
-                                                onClick={() => {
-                                                    setWorkspaceMode("agent");
-                                                    setAttachmentMenuOpen(false);
-                                                }}
-                                                type="button"
-                                            >
-                                                <strong>{t("modeAgent", "Agent Mode")}</strong>
-                                                <small>{t("modeAgentDesc", "Step-by-step execution")}</small>
-                                            </button>
-                                            <button
-                                                className={`menu-item mode ${workspaceMode === "legal_search" ? "active" : ""}`}
-                                                onClick={() => {
-                                                    setWorkspaceMode("legal_search");
-                                                    setAttachmentMenuOpen(false);
-                                                }}
-                                                type="button"
-                                            >
-                                                <strong>{t("modeLegalSearch", "Legal Search Mode")}</strong>
-                                                <small>{t("modeLegalSearchDesc", "Source-grounded legal answers")}</small>
-                                            </button>
-                                            <button
-                                                className={`menu-item mode ${externalModeEnabled ? "active" : ""}`}
-                                                onClick={() => {
-                                                    setExternalModeEnabled((current) => !current);
-                                                    setAttachmentMenuOpen(false);
-                                                }}
-                                                type="button"
-                                            >
-                                                <strong>{t("modeExternal", "External Mode")}</strong>
-                                                <small>{t("modeExternalDesc", "Web-enhanced legal research")}</small>
-                                            </button>
-                                        </div>
-                                        <div className="menu-group">
-                                            <small className="menu-group-title">{t("attachments", "Attachments")}</small>
-                                            <p className="muted">
-                                                {t("attachmentsRemovedNotice", "Chat image analysis was removed. Use scanned-document upload from the case workspace instead.")}
-                                            </p>
-                                        </div>
-                                    </div>
-                                ) : null}
-
-                                <form
-                                    className={`composer ${copilotLoading || optimizingPrompt ? "busy" : ""}`}
-                                    onSubmit={(event) => {
-                                        void handleSubmit(event);
-                                    }}
-                                >
-                                    <button
-                                        aria-label={t("addOptions", "Add options")}
-                                        className="composer-plus"
-                                        onClick={() => {
-                                            setAttachmentMenuOpen((current) => !current);
-                                        }}
-                                        title={attachmentMenuOpen ? t("closeMenu", "Close menu") : t("openMenu", "Open menu")}
-                                        type="button"
-                                    >
-                                        {attachmentMenuOpen ? "-" : "+"}
-                                    </button>
-
-                                    <textarea
-                                        onKeyDown={handleComposerKeyDown}
-                                        onChange={(event) => setDraft(event.target.value)}
-                                        placeholder={t("askPlaceholder", "Ask about your case, risks, deadlines, or draft something...")}
-                                        value={draft}
-                                    />
-
-                                    <div className="composer-controls">
-                                        <button
-                                            aria-label={optimizingPrompt ? t("optimizing", "Optimizing...") : t("optimize", "Optimize")}
-                                            className={`composer-optimize ${optimizingPrompt ? "busy" : ""}`}
-                                            disabled={!draft.trim() || copilotLoading || optimizingPrompt || composerRecording}
-                                            onClick={() => {
-                                                void optimizePromptDraft();
-                                            }}
-                                            title={optimizingPrompt ? t("optimizing", "Optimizing...") : t("optimize", "Optimize")}
-                                            type="button"
-                                        >
-                                            <svg aria-hidden="true" viewBox="0 0 20 20">
-                                                <path d="M10 2.8 11.3 6l3.2 1.3-3.2 1.3L10 11.8 8.7 8.6 5.5 7.3 8.7 6 10 2.8Z" />
-                                                <path d="M15.5 11.2 16.2 13l1.8.7-1.8.7-0.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8Z" />
-                                                <path d="M5.1 11.8 5.7 13.3l1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6.6-1.5Z" />
-                                            </svg>
-                                        </button>
-                                        <button
-                                            aria-label={composerRecording ? t("stopVoiceInput", "Stop voice input") : t("voiceInput", "Voice input")}
-                                            className={`composer-icon-button ${composerRecording ? "recording" : ""}`}
-                                            disabled={!token || copilotLoading || optimizingPrompt}
-                                            onClick={() => {
-                                                if (composerRecording) stopComposerRecording();
-                                                else void startComposerRecording();
-                                            }}
-                                            title={composerRecording ? t("stopVoiceInput", "Stop voice input") : t("voiceInput", "Voice input")}
-                                            type="button"
-                                        >
-                                            <svg aria-hidden="true" viewBox="0 0 20 20">
-                                                <rect x="7" y="3.2" width="6" height="9.2" rx="3" />
-                                                <path d="M5.5 9.5a4.5 4.5 0 0 0 9 0" />
-                                                <path d="M10 14v3" />
-                                                <path d="M7 17h6" />
-                                            </svg>
-                                        </button>
-                                        <button
-                                            aria-label={copilotLoading ? t("stopRequest", "Stop request") : t("send", "Send")}
-                                            className={`composer-send ${copilotLoading ? "is-stop" : ""}`}
-                                            disabled={!copilotLoading && (!draft.trim() || optimizingPrompt || composerRecording)}
-                                            onClick={copilotLoading ? stopCopilotRequest : undefined}
-                                            title={copilotLoading ? t("stopRequest", "Stop request") : t("send", "Send")}
-                                            type={copilotLoading ? "button" : "submit"}
-                                        >
-                                            {copilotLoading ? (
-                                                <svg aria-hidden="true" viewBox="0 0 20 20">
-                                                    <rect x="5.5" y="5.5" width="9" height="9" rx="1.6" />
-                                                </svg>
-                                            ) : (
-                                                <svg aria-hidden="true" viewBox="0 0 20 20">
-                                                    <path d="M4.5 10h9.8" />
-                                                    <path d="m10.2 5.2 4.8 4.8-4.8 4.8" />
-                                                </svg>
-                                            )}
-                                        </button>
-                                    </div>
-                                </form>
-
-                                <div className="composer-selected-row">
-                                    <label className="reasoning-inline-control" aria-label={t("reasoningLabel", "Reasoning")}
-                                    >
-                                        <span>{t("reasoningLabel", "Reasoning")}</span>
-                                        <select
-                                            aria-label={t("reasoningLabel", "Reasoning")}
-                                            disabled={copilotLoading || optimizingPrompt || composerRecording}
-                                            onChange={(event) => setReasoningLevel(event.target.value as ReasoningLevel)}
-                                            value={reasoningLevel}
-                                        >
-                                            <option value="low">{t("reasoningLow", "Low")}</option>
-                                            <option value="medium">{t("reasoningMedium", "Medium")}</option>
-                                            <option value="high">{t("reasoningHigh", "High")}</option>
-                                        </select>
-                                    </label>
-                                    <button
-                                        className="selected-mode-chip primary"
-                                        onClick={() => setAttachmentMenuOpen(true)}
-                                        type="button"
-                                    >
-                                        {workspaceMode === "chat"
-                                            ? t("modeChat", "Chat Mode")
-                                            : workspaceMode === "agent"
-                                                ? t("modeAgent", "Agent Mode")
-                                                : t("modeLegalSearch", "Legal Search Mode")}
-                                        {" "}v
-                                    </button>
-                                    {externalModeEnabled ? (
-                                        <button
-                                            className="selected-mode-chip external"
-                                            onClick={() => setExternalModeEnabled(false)}
-                                            type="button"
-                                        >
-                                            {t("modeExternal", "External Mode")}
-                                        </button>
-                                    ) : null}
-                                </div>
-                            </footer>
-                        </div>
-
-                        {historySidebarOpen ? (
-                            <aside className="assistant-history-sidebar" aria-label={t("chatHistory", "Chat history")}>
-                                <button
-                                    aria-label={t("hideHistory", "Hide history")}
-                                    className="assistant-history-edge-toggle open"
-                                    onClick={() => setHistorySidebarOpen(false)}
-                                    title={t("hideHistory", "Hide history")}
-                                    type="button"
-                                >
-                                    -
-                                </button>
-                                <div className="assistant-history-head">
-                                    <h3>{t("chatHistory", "Chat history")}</h3>
-                                </div>
-                                <div className="assistant-history-list">
-                                    {sessions.length ? sessions.map((session) => (
-                                        <div className={`assistant-history-row ${activeSessionId === session.id ? "active" : ""}`} key={session.id}>
-                                            <button
-                                                className={`assistant-history-item ${activeSessionId === session.id ? "active" : ""}`}
-                                                onClick={() => {
-                                                    if (!activeCaseId) return;
-                                                    selectChatSession(activeCaseId, session.id);
-                                                }}
-                                                type="button"
-                                            >
-                                                <strong>{session.title || t("newChat", "New chat")}</strong>
-                                                <small>{formatTimestamp(session.updatedAt, locale)}</small>
-                                            </button>
-                                            <button
-                                                aria-label={t("deleteChat", "Delete chat")}
-                                                className="assistant-history-delete"
-                                                onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    if (!activeCaseId) return;
-                                                    removeChatSession(activeCaseId, session.id);
-                                                }}
-                                                title={t("deleteChat", "Delete chat")}
-                                                type="button"
-                                            >
-                                                <svg aria-hidden="true" viewBox="0 0 20 20">
-                                                    <path d="M5.6 6.8h8.8" />
-                                                    <path d="M8 6.8V5.5h4v1.3" />
-                                                    <path d="M7.3 6.8v7.1" />
-                                                    <path d="M10 6.8v7.1" />
-                                                    <path d="M12.7 6.8v7.1" />
-                                                    <path d="M6.6 6.8h6.8v8.1a1 1 0 0 1-1 1H7.6a1 1 0 0 1-1-1Z" />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    )) : <p className="assistant-history-empty">{t("noHistoryYet", "No history yet.")}</p>}
-                                </div>
-                            </aside>
+                            </div>
                         ) : (
-                            <button
-                                aria-label={t("showHistory", "Show history")}
-                                className="assistant-history-edge-toggle closed"
-                                onClick={() => setHistorySidebarOpen(true)}
-                                title={t("showHistory", "Show history")}
-                                type="button"
-                            >
-                                +
-                            </button>
+                            <div className="assistant-empty-center">
+                                <h1>{t("howCanIAssist", "How can I assist?")}</h1>
+                                <p>{activeCaseId ? topbarCaseLabel : t("generalAssistantHint", "General assistant. Attach files here for temporary document context.")}</p>
+                                {composer}
+                                <div className="minimal-mode-pills" aria-label="Assistant capabilities">
+                                    {compactModes.map((mode) => (
+                                        <button className={assistantMode === mode.id ? "active" : ""} key={mode.id} onClick={() => selectAssistantMode(mode.id)} type="button">
+                                            {mode.label}
+                                        </button>
+                                    ))}
+                                    <button className={reasoningLevel === "high" ? "active" : ""} onClick={() => setReasoningLevel((current) => current === "high" ? "medium" : "high")} type="button">
+                                        Deep reasoning
+                                    </button>
+                                </div>
+                                <div className="minimal-starter-grid">
+                                    {starterPrompts.map((prompt) => (
+                                        <button disabled={!canSend || copilotLoading} key={prompt} onClick={() => void submitPrompt(prompt)} type="button">
+                                            {prompt}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
                         )}
-                    </div>
-                )}
+
+                        {hasConversation ? composer : null}
+                    </main>
+                    {legalEditorPanel}
+                </div>
+
+                {historySidebarOpen ? (
+                    <aside className="minimal-history-panel" aria-label="Chat history">
+                        <div className="minimal-history-head">
+                            <strong>{t("history", "History")}</strong>
+                            <button onClick={() => setHistorySidebarOpen(false)} type="button">Close</button>
+                        </div>
+                        <input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Search conversations..." />
+                        <div className="minimal-history-list">
+                            {filteredSessions.length ? filteredSessions.map((session) => (
+                                <div className={`minimal-history-row ${activeSessionId === session.id ? "active" : ""}`} key={session.id}>
+                                    <button
+                                        onClick={() => {
+                                            selectChatSession(activeChatScopeId, session.id);
+                                            setHistorySidebarOpen(false);
+                                        }}
+                                        type="button"
+                                    >
+                                        <strong>{session.title || t("newChat", "New chat")}</strong>
+                                        <span>{formatTimestamp(session.updatedAt, locale)}</span>
+                                    </button>
+                                    <button
+                                        aria-label={t("deleteChat", "Delete chat")}
+                                        onClick={() => {
+                                            removeChatSession(activeChatScopeId, session.id);
+                                        }}
+                                        type="button"
+                                    >
+                                        x
+                                    </button>
+                                </div>
+                            )) : <p>{t("noHistoryYet", "No history yet.")}</p>}
+                        </div>
+                    </aside>
+                ) : null}
             </section>
         </section>
     );

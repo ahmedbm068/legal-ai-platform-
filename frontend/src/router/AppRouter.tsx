@@ -24,6 +24,7 @@ export default function AppRouter() {
 
                     <Route path="cases" element={<CasesPage />} />
                     <Route path="cases/:caseId" element={<CasesPage />} />
+                    <Route path="cases/:caseId/calendar" element={<CalendarPage />} />
                     <Route path="cases/:caseId/:tab" element={<CasesPage />} />
 
                     <Route path="assistant" element={<AssistantPage />} />

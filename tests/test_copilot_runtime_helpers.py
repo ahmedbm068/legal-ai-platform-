@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -32,6 +33,336 @@ class CopilotFieldExtractionTests(unittest.TestCase):
             stop_labels=["name", "email", "address"],
         )
         self.assertEqual(extracted, "+21626002544")
+
+    def test_case_document_breakdown_is_opt_in(self) -> None:
+        self.assertFalse(
+            self.service._wants_case_document_breakdown(
+                "summarize the case with the main contract and healthcare operations issues"
+            )
+        )
+        self.assertTrue(
+            self.service._wants_case_document_breakdown(
+                "summarize the case with a document-by-document breakdown"
+            )
+        )
+
+    def test_build_case_people_role_lines_extracts_roles_from_uploaded_docs(self) -> None:
+        documents = [
+            SimpleNamespace(
+                filename="01_equipment_maintenance_agreement.pdf",
+                extracted_text="Parties: MedCare Clinics SARL and BioServe Medical Systems SARL.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                filename="10_management_call_summary.pdf",
+                extracted_text="Participants: MedCare CEO, MedCare Legal, BioServe Director, BioServe Service Lead.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+        ]
+        lines = self.service._build_case_people_role_lines(
+            documents=documents,  # type: ignore[arg-type]
+            reasoning_parties=[],
+        )
+        joined = "\n".join(lines)
+        self.assertIn("MedCare Clinics SARL: client", joined)
+        self.assertIn("BioServe Medical Systems SARL: medical equipment maintenance provider", joined)
+        self.assertIn("MedCare CEO: management-level participant", joined)
+        self.assertIn("BioServe Director: management-level BioServe participant", joined)
+
+    def test_case_brief_summary_uses_numbered_template(self) -> None:
+        lines = self.service._build_case_brief_summary_lines(
+            case=SimpleNamespace(
+                id=29,
+                title="MedCare v BioServe - Medical Equipment Maintenance Dispute",
+                jurisdiction_country="Tunisia",
+            ),  # type: ignore[arg-type]
+            jurisdiction_context={"country_display_name": "Tunisia"},
+            overview="MedCare and BioServe dispute medical equipment maintenance performance.",
+            people_role_lines=["MedCare Clinics SARL: client. [source: 01_equipment_maintenance_agreement.pdf]"],
+            key_takeaways=["Invoice quantum is contested around 64,380 TND."],
+            key_dates=[{"label": "Incident Date", "value": "March 21, 2026"}],
+            evidence_sources=[
+                "01_equipment_maintenance_agreement.pdf",
+                "03_client_breach_notice.pdf",
+                "04_bioserve_response_letter.pdf",
+                "05_invoice_and_reconciliation_sheet.pdf",
+            ],
+            document_resume_lines=[],
+            wants_document_breakdown=False,
+            recommended_steps=[],
+            wants_next_steps=False,
+        )
+        rendered = "\n".join(lines)
+        self.assertIn("CASE BRIEF / SUMMARY", rendered)
+        self.assertIn("1. Name of Case & Source Record", rendered)
+        self.assertIn("3. Main Persons / Roles", rendered)
+        self.assertIn("5. Issue(s)", rendered)
+        self.assertIn("8. Important Dates / Deadlines", rendered)
+        self.assertNotIn("Documents Summary", rendered)
+
+    def test_party_position_contradiction_answer_focuses_on_disputes(self) -> None:
+        documents = [
+            SimpleNamespace(
+                id=1,
+                case_id=29,
+                filename="03_client_breach_notice.pdf",
+                extracted_text="MedCare Clinics SARL alleges BioServe Medical Systems SARL failed the critical onsite response standard and disputes Invoice BS-INV-2026-0317: claimed 64,380 TND, accepted 39,750 TND, disputed 24,630 TND.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=2,
+                case_id=29,
+                filename="04_bioserve_response_letter.pdf",
+                extracted_text="BioServe Medical Systems SARL denies material breach and says the response clock starts at 09:10. BioServe maintains the invoice is payable in full and offers a 6,500 TND credit note.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+        ]
+        result = self.service._build_party_position_contradiction_answer(
+            case=SimpleNamespace(id=29, title="MedCare v BioServe"),  # type: ignore[arg-type]
+            documents=documents,  # type: ignore[arg-type]
+        )
+        self.assertIsNotNone(result)
+        answer, sources = result or ("", [])
+        self.assertIn("CONTRADICTIONS BETWEEN MEDCARE AND BIOSERVE POSITIONS", answer)
+        self.assertIn("SLA response clock", answer)
+        self.assertIn("Invoice amount and payment obligation", answer)
+        self.assertNotIn("Comparison overview", answer)
+        self.assertGreaterEqual(len(sources), 1)
+
+    def test_medcare_evidence_strength_answer_is_party_aware(self) -> None:
+        documents = [
+            SimpleNamespace(
+                id=1,
+                case_id=29,
+                filename="01_equipment_maintenance_agreement.pdf",
+                extracted_text="Equipment Maintenance and Service Agreement EMSA with service level and SLA terms.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=2,
+                case_id=29,
+                filename="03_client_breach_notice.pdf",
+                extracted_text="MedCare Clinics SARL sends breach notice and payment reservation to BioServe Medical Systems SARL.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=3,
+                case_id=29,
+                filename="05_invoice_and_reconciliation_sheet.pdf",
+                extracted_text="Invoice BS-INV-2026-0317 claimed 64,380 TND, accepted 39,750 TND, disputed 24,630 TND.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=4,
+                case_id=29,
+                filename="07_patient_operations_impact_summary.pdf",
+                extracted_text="Patient operations summary lists delayed appointments, external referrals, and external scan costs.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+        ]
+        result = self.service._build_medcare_evidence_strength_answer(
+            case=SimpleNamespace(id=29, title="MedCare v BioServe"),  # type: ignore[arg-type]
+            documents=documents,  # type: ignore[arg-type]
+            objective="What are the strongest and weakest pieces of evidence for MedCare?",
+        )
+        self.assertIsNotNone(result)
+        answer, sources = result or ("", [])
+        self.assertIn("EVIDENCE STRENGTH FOR MEDCARE", answer)
+        self.assertIn("Evidence Matrix", answer)
+        self.assertEqual(answer.count("| Strength | Evidence |"), 1)
+        self.assertIn("64,380 TND", answer)
+        self.assertIn("Exact SLA clock start", answer)
+        self.assertGreaterEqual(len(sources), 1)
+
+    def test_bioserve_evidence_strength_answer_uses_defense_view(self) -> None:
+        documents = [
+            SimpleNamespace(
+                id=1,
+                case_id=29,
+                filename="04_bioserve_response_letter.pdf",
+                extracted_text="BioServe denies material breach and says the response clock starts at 09:10 when the complete ticket was accepted.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=2,
+                case_id=29,
+                filename="06_service_logs_extract.pdf",
+                extracted_text="Service logs include ticket acceptance and technician arrival records.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=3,
+                case_id=29,
+                filename="07_patient_operations_impact_summary.pdf",
+                extracted_text="Patient operations summary lists delayed appointments and external referrals.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+        ]
+        result = self.service._build_party_evidence_strength_answer(
+            case=SimpleNamespace(id=29, title="MedCare v BioServe"),  # type: ignore[arg-type]
+            documents=documents,  # type: ignore[arg-type]
+            objective="What are the strongest and weakest pieces of evidence for BioServe?",
+        )
+        self.assertIsNotNone(result)
+        answer, _sources = result or ("", [])
+        self.assertIn("EVIDENCE STRENGTH FOR BIOSERVE", answer)
+        self.assertIn("Response-clock defense", answer)
+        self.assertIn("Patient impact and outage duration", answer)
+        self.assertNotIn("EVIDENCE STRENGTH FOR MEDCARE", answer)
+
+    def test_medcare_ranked_legal_risks_answer_is_risk_matrix(self) -> None:
+        documents = [
+            SimpleNamespace(
+                id=1,
+                case_id=29,
+                filename="01_equipment_maintenance_agreement.pdf",
+                extracted_text="MedCare and BioServe agreement with SLA terms.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=2,
+                case_id=29,
+                filename="04_bioserve_response_letter.pdf",
+                extracted_text="BioServe disputes material breach and says the response clock starts at 09:10.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=3,
+                case_id=29,
+                filename="05_invoice_and_reconciliation_sheet.pdf",
+                extracted_text="Invoice total is 64,380 TND with 24,630 TND disputed.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+        ]
+        result = self.service._build_medcare_ranked_legal_risks_answer(
+            case=SimpleNamespace(id=29, title="MedCare v BioServe"),  # type: ignore[arg-type]
+            documents=documents,  # type: ignore[arg-type]
+        )
+        self.assertIsNotNone(result)
+        answer, sources = result or ("", [])
+        self.assertIn("RANKED LEGAL RISKS", answer)
+        self.assertIn("| Level | Legal risk | Why it matters | Evidence behind it |", answer)
+        self.assertIn("Material breach / missed SLA response", answer)
+        self.assertIn("Invoice withholding / late-payment exposure", answer)
+        self.assertNotIn("Dear Client", answer)
+        self.assertGreaterEqual(len(sources), 1)
+
+    def test_medcare_rights_preserving_client_email_is_substantive(self) -> None:
+        documents = [
+            SimpleNamespace(
+                id=1,
+                case_id=29,
+                filename="03_client_breach_notice.pdf",
+                extracted_text="MedCare Clinics SARL reserves rights and disputes BioServe invoice support.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=2,
+                case_id=29,
+                filename="05_invoice_and_reconciliation_sheet.pdf",
+                extracted_text="Invoice BS-INV-2026-0317 total 64,380 TND; 39,750 TND undisputed; 24,630 TND disputed.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=3,
+                case_id=29,
+                filename="07_patient_operations_impact_summary.pdf",
+                extracted_text="Patient operations impact includes delayed appointments and external referrals.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+        ]
+        result = self.service._build_medcare_rights_preserving_client_email(
+            case=SimpleNamespace(id=29, title="MedCare v BioServe"),  # type: ignore[arg-type]
+            documents=documents,  # type: ignore[arg-type]
+            client_name="MedCare Clinics SARL",
+            lawyer_name="Ahmed Ben Ali",
+        )
+        self.assertIsNotNone(result)
+        answer, sources = result or ("", [])
+        self.assertIn("Subject: MedCare v BioServe", answer)
+        self.assertIn("Dear MedCare Clinics SARL", answer)
+        self.assertIn("Ahmed Ben Ali", answer)
+        self.assertIn("24,630 TND", answer)
+        self.assertIn("all of which are expressly reserved", answer)
+        self.assertGreaterEqual(len(sources), 1)
+
+    def test_medcare_without_prejudice_strategy_is_case_grounded(self) -> None:
+        documents = [
+            SimpleNamespace(
+                id=1,
+                case_id=29,
+                filename="04_bioserve_response_letter.pdf",
+                extracted_text="BioServe offered a 6,500 TND credit note and denied material breach.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=2,
+                case_id=29,
+                filename="09_without_prejudice_settlement_offer.pdf",
+                extracted_text="MedCare settlement offer seeks 14,000 TND credit note without prejudice.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+            SimpleNamespace(
+                id=3,
+                case_id=29,
+                filename="10_management_call_summary.pdf",
+                extracted_text="Management call discusses possible flexibility up to 10,000 TND.",
+                redacted_text=None,
+                summary=None,
+                summary_short=None,
+            ),
+        ]
+        result = self.service._build_medcare_without_prejudice_strategy(
+            case=SimpleNamespace(id=29, title="MedCare v BioServe"),  # type: ignore[arg-type]
+            documents=documents,  # type: ignore[arg-type]
+            objective="Draft a without-prejudice negotiation strategy for the April 9 settlement call",
+        )
+        self.assertIsNotNone(result)
+        answer, sources = result or ("", [])
+        self.assertIn("WITHOUT-PREJUDICE NEGOTIATION STRATEGY", answer)
+        self.assertIn("14,000 TND", answer)
+        self.assertIn("6,500 TND", answer)
+        self.assertIn("10,000 TND", answer)
+        self.assertNotIn("Here's a proposed approach", answer)
+        self.assertGreaterEqual(len(sources), 1)
 
 
 class CopilotIntentExecutionAgentTests(unittest.TestCase):
@@ -83,6 +414,33 @@ class CopilotIntentExecutionAgentTests(unittest.TestCase):
         )
         self.assertEqual(result.get("answer"), "ok")
         self.assertEqual(runtime.received_case_id, 77)
+
+    def test_evaluate_case_evidence_intent_executes_runtime_method(self) -> None:
+        class Runtime:
+            def __init__(self) -> None:
+                self.received_objective = None
+
+            def _unsupported_intent_response(self) -> dict[str, Any]:
+                return {"answer": "unsupported"}
+
+            def _evaluate_case_evidence(self, **kwargs: Any) -> dict[str, Any]:
+                self.received_objective = kwargs.get("objective")
+                return {"answer": "evidence ok"}
+
+        runtime = Runtime()
+        agent = CopilotIntentExecutionAgent()
+        result = agent.execute(
+            intent="evaluate_case_evidence",
+            runtime=runtime,
+            ctx=self._build_context(
+                parsed={
+                    "case_id": 29,
+                    "clean_query": "What are the strongest and weakest pieces of evidence for MedCare?",
+                }
+            ),
+        )
+        self.assertEqual(result.get("answer"), "evidence ok")
+        self.assertIn("strongest and weakest", str(runtime.received_objective))
 
 
 class CopilotChatModeTests(unittest.TestCase):
@@ -415,6 +773,26 @@ class RuntimeWorkflowPlanningTests(unittest.TestCase):
         self.assertEqual(parsed.get("intent"), "draft_client_email_case")
         self.assertTrue(metadata.get("intent_overridden"))
         self.assertEqual(metadata.get("reason"), "client_explanation_route")
+
+    def test_workflow_routing_preserves_explicit_risk_analysis_intent(self) -> None:
+        parsed, metadata = self.orchestrator._apply_workflow_routing(
+            parsed={
+                "intent": "analyze_risks_case",
+                "case_id": 29,
+                "clean_query": "Rank the legal risks from high to low and explain the evidence behind each one.",
+            },
+            workflow_plan={
+                "workflow_kind": "client_explanation",
+                "matter_type": "civil obligation",
+                "trust_level": "medium",
+            },
+            workspace_case_id=29,
+            workspace_document_id=None,
+        )
+
+        self.assertEqual(parsed.get("intent"), "analyze_risks_case")
+        self.assertFalse(metadata.get("intent_overridden"))
+        self.assertEqual(metadata.get("reason"), "explicit_analysis_intent_preserved")
 
     def test_resolve_effective_mode_does_not_auto_promote_default_to_legal_search(self) -> None:
         mode = self.orchestrator._resolve_effective_mode(

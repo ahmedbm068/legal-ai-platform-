@@ -99,6 +99,18 @@ BASE_SCHEMA_PATCHES = [
     ADD COLUMN IF NOT EXISTS source_image_batch_id INTEGER;
     """,
     """
+    ALTER TABLE documents
+    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+    """,
+    """
+    ALTER TABLE voice_recordings
+    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+    """,
+    """
+    ALTER TABLE image_document_batches
+    ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+    """,
+    """
     CREATE INDEX IF NOT EXISTS ix_documents_source_image_batch_id
     ON documents (source_image_batch_id);
     """,
@@ -297,6 +309,166 @@ BASE_SCHEMA_PATCHES = [
     """
     CREATE INDEX IF NOT EXISTS ix_ai_response_audit_logs_intent
     ON ai_response_audit_logs (parsed_intent);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS calendar_events (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+        client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL,
+        lawyer_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        title VARCHAR NOT NULL,
+        description TEXT,
+        event_type VARCHAR NOT NULL DEFAULT 'other',
+        status VARCHAR NOT NULL DEFAULT 'scheduled',
+        priority VARCHAR NOT NULL DEFAULT 'medium',
+        start_datetime TIMESTAMPTZ NOT NULL,
+        end_datetime TIMESTAMPTZ,
+        all_day BOOLEAN NOT NULL DEFAULT FALSE,
+        timezone VARCHAR NOT NULL DEFAULT 'UTC',
+        location VARCHAR,
+        source_type VARCHAR NOT NULL DEFAULT 'manual',
+        source_document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+        source_chunk_id INTEGER REFERENCES document_chunks(id) ON DELETE SET NULL,
+        source_quote TEXT,
+        extraction_confidence DOUBLE PRECISION,
+        requires_review BOOLEAN NOT NULL DEFAULT FALSE,
+        reviewed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        reviewed_at TIMESTAMPTZ,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        deleted_at TIMESTAMPTZ
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_calendar_events_tenant_start
+    ON calendar_events (tenant_id, start_datetime ASC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_calendar_events_case_start
+    ON calendar_events (case_id, start_datetime ASC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_calendar_events_review
+    ON calendar_events (tenant_id, requires_review, status);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_calendar_events_source_document
+    ON calendar_events (source_document_id);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS calendar_event_sources (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        event_id INTEGER NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+        source_type VARCHAR NOT NULL DEFAULT 'manual',
+        document_id INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+        chunk_id INTEGER REFERENCES document_chunks(id) ON DELETE SET NULL,
+        quote TEXT,
+        confidence DOUBLE PRECISION,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_calendar_event_sources_event
+    ON calendar_event_sources (event_id);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS calendar_reminders (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        event_id INTEGER NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+        remind_at TIMESTAMPTZ NOT NULL,
+        method VARCHAR NOT NULL DEFAULT 'in_app',
+        status VARCHAR NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_calendar_reminders_due
+    ON calendar_reminders (tenant_id, status, remind_at ASC);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS calendar_event_attendees (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        event_id INTEGER NOT NULL REFERENCES calendar_events(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        email VARCHAR,
+        name VARCHAR,
+        role VARCHAR NOT NULL DEFAULT 'attendee',
+        response_status VARCHAR NOT NULL DEFAULT 'needs_action',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_calendar_event_attendees_event
+    ON calendar_event_attendees (event_id);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS calendar_sync_providers (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        lawyer_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        provider VARCHAR NOT NULL,
+        external_calendar_id VARCHAR,
+        status VARCHAR NOT NULL DEFAULT 'disabled',
+        webhook_url TEXT,
+        n8n_workflow_hint VARCHAR,
+        is_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_calendar_sync_providers_tenant_lawyer
+    ON calendar_sync_providers (tenant_id, lawyer_id);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS draft_documents (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        case_id INTEGER REFERENCES cases(id) ON DELETE SET NULL,
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        title VARCHAR NOT NULL,
+        document_type VARCHAR NOT NULL DEFAULT 'general',
+        content_json TEXT NOT NULL DEFAULT '{}',
+        content_html TEXT NOT NULL DEFAULT '',
+        content_text TEXT NOT NULL DEFAULT '',
+        status VARCHAR NOT NULL DEFAULT 'draft',
+        source_context_json TEXT,
+        citations_json TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        deleted_at TIMESTAMPTZ
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_draft_documents_tenant_updated
+    ON draft_documents (tenant_id, updated_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_draft_documents_case_updated
+    ON draft_documents (case_id, updated_at DESC);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS draft_document_versions (
+        id SERIAL PRIMARY KEY,
+        draft_document_id INTEGER NOT NULL REFERENCES draft_documents(id) ON DELETE CASCADE,
+        version_number INTEGER NOT NULL,
+        content_json TEXT NOT NULL DEFAULT '{}',
+        content_html TEXT NOT NULL DEFAULT '',
+        content_text TEXT NOT NULL DEFAULT '',
+        created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        change_summary TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_draft_document_versions_document_version
+    ON draft_document_versions (draft_document_id, version_number DESC);
     """,
 ]
 

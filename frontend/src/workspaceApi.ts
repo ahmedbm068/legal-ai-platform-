@@ -1,7 +1,11 @@
 import type {
     AIResponseAuditLogListResponse,
+    AssistantUploadResponse,
     CalendarAppointment,
     CalendarAppointmentActionResponse,
+    CalendarEvent,
+    CalendarEventActionResponse,
+    CalendarReminder,
     CaseItem,
     CaseReviewTable,
     Client,
@@ -10,6 +14,10 @@ import type {
     CopilotAttachment,
     CopilotResponse,
     DocumentItem,
+    DraftDocument,
+    DraftDocumentAiEditResponse,
+    DraftDocumentPayload,
+    DraftDocumentVersion,
     EvidenceAnalysisReview,
     EvidenceReviewListResponse,
     FullDocumentAnalysis,
@@ -52,7 +60,7 @@ function resolveApiBaseUrl(): string {
 const API_BASE_URL = resolveApiBaseUrl();
 const SLOW_AI_TIMEOUT_MS = 90000;
 
-type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 interface RequestOptions {
     method?: HttpMethod;
@@ -79,6 +87,28 @@ async function requestBlob(path: string, token: string): Promise<Blob> {
 
         const textResponse = await response.text();
         throw new Error(textResponse || `Request failed with status ${response.status}`);
+    }
+
+    return response.blob();
+}
+
+async function postBlob(path: string, token: string, body?: unknown): Promise<Blob> {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+        method: "POST",
+        headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+        },
+        body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+        const contentType = response.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+            const payload = (await response.json()) as { detail?: string };
+            throw new Error(payload.detail || `Request failed with status ${response.status}`);
+        }
+        throw new Error(await response.text());
     }
 
     return response.blob();
@@ -248,6 +278,12 @@ export const workspaceApi = {
 
     getDocumentFile: (token: string, documentId: number) => requestBlob(`/documents/${documentId}/file`, token),
 
+    archiveDocument: (token: string, documentId: number) =>
+        request<{ message: string; document_id: number; archived: boolean }>(`/documents/${documentId}/archive`, {
+            method: "POST",
+            token,
+        }),
+
     uploadDocument: (token: string, caseId: number, file: File) => {
         const formData = new FormData();
         formData.append("file", file);
@@ -295,6 +331,12 @@ export const workspaceApi = {
         }),
 
     getImageAssetFile: (token: string, assetId: number) => requestBlob(`/documents/image-assets/${assetId}/file`, token),
+
+    archiveImageBatch: (token: string, batchId: number) =>
+        request<{ message: string; batch_id: number; archived: boolean }>(`/documents/image-batches/${batchId}/archive`, {
+            method: "POST",
+            token,
+        }),
 
     listCallSessions: (token: string, caseId: number) =>
         request<CallSession[]>(`/calls/case/${caseId}`, {
@@ -389,6 +431,141 @@ export const workspaceApi = {
             token,
         }),
 
+    listCalendarEvents: (
+        token: string,
+        params?: {
+            caseId?: number | null;
+            clientId?: number | null;
+            eventType?: string | null;
+            priority?: string | null;
+            status?: string | null;
+            requiresReview?: boolean | null;
+        }
+    ) => {
+        const search = new URLSearchParams();
+        if (params?.caseId) search.set("case_id", String(params.caseId));
+        if (params?.clientId) search.set("client_id", String(params.clientId));
+        if (params?.eventType) search.set("event_type", params.eventType);
+        if (params?.priority) search.set("priority", params.priority);
+        if (params?.status) search.set("status", params.status);
+        if (params?.requiresReview !== undefined && params.requiresReview !== null) {
+            search.set("requires_review", String(params.requiresReview));
+        }
+        const query = search.toString();
+        return request<CalendarEvent[]>(`/calendar/events${query ? `?${query}` : ""}`, { token });
+    },
+
+    listCaseCalendarEvents: (token: string, caseId: number) =>
+        request<CalendarEvent[]>(`/cases/${caseId}/calendar/events`, { token }),
+
+    createCalendarEvent: (
+        token: string,
+        payload: {
+            caseId?: number | null;
+            title: string;
+            description?: string | null;
+            eventType: string;
+            status?: string;
+            priority: string;
+            startDatetime: string;
+            endDatetime?: string | null;
+            allDay?: boolean;
+            timezone?: string;
+            location?: string | null;
+        }
+    ) =>
+        request<CalendarEventActionResponse>("/calendar/events", {
+            method: "POST",
+            token,
+            body: {
+                case_id: payload.caseId ?? null,
+                title: payload.title,
+                description: payload.description ?? null,
+                event_type: payload.eventType,
+                status: payload.status ?? "scheduled",
+                priority: payload.priority,
+                start_datetime: payload.startDatetime,
+                end_datetime: payload.endDatetime ?? null,
+                all_day: payload.allDay ?? false,
+                timezone: payload.timezone ?? "UTC",
+                location: payload.location ?? null,
+                source_type: "manual",
+            },
+        }),
+
+    updateCalendarEvent: (
+        token: string,
+        eventId: number,
+        payload: Partial<{
+            caseId: number | null;
+            title: string;
+            description: string | null;
+            eventType: string;
+            status: string;
+            priority: string;
+            startDatetime: string;
+            endDatetime: string | null;
+            allDay: boolean;
+            timezone: string;
+            location: string | null;
+            requiresReview: boolean;
+        }>
+    ) =>
+        request<CalendarEventActionResponse>(`/calendar/events/${eventId}`, {
+            method: "PATCH",
+            token,
+            body: {
+                case_id: payload.caseId ?? undefined,
+                title: payload.title,
+                description: payload.description,
+                event_type: payload.eventType,
+                status: payload.status,
+                priority: payload.priority,
+                start_datetime: payload.startDatetime,
+                end_datetime: payload.endDatetime,
+                all_day: payload.allDay,
+                timezone: payload.timezone,
+                location: payload.location,
+                requires_review: payload.requiresReview,
+            },
+        }),
+
+    archiveCalendarEvent: (token: string, eventId: number) =>
+        request<CalendarEventActionResponse>(`/calendar/events/${eventId}`, {
+            method: "DELETE",
+            token,
+        }),
+
+    listPendingExtractedDates: (token: string, caseId?: number | null) => {
+        const query = caseId ? `?case_id=${caseId}` : "";
+        return request<CalendarEvent[]>(`/calendar/extracted-dates/pending${query}`, { token });
+    },
+
+    acceptExtractedDate: (token: string, eventId: number) =>
+        request<CalendarEventActionResponse>(`/calendar/extracted-dates/${eventId}/accept`, {
+            method: "POST",
+            token,
+        }),
+
+    rejectExtractedDate: (token: string, eventId: number) =>
+        request<CalendarEventActionResponse>(`/calendar/extracted-dates/${eventId}/reject`, {
+            method: "POST",
+            token,
+        }),
+
+    createCalendarReminder: (token: string, eventId: number, payload: { remindAt: string; method?: string }) =>
+        request<CalendarReminder>(`/calendar/events/${eventId}/reminders`, {
+            method: "POST",
+            token,
+            body: {
+                remind_at: payload.remindAt,
+                method: payload.method ?? "in_app",
+            },
+        }),
+
+    listUpcomingCalendarReminders: (token: string) =>
+        request<CalendarReminder[]>("/calendar/reminders/upcoming", { token }),
+
     createCallSession: (
         token: string,
         caseId: number,
@@ -470,6 +647,12 @@ export const workspaceApi = {
         }),
 
     getVoiceRecordingFile: (token: string, recordingId: number) => requestBlob(`/voice/${recordingId}/file`, token),
+
+    archiveVoiceRecording: (token: string, recordingId: number) =>
+        request<{ message: string; recording_id: number; archived: boolean }>(`/voice/${recordingId}/archive`, {
+            method: "POST",
+            token,
+        }),
 
     uploadVoiceRecording: (
         token: string,
@@ -588,6 +771,144 @@ export const workspaceApi = {
             },
             signal: options?.signal,
             timeoutMs: SLOW_AI_TIMEOUT_MS,
+        }),
+
+    uploadAssistantFiles: (
+        token: string,
+        files: File[],
+        options?: {
+            caseId?: number | null;
+            chatSessionId?: string | null;
+            message?: string | null;
+        }
+    ) => {
+        const formData = new FormData();
+        files.forEach((file) => formData.append("files", file));
+        if (options?.caseId) formData.append("case_id", String(options.caseId));
+        if (options?.chatSessionId) formData.append("chat_session_id", options.chatSessionId);
+        if (options?.message) formData.append("message", options.message);
+
+        return request<AssistantUploadResponse>("/assistant/upload", {
+            method: "POST",
+            token,
+            formData,
+            timeoutMs: SLOW_AI_TIMEOUT_MS,
+        });
+    },
+
+    askWithFiles: (
+        token: string,
+        message: string,
+        options: {
+            uploadedDocumentIds: string[];
+            caseId?: number | null;
+            chatSessionId?: string | null;
+            topK?: number;
+            reasoningLevel?: "low" | "medium" | "high";
+            useExternalResearch?: boolean;
+            mode?: "default" | "legal_search";
+            legalSearchMultilingualOutput?: boolean;
+            agentMode?: boolean;
+            conversationHistory?: Array<{
+                role: "user" | "assistant";
+                content: string;
+                parsed_intent?: string | null;
+                case_id?: number | null;
+                document_id?: number | null;
+            }>;
+            signal?: AbortSignal;
+        }
+    ) =>
+        request<CopilotResponse>("/assistant/ask-with-files", {
+            method: "POST",
+            token,
+            body: {
+                message,
+                case_id: options.caseId ?? null,
+                chat_session_id: options.chatSessionId ?? null,
+                uploaded_document_ids: options.uploadedDocumentIds,
+                top_k: options.topK ?? 6,
+                reasoning_level: options.reasoningLevel ?? "medium",
+                use_external_research: options.useExternalResearch ?? false,
+                mode: options.mode ?? "default",
+                legal_search_multilingual_output: options.legalSearchMultilingualOutput ?? false,
+                agent_mode: options.agentMode ?? false,
+                conversation_history: options.conversationHistory ?? [],
+            },
+            signal: options.signal,
+            timeoutMs: SLOW_AI_TIMEOUT_MS,
+        }),
+
+    createDraftDocument: (token: string, payload: DraftDocumentPayload) =>
+        request<DraftDocument>("/draft-documents", {
+            method: "POST",
+            token,
+            body: {
+                case_id: payload.case_id ?? null,
+                title: payload.title,
+                document_type: payload.document_type || "general",
+                content_json: payload.content_json || {},
+                content_html: payload.content_html || "",
+                content_text: payload.content_text || "",
+                source_context_json: payload.source_context || {},
+                citations_json: payload.citations || [],
+                status: "draft",
+            },
+        }),
+
+    updateDraftDocument: (
+        token: string,
+        documentId: number,
+        payload: Partial<Pick<DraftDocument, "title" | "document_type" | "content_json" | "content_html" | "content_text" | "status" | "source_context_json" | "citations_json">> & {
+            change_summary?: string;
+            create_version?: boolean;
+        }
+    ) =>
+        request<DraftDocument>(`/draft-documents/${documentId}`, {
+            method: "PATCH",
+            token,
+            body: payload,
+        }),
+
+    listDraftDocuments: (token: string, caseId?: number | null) =>
+        request<DraftDocument[]>(`/draft-documents${caseId ? `?case_id=${caseId}` : ""}`, { token }),
+
+    getDraftDocumentVersions: (token: string, documentId: number) =>
+        request<DraftDocumentVersion[]>(`/draft-documents/${documentId}/versions`, { token }),
+
+    aiEditDraftDocument: (
+        token: string,
+        documentId: number,
+        payload: {
+            selected_text: string;
+            instruction: string;
+            full_document_context: string;
+            case_id?: number | null;
+            citation_mode?: "none" | "suggest" | "required";
+        }
+    ) =>
+        request<DraftDocumentAiEditResponse>(`/draft-documents/${documentId}/ai-edit`, {
+            method: "POST",
+            token,
+            body: payload,
+            timeoutMs: SLOW_AI_TIMEOUT_MS,
+        }),
+
+    exportDraftDocumentDocx: (token: string, documentId: number) =>
+        postBlob(`/draft-documents/${documentId}/export/docx`, token),
+
+    exportDraftDocumentPdf: (token: string, documentId: number) =>
+        postBlob(`/draft-documents/${documentId}/export/pdf`, token),
+
+    sendDraftDocumentEmail: (
+        token: string,
+        documentId: number,
+        payload: { to: string; subject: string; cc?: string[]; body_html?: string; body_text?: string; confirm: boolean }
+    ) =>
+        request<{ message: string; document: DraftDocument | null }>(`/draft-documents/${documentId}/send-email`, {
+            method: "POST",
+            token,
+            body: payload,
         }),
 
     createCopilotFeedback: (

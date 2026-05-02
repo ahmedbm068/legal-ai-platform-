@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 
 from backend.api.document_schema import (
     DocumentListItemOut,
@@ -66,7 +67,7 @@ def list_case_documents(
     current_user: User = Depends(get_current_user),
 ):
     get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
-    query = db.query(Document).filter(Document.case_id == case_id)
+    query = db.query(Document).filter(Document.case_id == case_id, Document.archived_at.is_(None))
     return apply_tenant_scope(query, Document.tenant_id, current_user).order_by(
         Document.upload_timestamp.desc(), Document.id.desc()
     ).all()
@@ -93,6 +94,18 @@ def get_document_file(
         media_type=document.file_type or "application/pdf",
         filename=document.filename,
     )
+
+
+@router.post("/{document_id}/archive", status_code=status.HTTP_200_OK)
+def archive_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = get_tenant_document_or_404(db=db, document_id=document_id, current_user=current_user)
+    document.archived_at = func.now()
+    db.commit()
+    return {"message": "Document moved to archive", "document_id": document.id, "archived": True}
 
 
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -199,7 +212,10 @@ def list_case_image_batches(
     current_user: User = Depends(get_current_user),
 ):
     get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
-    query = db.query(ImageDocumentBatch).filter(ImageDocumentBatch.case_id == case_id)
+    query = db.query(ImageDocumentBatch).filter(
+        ImageDocumentBatch.case_id == case_id,
+        ImageDocumentBatch.archived_at.is_(None),
+    )
     return apply_tenant_scope(query, ImageDocumentBatch.tenant_id, current_user).order_by(
         ImageDocumentBatch.created_at.desc(), ImageDocumentBatch.id.desc()
     ).all()
@@ -213,6 +229,18 @@ def get_image_batch(
 ):
     batch = get_tenant_image_batch_or_404(db=db, batch_id=batch_id, current_user=current_user)
     return image_document_service.to_batch_detail_payload(db=db, batch=batch)
+
+
+@router.post("/image-batches/{batch_id}/archive", status_code=status.HTTP_200_OK)
+def archive_image_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    batch = get_tenant_image_batch_or_404(db=db, batch_id=batch_id, current_user=current_user)
+    batch.archived_at = func.now()
+    db.commit()
+    return {"message": "Image batch moved to archive", "batch_id": batch.id, "archived": True}
 
 
 @router.get("/image-assets/{asset_id}/file")

@@ -39,7 +39,6 @@ export const APP_ROUTES: AppRoute[] = [
         path: "/calendar",
         label: "Calendar",
         description: "Deadlines and why-they-matter",
-        useSelectedCase: true,
     },
     {
         path: "/settings",

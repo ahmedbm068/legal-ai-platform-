@@ -1,0 +1,31 @@
+claim,evidence,label
+"The contract requires payment within thirty days.","Clause 4 says invoices are payable within 30 days after receipt.",supported
+"The tenant must pay a security deposit.","The lease states that the tenant shall pay a security deposit equal to two months rent.",supported
+"The supplier may terminate after written notice.","Section 12 allows termination if the supplier gives written notice and a cure period expires.",supported
+"The client call happened on March 12.","The transcript header reads client intake call date March 12.",supported
+"The invoice balance is 8400.","The invoice summary lists balance due 8400 and payment by bank transfer.",supported
+"The court awarded costs to the claimant.","The judgment orders the defendant to pay damages and costs to the claimant.",supported
+"The notice period is seven days.","The letter demands performance within seven days from receipt of this notice.",supported
+"The agreement is governed by Tunisian law.","The governing law clause states this agreement is governed by the laws of Tunisia.",supported
+"The settlement offer is without prejudice.","The document title is without prejudice settlement proposal.",supported
+"The memo recommends negotiation before litigation.","The internal memo recommends attempting settlement negotiation before filing suit.",supported
+"The invoice was fully paid.","The invoice shows outstanding balance due and no payment received.",contradicted
+"The contract has no termination clause.","Section 12 of the agreement is titled termination and describes termination rights.",contradicted
+"The notice gave thirty days to cure.","The formal notice requires cure within seven days.",contradicted
+"The claimant withdrew all damages claims.","The complaint asks for damages interest and costs.",contradicted
+"The hearing was dismissed for lack of evidence.","The judgment says the court admitted the evidence and granted partial relief.",contradicted
+"The lease does not mention rent.","The lease states monthly rent and service charges are due on the first day.",contradicted
+"The buyer is responsible for confidentiality only after termination.","The confidentiality clause applies during the term and after termination.",contradicted
+"The case risk is low because all documents agree.","The comparison notes conflicting payment dates and missing proof of delivery.",contradicted
+"The respondent accepted liability.","The counterparty response denies liability and disputes the alleged breach.",contradicted
+"The agreement was unsigned.","The contract includes signature blocks completed by both parties.",contradicted
+"The supplier delivered the goods on time.","The snippet only describes payment terms and does not mention delivery dates.",insufficient
+"The client is likely to win at trial.","The evidence lists the parties and contract title but contains no merits assessment.",insufficient
+"The invoice relates to the same contract.","The invoice has an amount and due date but no matching contract reference.",insufficient
+"The notice was received by the counterparty.","The letter is dated and signed but contains no delivery receipt.",insufficient
+"The witness will confirm the breach.","The file contains an internal memo and no witness statement.",insufficient
+"The penalty clause is enforceable.","The contract quotes a penalty amount but gives no jurisdictional enforceability analysis.",insufficient
+"The court judgment is final and non appealable.","The judgment excerpt states the result but does not discuss appeal rights.",insufficient
+"The client has a strong settlement position.","The evidence says negotiations are possible but gives no risk or valuation analysis.",insufficient
+"The limitation period has expired.","The summary contains event dates but no applicable limitation rule.",insufficient
+"The document is authentic.","The scan has a signature image but no metadata or authenticity verification.",insufficient

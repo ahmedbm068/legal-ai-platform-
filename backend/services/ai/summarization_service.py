@@ -62,6 +62,7 @@ class SummarizationService:
                 raise ValueError("Processed document text is too short to summarize reliably.")
 
             temp_document = SimpleNamespace(
+                filename=document.filename,
                 extracted_text=text,
                 redacted_text=None,
             )

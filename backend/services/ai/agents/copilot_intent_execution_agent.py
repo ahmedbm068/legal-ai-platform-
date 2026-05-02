@@ -221,6 +221,12 @@ class CopilotIntentExecutionAgent:
                 requested_count=ctx.parsed.get("requested_count"),
                 risk_request_text=ctx.parsed.get("clean_query") or ctx.parsed.get("raw_message"),
             ),
+            "evaluate_case_evidence": lambda: runtime._evaluate_case_evidence(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                case_id=ctx.parsed["case_id"],
+                objective=ctx.parsed.get("clean_query") or ctx.parsed.get("raw_message") or ctx.message,
+            ),
             "trace_case_evidence": lambda: runtime._trace_case_evidence(
                 db=ctx.db,
                 tenant_id=ctx.tenant_id,
@@ -250,6 +256,7 @@ class CopilotIntentExecutionAgent:
                 db=ctx.db,
                 tenant_id=ctx.tenant_id,
                 case_id=ctx.parsed["case_id"],
+                user_id=ctx.user_id,
             ),
             "draft_internal_email_case": lambda: runtime._draft_internal_email_for_case(
                 db=ctx.db,
@@ -267,6 +274,9 @@ class CopilotIntentExecutionAgent:
                 case_id=ctx.parsed["case_id"],
             ),
             "draft_negotiation_strategy": lambda: runtime._draft_negotiation_strategy(
+                db=ctx.db,
+                tenant_id=ctx.tenant_id,
+                case_id=ctx.parsed.get("case_id"),
                 objective=ctx.parsed.get("clean_query") or ctx.parsed.get("raw_message") or ctx.message,
                 horizon_days=ctx.parsed.get("requested_horizon_days") or ctx.parsed.get("requested_count"),
                 use_external_research=ctx.use_external_research,
@@ -290,6 +300,7 @@ class CopilotIntentExecutionAgent:
             "ask_case": lambda: runtime._answer_with_optional_external_research(
                 db=ctx.db,
                 tenant_id=ctx.tenant_id,
+                user_id=ctx.user_id,
                 question=ctx.resolved_query,
                 top_k=ctx.top_k,
                 case_id=ctx.parsed["case_id"],
@@ -300,6 +311,8 @@ class CopilotIntentExecutionAgent:
                 target_type="case",
                 target_id=ctx.parsed["case_id"],
                 already_optimized=bool(ctx.preoptimized_query),
+                case_context=ctx.case_context,
+                case_snapshot=ctx.case_snapshot,
             ),
             "ask_global": lambda: runtime._answer_with_optional_external_research(
                 db=ctx.db,

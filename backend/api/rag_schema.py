@@ -274,6 +274,14 @@ class CopilotResponse(BaseModel):
     reasoning_result: Optional[Dict[str, Any]] = None
     saved_asset_ids: List[int] = Field(default_factory=list)
     review_record_id: Optional[int] = None
+    open_editor: bool = False
+    draft_document: Optional[Dict[str, Any]] = None
+    # Quality & insight fields (Step 4/5 — ResponseAssemblyService)
+    grounding: Optional[str] = None
+    confidence_reason: Optional[str] = None
+    legal_warning: Optional[str] = None
+    legal_sources_note: Optional[str] = None
+    ai_insight: Optional[Dict[str, Any]] = None
 
 
 class ReasoningCandidateScore(BaseModel):

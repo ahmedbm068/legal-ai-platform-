@@ -1,20 +1,82 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Optional
 
 from backend.services.ai.agents.agent_output_formatter import AgentOutputFormatter
 from backend.services.ai.llm_gateway import llm_gateway
 
 
+PROMPT_DIR = Path(__file__).parent
+
+
 class SummarizationAgent:
     def __init__(self) -> None:
         self.client = llm_gateway.create_client()
         self.model = llm_gateway.summary_model
+        self._case_summary_prompt_template: str | None = None
 
     @property
     def available(self) -> bool:
         return self.client is not None
+
+    def summarize_case(self, *, case_id: int, documents: list[dict], num_bullets: int = 8) -> Optional[dict[str, Any]]:
+        if not self.client:
+            return None
+
+        prompt = self._build_case_summary_prompt(documents=documents, num_bullets=num_bullets)
+        if not prompt:
+            return None
+
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                input=prompt,
+            )
+            raw_text = (response.output_text or "").strip()
+            if not raw_text:
+                return None
+
+            bullets = [
+                line.strip()
+                for line in raw_text.splitlines()
+                if line.strip() and line.strip().startswith(("-", "*"))
+            ]
+            if not bullets:
+                bullets = [line.strip() for line in raw_text.splitlines() if line.strip()]
+            bullets = bullets[:num_bullets]
+
+            return {
+                "summary_bullets": bullets,
+                "summary_source": "llm_summary_agent",
+                "summary_version": "v3_case_summary_bullets",
+            }
+        except Exception:
+            return None
+
+    def _get_case_summary_prompt_template(self) -> str | None:
+        if self._case_summary_prompt_template is None:
+            try:
+                self._case_summary_prompt_template = (
+                    PROMPT_DIR / "summarization_prompt.md"
+                ).read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return None
+        return self._case_summary_prompt_template
+
+    def _build_case_summary_prompt(self, *, documents: list[dict], num_bullets: int) -> str | None:
+        template = self._get_case_summary_prompt_template()
+        if not template:
+            return None
+
+        doc_snippets = []
+        for doc in documents:
+            snippet = (doc.get("content") or "")[:4000]
+            doc_snippets.append(f"--- Document: {doc.get('filename', 'unknown')} ---\n{snippet}\n")
+
+        prompt = template.format(num_bullets=num_bullets)
+        return prompt + "\n\n" + "\n".join(doc_snippets)
 
     def summarize_document(
         self,

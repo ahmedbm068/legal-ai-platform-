@@ -1,0 +1,19 @@
+text,label,prediction,correct
+"claim: The invoice balance is 8400.
+evidence: The invoice summary lists balance due 8400 and payment by bank transfer.
+features: lexical_overlap_high direct_statement_cue",supported,supported,true
+"claim: The court judgment is final and non appealable.
+evidence: The judgment excerpt states the result but does not discuss appeal rights.
+features: lexical_overlap_medium evidence_gap_cue direct_statement_cue",insufficient,insufficient,true
+"claim: The tenant must pay a security deposit.
+evidence: The lease states that the tenant shall pay a security deposit equal to two months rent.
+features: lexical_overlap_high direct_statement_cue",supported,supported,true
+"claim: The buyer is responsible for confidentiality only after termination.
+evidence: The confidentiality clause applies during the term and after termination.
+features: lexical_overlap_high evidence_contradiction_cue claim_absence_or_exclusivity_cue",contradicted,contradicted,true
+"claim: The invoice relates to the same contract.
+evidence: The invoice has an amount and due date but no matching contract reference.
+features: lexical_overlap_high evidence_gap_cue",insufficient,insufficient,true
+"claim: The claimant withdrew all damages claims.
+evidence: The complaint asks for damages interest and costs.
+features: lexical_overlap_medium evidence_contradiction_cue",contradicted,contradicted,true

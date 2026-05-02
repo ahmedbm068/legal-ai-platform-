@@ -1,0 +1,31 @@
+text,label
+"Master services agreement between supplier and buyer with payment terms termination clause governing law confidentiality and dispute resolution.",contract
+"Lease contract between landlord and tenant with rent security deposit effective date renewal notice and signed obligations.",contract
+"Software license agreement defining parties scope of services limitation of liability intellectual property and termination rights.",contract
+"Settlement agreement where both parties release claims define payment schedule and confirm governing law.",contract
+"Employment contract with salary probation confidentiality non compete clause termination notice and signature blocks.",contract
+"Invoice number INV 102 total amount 8400 VAT subtotal balance due payment due date and bank transfer details.",invoice
+"Commercial invoice listing unit price quantity tax amount due billing address and payment terms net thirty.",invoice
+"Fee invoice for legal services with matter reference itemized hours subtotal tax and outstanding balance.",invoice
+"Supplier invoice addressed to buyer showing purchase order number due date total amount and remittance instructions.",invoice
+"Rent invoice with monthly rent service charges late fee amount due and due date.",invoice
+"Dear Sir formal notice is served on behalf of our client demanding payment within seven days.",legal_letter
+"We hereby notify you that your failure to perform obligations constitutes breach and reserve all rights.",legal_letter
+"To whom it may concern this letter confirms representation and requests production of documents.",legal_letter
+"Yours faithfully the claimant gives notice of termination and demands return of confidential materials.",legal_letter
+"Dear Madam our office sends a without prejudice settlement proposal for your review.",legal_letter
+"The court finds that the defendant breached the contract and enters judgment for the plaintiff.",court_judgment
+"Tribunal decision on appeal holding that the lower court ruling is affirmed with costs.",court_judgment
+"Judgment delivered by the judge after hearing claimant and respondent on damages and liability.",court_judgment
+"The court held that evidence was admissible and granted partial relief to the petitioner.",court_judgment
+"Final ruling states reasons for decision orders payment and dismisses remaining claims.",court_judgment
+"Statement of claim describing facts cause of action damages claimed and relief sought against respondent.",complaint
+"Complaint filed by plaintiff alleging breach negligence and requesting compensation interest and costs.",complaint
+"Petition sets out the facts of the case legal basis requested injunction and supporting exhibits.",complaint
+"Claimant pleads contractual breach non payment and asks the tribunal for damages.",complaint
+"Civil complaint names defendant lists allegations jurisdiction facts and prayer for relief.",complaint
+"Internal legal case memo with preliminary assessment litigation risk evidentiary risk and recommended next legal actions.",case_memo
+"Confidential internal note summarizing strengths weaknesses negotiation posture and recommended settlement range.",case_memo
+"Case strategy memo reviewing timeline missing evidence witness issues and procedural deadlines.",case_memo
+"Legal risk memorandum assessing exposure probability of success and next investigative steps.",case_memo
+"Internal case assessment memo comparing client position counterparty response and recommended action plan.",case_memo

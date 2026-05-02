@@ -1,0 +1,13 @@
+text,label,prediction,correct
+"case_summary: Lease termination involves eviction risk unpaid rent property damage and urgent hearing date.
+features: high_risk_cue procedure_pressure_cue",high,high,true
+"case_summary: Lease dispute includes unpaid rent and repair complaints but tenant is still communicating.
+features: medium_risk_cue",medium,medium,true
+"case_summary: Simple consultation about standard employment contract clauses with no active conflict or missed deadline.
+features: low_risk_cue medium_risk_cue procedure_pressure_cue",low,medium,false
+"case_summary: Compliance memo identifies no violation and recommends ordinary record keeping.
+features: low_risk_cue",low,low,true
+"case_summary: Settlement collapsed after threats of litigation and limitation period expires this week.
+features: high_risk_cue procedure_pressure_cue",high,high,true
+"case_summary: Settlement talks are active but counterparty proposes a much lower payment than claimed losses.
+features: medium_risk_cue",medium,medium,true

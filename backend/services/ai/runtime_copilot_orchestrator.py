@@ -1,7 +1,10 @@
 ﻿from __future__ import annotations
 
+import logging
 import re
-from typing import Any
+import time
+import uuid
+from typing import Any, Optional, TypedDict
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +28,168 @@ from backend.services.ai.copilot_service import CopilotService
 from backend.services.ai.legal_trust_service import legal_trust_service
 
 
+class CopilotGraphState(TypedDict, total=False):
+    """Single source of truth for all decision/context data flowing through
+    the copilot graph pipeline.
+
+    Fields are grouped by lifecycle stage.  Every node reads and writes
+    exclusively through this dict so external interfaces (endpoint, response
+    schema, frontend) remain stable.
+    """
+
+    # ── Identity & request inputs ─────────────────────────────────────────────
+    request_id: str                  # UUID generated at run() start — in every log line
+    raw_message: str                 # Original user message — NEVER logged
+    safe_message_preview: str        # raw_message[:100] — safe for logs
+    mode: str                        # Mode string as supplied by caller
+    agent_mode: bool                 # Whether agent mode was requested
+    case_id: Optional[int]           # workspace_case_id at call time
+
+    # ── Runtime inputs (populated by run()) ───────────────────────────────────
+    pipeline_request: Any            # CopilotPipelineRequest
+    db: Any                          # sqlalchemy Session
+    tenant_id: int
+    user_id: Optional[int]
+    user_role: str
+    workspace_case_id: Optional[int]
+    workspace_document_id: Optional[int]
+    conversation_history: Optional[list]
+    attachments: Optional[list]
+    save_attachments_to_case: bool
+    attachment_case_id: Optional[int]
+    allowed_case_ids: Optional[list]
+    allowed_document_ids: Optional[list]
+
+    # ── Graph-level observability ─────────────────────────────────────────────
+    execution_trace: list            # list of _append_trace() entries
+    errors: list                     # list of _set_error() entries
+    warnings: list                   # list of _set_warning() messages
+
+    # ── memory_retrieve outputs ───────────────────────────────────────────────
+    memory_items: list               # loaded + merged memory (canonical source)
+    merged_history: list             # alias kept for internal node compatibility
+    stage_records: list              # list[PipelineStageRecord]
+
+    # ── orchestrator outputs ──────────────────────────────────────────────────
+    corrected_message: str
+    parsed: dict
+    parsed_intent: dict              # full parsed command dict
+    intent: str                      # intent string (legacy alias, same as intent_name)
+    intent_name: str                 # canonical intent name
+    action_category: str             # e.g. "query", "drafting", "analysis"
+    clean_query: str
+    optimized_message: Optional[str]
+    effective_case_id: Optional[int]
+    effective_document_id: Optional[int]
+    case_context: dict
+    case_snapshot: Optional[dict]    # snapshot_payload alias
+    snapshot_payload: Optional[dict]
+    matter_classification: dict
+    matter_type: Optional[str]
+    task_type: Optional[str]
+    complexity: Optional[str]
+    is_follow_up: bool
+    workflow_plan: dict
+    effective_mode: str
+    use_trust_engine: bool
+    trust_eligible: bool             # whether mode/intent qualifies for trust
+    trust_enabled: bool              # whether trust engine actually ran
+    selected_agents: list            # agent_sequence from workflow_plan
+    route: str                       # "agent_execution" | "casual_chat" | "attachment_disabled"
+    route_reason: str                # human-readable routing decision
+    execution_context: Any           # CopilotExecutionContext
+
+    # ── agent_execution outputs ───────────────────────────────────────────────
+    copilot_result: dict             # raw result from CopilotService.handle_message()
+    agent_outputs: dict              # keyed by agent; Phase 1: {"copilot_service": result}
+    result: dict                     # current working result (mutated by verifier/composer)
+
+    # ── verifier outputs ──────────────────────────────────────────────────────
+    verification_result: dict        # combined contract + trust diagnostics
+    global_output_contract: dict
+    legal_agent_pack_payload: dict
+
+    # ── composer outputs ──────────────────────────────────────────────────────
+    final_response: dict             # fully composed response — source of truth after composer
+
+    # ── memory_write outputs ──────────────────────────────────────────────────
+    resolved_case_id: Optional[int]
+    resolved_document_id: Optional[int]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Graph logging infrastructure
+# ──────────────────────────────────────────────────────────────────────────────
+
+_graph_logger = logging.getLogger("copilot.graph")
+_LOG_TRUNC = 100
+
+
+def _trunc(value: Any, max_len: int = _LOG_TRUNC) -> str:
+    """Return a safely truncated string representation of *value*."""
+    text = str(value or "")
+    return (text[:max_len] + "\u2026") if len(text) > max_len else text
+
+
+def _safe_state_fields(state: "CopilotGraphState") -> dict[str, Any]:
+    """Extract a minimal, PII-safe subset of graph state for log context."""
+    pr = state.get("pipeline_request")
+    mode = (
+        state.get("mode")
+        or (getattr(pr, "mode", None) if pr else None)
+        or state.get("effective_mode")
+    )
+    agent_mode_val = state.get("agent_mode")
+    if agent_mode_val is None and pr is not None:
+        agent_mode_val = getattr(pr, "agent_mode", None)
+    trust_enabled = (
+        state.get("trust_enabled")
+        if state.get("trust_enabled") is not None
+        else state.get("use_trust_engine")
+    )
+    selected = state.get("selected_agents")
+    return {
+        "tenant_id": state.get("tenant_id"),
+        "user_id": state.get("user_id"),
+        "mode": mode,
+        "agent_mode": agent_mode_val,
+        "workspace_case_id": state.get("workspace_case_id"),
+        "intent_name": state.get("intent_name") or state.get("intent"),
+        "effective_mode": state.get("effective_mode"),
+        "route": state.get("route"),
+        "route_reason": state.get("route_reason"),
+        "trust_enabled": trust_enabled,
+        "selected_agents_count": len(selected) if selected else None,
+    }
+
+
+def log_graph_event(
+    node_name: str,
+    event: str,
+    state: "CopilotGraphState",
+    extra: dict[str, Any] | None = None,
+    duration_ms: float | None = None,
+) -> None:
+    """Emit a structured graph log line.
+
+    Format:  [GRAPH] <node_name> \u2192 <event> | key=value ... | rid=<request_id>
+    """
+    safe = _safe_state_fields(state)
+    request_id = str(state.get("request_id") or "-")
+    parts: list[str] = []
+    for k, v in safe.items():
+        if v is not None:
+            parts.append(f"{k}={_trunc(v)}")
+    if extra:
+        for k, v in extra.items():
+            if v is not None:
+                parts.append(f"{k}={_trunc(v)}")
+    if duration_ms is not None:
+        parts.append(f"duration_ms={duration_ms:.1f}")
+    body = " ".join(parts)
+    _graph_logger.info("[GRAPH] %s \u2192 %s | %s | rid=%s", node_name, event, body, request_id)
+
+
 class RuntimeCopilotOrchestrator:
     OPTIMIZABLE_INTENTS = {
         "ask_document",
@@ -41,6 +206,16 @@ class RuntimeCopilotOrchestrator:
         "summarize_global",
         "summarize_and_analyze_risks_case",
         "analyze_risks_case",
+        "evaluate_case_evidence",
+        "build_timeline_case",
+        "compare_case_documents",
+        "trace_case_evidence",
+        "monitor_deadlines_case",
+    }
+    EXPLICIT_ANALYSIS_INTENTS = {
+        "summarize_and_analyze_risks_case",
+        "analyze_risks_case",
+        "evaluate_case_evidence",
         "build_timeline_case",
         "compare_case_documents",
         "trace_case_evidence",
@@ -160,6 +335,70 @@ class RuntimeCopilotOrchestrator:
         self.copilot_service = copilot_service
         self.memory_service = memory_service or copilot_memory_service
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # State helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _safe_get_state(state: CopilotGraphState, key: str, default: Any = None) -> Any:
+        """Return state[key] with a safe default; never raises."""
+        try:
+            return state.get(key, default)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _append_trace(
+        state: CopilotGraphState,
+        stage: str,
+        status: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Append a graph-level trace entry to state["execution_trace"]."""
+        try:
+            trace = state.get("execution_trace")
+            if not isinstance(trace, list):
+                state["execution_trace"] = []
+                trace = state["execution_trace"]
+            entry: dict[str, Any] = {"stage": stage, "status": status}
+            if metadata:
+                entry.update(metadata)
+            trace.append(entry)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _set_warning(state: CopilotGraphState, message: str) -> None:
+        """Append a warning string to state["warnings"]."""
+        try:
+            warnings_list = state.get("warnings")
+            if not isinstance(warnings_list, list):
+                state["warnings"] = []
+                warnings_list = state["warnings"]
+            warnings_list.append(message)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _set_error(state: CopilotGraphState, node: str, error: Exception) -> None:
+        """Append a structured error entry to state["errors"]."""
+        try:
+            errors_list = state.get("errors")
+            if not isinstance(errors_list, list):
+                state["errors"] = []
+                errors_list = state["errors"]
+            errors_list.append({
+                "node": node,
+                "error_type": type(error).__name__,
+                "message": str(error),
+            })
+        except Exception:
+            pass
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Public entrypoint
+    # ──────────────────────────────────────────────────────────────────────────
+
     def run(
         self,
         *,
@@ -184,6 +423,7 @@ class RuntimeCopilotOrchestrator:
         allowed_case_ids: list[int] | None = None,
         allowed_document_ids: list[int] | None = None,
     ) -> dict[str, Any]:
+        request_id = str(uuid.uuid4())
         pipeline_request = CopilotPipelineRequest(
             message=message,
             top_k=top_k,
@@ -199,15 +439,150 @@ class RuntimeCopilotOrchestrator:
             save_attachments_to_case=save_attachments_to_case,
             attachment_case_id=attachment_case_id,
         )
+        initial_state: CopilotGraphState = {
+            # identity
+            "request_id": request_id,
+            "raw_message": message,
+            "safe_message_preview": message[:100],
+            "mode": str(mode or "default"),
+            "agent_mode": agent_mode,
+            "case_id": workspace_case_id,
+            # runtime inputs
+            "pipeline_request": pipeline_request,
+            "db": db,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "user_role": user_role,
+            "workspace_case_id": workspace_case_id,
+            "workspace_document_id": workspace_document_id,
+            "conversation_history": list(conversation_history or []),
+            "attachments": list(attachments or []),
+            "save_attachments_to_case": save_attachments_to_case,
+            "attachment_case_id": attachment_case_id,
+            "allowed_case_ids": allowed_case_ids,
+            "allowed_document_ids": allowed_document_ids,
+            # observability — pre-seeded so helpers never crash on missing keys
+            "execution_trace": [],
+            "errors": [],
+            "warnings": [],
+            # downstream defaults
+            "memory_items": [],
+            "agent_outputs": {},
+            "selected_agents": [],
+            "trust_eligible": False,
+            "trust_enabled": False,
+        }
+        log_graph_event(
+            "graph", "start", initial_state,
+            extra={
+                "message_len": len(message),
+                "mode": str(mode or "default"),
+                "agent_mode": agent_mode,
+                "has_attachments": bool(attachments),
+                "reasoning_level": str(reasoning_level or "medium"),
+            },
+        )
+        _t_graph = time.monotonic()
+        try:
+            final_state = self._execute_graph(initial_state)
+        except Exception:
+            _graph_logger.exception(
+                "[GRAPH] graph → error | rid=%s duration_ms=%.1f",
+                request_id,
+                (time.monotonic() - _t_graph) * 1000,
+            )
+            raise
+        log_graph_event(
+            "graph", "end", final_state,
+            extra={"route": final_state.get("route")},
+            duration_ms=(time.monotonic() - _t_graph) * 1000,
+        )
+        result = final_state["result"]
+        # ── Post-graph grounding consistency check ────────────────────────────
+        # The trust engine or final-output composer may replace result["answer"]
+        # AFTER the assembly service has already classified grounding.  If the
+        # final answer text signals insufficient evidence, downgrade grounding
+        # and ai_insight so the UI never shows a Case-grounded/insufficient
+        # contradiction.
+        _final_answer = str(result.get("answer") or "")
+        if self.copilot_service.response_assembly_service._answer_indicates_insufficient_grounding(
+            _final_answer
+        ):
+            _old_grounding = result.get("grounding") or ""
+            _has_case_ctx = bool(result.get("grounding") == "Case-grounded")
+            _new_grounding = "Partial" if _has_case_ctx else (_old_grounding or "Not grounded")
+            if _old_grounding == "Case-grounded":
+                result["grounding"] = _new_grounding
+            result["confidence"] = "low"
+            result["confidence_reason"] = (
+                "The response itself indicates insufficient grounded evidence. "
+                "Source references were found but do not support a reliable legal analysis. "
+                "Independent verification of applicable legal authority is required."
+            )
+            _ai_insight = result.get("ai_insight")
+            if isinstance(_ai_insight, dict):
+                if _ai_insight.get("grounding_type") == "Case-grounded":
+                    _ai_insight["grounding_type"] = _new_grounding
+                    _ai_insight["grounding_description"] = (
+                        "The response indicates insufficient grounded evidence despite the "
+                        "presence of document sources. Counsel must verify the applicable "
+                        "legal authority independently."
+                    )
+                _ai_insight["confidence_level"] = "low"
+                _ai_insight["confidence_reason"] = result["confidence_reason"]
+                _ai_insight["lawyer_note"] = (
+                    "This response could not be grounded in the available case record. "
+                    "It must not be relied upon without independent verification by qualified counsel."
+                )
+        return result
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Graph executor
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _execute_graph(self, state: CopilotGraphState) -> CopilotGraphState:
+        """Execute the copilot pipeline as a sequential node graph.
+
+        Current implementation: hybrid bridge — the new graph structure wraps
+        the original CopilotService.handle_message() call unchanged so every
+        external interface (endpoint, response schema, frontend) stays stable.
+
+        Migration path:
+          1. ✅ Graph state object + node skeleton (this commit)
+          2.    Replace individual CopilotService paths node by node
+          3.    Add contradiction tool inside Verifier node
+          4.    Add repair loop between Verifier and Composer
+          5.    Add parallel agent execution last
+        """
+        state = self._node_memory_retrieve(state)
+        state = self._node_orchestrator(state)
+        route = str(state.get("route") or "agent_execution")
+        if route == "agent_execution":
+            state = self._node_agent_execution(state)
+            state = self._node_verifier(state)
+            state = self._node_composer(state)
+        state = self._node_memory_write(state)
+        return state
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Node: Memory Retrieve
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _node_memory_retrieve(self, state: CopilotGraphState) -> CopilotGraphState:
+        """Load and merge copilot memory with the frontend-supplied history."""
+        _t0 = time.monotonic()
+        log_graph_event("memory_retrieve", "start", state)
+        workspace_case_id: int | None = state.get("workspace_case_id")
+        workspace_document_id: int | None = state.get("workspace_document_id")
         stage_records: list[PipelineStageRecord] = []
 
         merged_history = self.memory_service.load_recent_history(
-            db=db,
-            tenant_id=tenant_id,
-            user_id=user_id,
+            db=state["db"],
+            tenant_id=state["tenant_id"],
+            user_id=state.get("user_id"),
             case_id=workspace_case_id,
             document_id=workspace_document_id,
-            conversation_history=conversation_history or [],
+            conversation_history=list(state.get("conversation_history") or []),
         )
         self._append_stage(
             stage_records,
@@ -220,7 +595,44 @@ class RuntimeCopilotOrchestrator:
                 "workspace_document_id": workspace_document_id,
             },
         )
+        _new_state = {
+            **state,
+            "merged_history": merged_history,
+            "memory_items": merged_history,
+            "conversation_history": merged_history,
+            "stage_records": stage_records,
+        }
+        log_graph_event(
+            "memory_retrieve", "end", _new_state,
+            extra={"history_items": len(merged_history)},
+            duration_ms=(time.monotonic() - _t0) * 1000,
+        )
+        return _new_state
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Node: Orchestrator
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _node_orchestrator(self, state: CopilotGraphState) -> CopilotGraphState:
+        """Pre-process the request and plan execution.
+
+        Handles prompt correction, intent detection, low-confidence arbitration,
+        casual-chat detection, prompt optimisation, context enrichment, matter
+        classification, and workflow planning.
+
+        Sets state["route"] to one of:
+          "attachment_disabled" | "casual_chat" | "agent_execution"
+        """
+        _t0 = time.monotonic()
+        log_graph_event("orchestrator", "start", state)
+        pipeline_request: CopilotPipelineRequest = state["pipeline_request"]
+        stage_records: list[PipelineStageRecord] = list(state.get("stage_records") or [])
+        merged_history: list[dict[str, Any]] = list(state.get("merged_history") or [])
+        workspace_case_id: int | None = state.get("workspace_case_id")
+        workspace_document_id: int | None = state.get("workspace_document_id")
+
+        # ── Attachment early exit ──────────────────────────────────────────
+        attachments: list[dict[str, Any]] = list(state.get("attachments") or [])
         if attachments:
             self._append_stage(
                 stage_records,
@@ -229,12 +641,12 @@ class RuntimeCopilotOrchestrator:
                 detail="Chat image analysis is disabled. Use scanned-photo upload from the case workspace instead.",
                 metadata={"attachment_count": len(attachments)},
             )
-            return {
+            attachment_result: dict[str, Any] = {
                 "message": "Chat image analysis is disabled. Upload scanned photos from the case workspace to process document images.",
                 "parsed_intent": "scan_document_images",
                 "target_type": "case" if workspace_case_id else None,
                 "target_id": workspace_case_id,
-                "mode": str(mode or "default"),
+                "mode": str(pipeline_request.mode or "default"),
                 "agent_mode": False,
                 "action_category": "analysis",
                 "action_status": "unavailable",
@@ -249,9 +661,27 @@ class RuntimeCopilotOrchestrator:
                 "sources": [],
                 "citations": [],
                 "cache": {"hit": False, "backend": "none"},
-                "execution_trace": [record.model_dump(mode="json") for record in stage_records],
+                "execution_trace": [r.model_dump(mode="json") for r in stage_records],
             }
+            _att_state = {
+                **state,
+                "stage_records": stage_records,
+                "route": "attachment_disabled",
+                "route_reason": "attachments_present_chat_disabled",
+                "trust_eligible": False,
+                "trust_enabled": False,
+                "selected_agents": [],
+                "result": attachment_result,
+                "final_response": attachment_result,
+            }
+            log_graph_event(
+                "orchestrator", "route=attachment_disabled", _att_state,
+                extra={"attachment_count": len(attachments)},
+                duration_ms=(time.monotonic() - _t0) * 1000,
+            )
+            return _att_state
 
+        # ── Prompt correction ──────────────────────────────────────────────
         raw_parse = command_parsing_service.parse(pipeline_request.message)
         correction_result = prompt_correction_agent.correct_query(
             raw_query=pipeline_request.message,
@@ -279,6 +709,7 @@ class RuntimeCopilotOrchestrator:
             },
         )
 
+        # ── Intent detection ───────────────────────────────────────────────
         parsed = command_parsing_service.parse(corrected_message)
         intent = str(parsed.get("intent") or "ask_global").strip() or "ask_global"
         self._append_stage(
@@ -295,6 +726,7 @@ class RuntimeCopilotOrchestrator:
             },
         )
 
+        # ── Low-confidence intent arbitration ─────────────────────────────
         parsed, arbitration_metadata = self._arbitrate_low_confidence_intent(
             raw_parse=raw_parse,
             parsed=parsed,
@@ -314,7 +746,7 @@ class RuntimeCopilotOrchestrator:
             metadata=arbitration_metadata,
         )
 
-        optimized_message: str | None = None
+        # ── Casual chat bypass ─────────────────────────────────────────────
         clean_query = str(parsed.get("clean_query") or corrected_message).strip()
         requested_mode = str(pipeline_request.mode or "default").strip().lower() or "default"
         if (
@@ -325,13 +757,15 @@ class RuntimeCopilotOrchestrator:
                 intent=intent,
                 case_id=parsed.get("case_id") if isinstance(parsed.get("case_id"), int) else workspace_case_id,
                 document_id=(
-                    parsed.get("document_id") if isinstance(parsed.get("document_id"), int) else workspace_document_id
+                    parsed.get("document_id")
+                    if isinstance(parsed.get("document_id"), int)
+                    else workspace_document_id
                 ),
             )
         ):
             chat_result = self.copilot_service._respond_in_chat_mode(
                 question=clean_query or corrected_message,
-                user_role=user_role,
+                user_role=state["user_role"],
                 conversation_history=merged_history,
             )
             chat_result = self.copilot_service._strip_heavy_trust_diagnostics(chat_result)
@@ -346,7 +780,7 @@ class RuntimeCopilotOrchestrator:
             action_status = str(chat_result.pop("action_status", "")).strip() or (
                 "fallback" if chat_result.get("used_fallback") else "completed"
             )
-            response_payload = {
+            chat_response: dict[str, Any] = {
                 "message": pipeline_request.message,
                 "parsed_intent": intent,
                 "target_type": parsed.get("target_type"),
@@ -361,21 +795,34 @@ class RuntimeCopilotOrchestrator:
                 "structured_result": structured_result if isinstance(structured_result, dict) else {},
                 **chat_result,
             }
-            response_payload["execution_trace"] = [record.model_dump(mode="json") for record in stage_records]
-            self.memory_service.append_exchange(
-                db=db,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                mode="default",
-                parsed_intent=intent,
-                user_message=pipeline_request.message,
-                assistant_message=str(response_payload.get("answer") or ""),
-                case_id=None,
-                document_id=None,
-                metadata=self._build_memory_metadata(response_payload),
+            chat_response["execution_trace"] = [r.model_dump(mode="json") for r in stage_records]
+            _chat_state = {
+                **state,
+                "stage_records": stage_records,
+                "corrected_message": corrected_message,
+                "parsed": parsed,
+                "parsed_intent": parsed,
+                "intent": intent,
+                "intent_name": intent,
+                "action_category": self.copilot_service.ACTION_CATEGORY_BY_INTENT.get(intent, "query"),
+                "clean_query": clean_query,
+                "route": "casual_chat",
+                "route_reason": "default_mode_no_rag",
+                "trust_eligible": False,
+                "trust_enabled": False,
+                "selected_agents": [],
+                "result": chat_response,
+                "final_response": chat_response,
+            }
+            log_graph_event(
+                "orchestrator", "route=casual_chat", _chat_state,
+                extra={"intent": intent, "mode": requested_mode},
+                duration_ms=(time.monotonic() - _t0) * 1000,
             )
-            return response_payload
+            return _chat_state
 
+        # ── Prompt optimisation ────────────────────────────────────────────
+        optimized_message: str | None = None
         if intent in self.OPTIMIZABLE_INTENTS and clean_query:
             optimize_result = prompt_optimizer_agent.optimize_query(
                 raw_query=clean_query,
@@ -414,9 +861,10 @@ class RuntimeCopilotOrchestrator:
                 metadata={"intent": intent},
             )
 
+        # ── High reasoning selector ────────────────────────────────────────
         selected_reasoning_level = pipeline_request.reasoning_level
         rollout_eligible, rollout_reason, rollout_bucket = self.copilot_service._is_high_reasoning_rollout_eligible(
-            tenant_id=tenant_id,
+            tenant_id=state["tenant_id"],
         )
         high_reasoning_eligible = (
             selected_reasoning_level == "high"
@@ -446,28 +894,21 @@ class RuntimeCopilotOrchestrator:
             },
         )
 
-        execution_context = CopilotExecutionContext(
-            corrected_message=corrected_message,
-            optimized_message=optimized_message,
-            parsed_intent=intent,
-            target_type=parsed.get("target_type"),
-            target_id=parsed.get("target_id"),
-        )
-
+        # ── Case context enrichment ────────────────────────────────────────
         effective_case_id = parsed.get("case_id") if isinstance(parsed.get("case_id"), int) else workspace_case_id
         effective_document_id = (
             parsed.get("document_id") if isinstance(parsed.get("document_id"), int) else workspace_document_id
         )
         case_context = case_context_service.build_context(
-            db=db,
-            tenant_id=tenant_id,
+            db=state["db"],
+            tenant_id=state["tenant_id"],
             case_id=effective_case_id,
             document_id=effective_document_id,
         )
         context_case = case_context.get("case") if isinstance(case_context.get("case"), dict) else {}
         snapshot = case_snapshot_service.get_snapshot(
-            db=db,
-            tenant_id=tenant_id,
+            db=state["db"],
+            tenant_id=state["tenant_id"],
             case_id=context_case.get("id") if isinstance(context_case.get("id"), int) else effective_case_id,
         )
         snapshot_payload = case_snapshot_service.to_public_payload(snapshot)
@@ -494,6 +935,7 @@ class RuntimeCopilotOrchestrator:
             },
         )
 
+        # ── Matter classification ──────────────────────────────────────────
         available_document_summaries = self._extract_available_document_summaries(
             case_context=case_context,
             snapshot_payload=snapshot_payload,
@@ -523,6 +965,7 @@ class RuntimeCopilotOrchestrator:
             },
         )
 
+        # ── Workflow planning ──────────────────────────────────────────────
         workflow_plan = self._build_legal_workflow_plan(
             message=clean_query or corrected_message,
             parsed=parsed,
@@ -547,6 +990,7 @@ class RuntimeCopilotOrchestrator:
             },
         )
 
+        # ── Workflow routing ───────────────────────────────────────────────
         parsed, routing_metadata = self._apply_workflow_routing(
             parsed=parsed,
             workflow_plan=workflow_plan,
@@ -588,30 +1032,143 @@ class RuntimeCopilotOrchestrator:
             requested_user_goal=str(workflow_plan.get("user_goal") or "").strip() or None,
         )
 
+        _orch_state = {
+            **state,
+            "stage_records": stage_records,
+            "corrected_message": corrected_message,
+            "parsed": parsed,
+            "parsed_intent": parsed,
+            "intent": intent,
+            "intent_name": intent,
+            "action_category": self.copilot_service.ACTION_CATEGORY_BY_INTENT.get(intent, "query"),
+            "clean_query": clean_query,
+            "optimized_message": optimized_message,
+            "effective_case_id": effective_case_id,
+            "effective_document_id": effective_document_id,
+            "case_context": case_context,
+            "case_snapshot": snapshot_payload,
+            "snapshot_payload": snapshot_payload,
+            "matter_classification": matter_classification,
+            "matter_type": matter_classification.get("matter_type"),
+            "task_type": matter_classification.get("task_type"),
+            "complexity": matter_classification.get("complexity"),
+            "is_follow_up": bool(parsed.get("is_follow_up")),
+            "workflow_plan": workflow_plan,
+            "effective_mode": effective_mode,
+            "use_trust_engine": use_trust_engine,
+            "trust_eligible": use_trust_engine,
+            "trust_enabled": use_trust_engine,
+            "selected_agents": list(workflow_plan.get("agent_sequence") or []),
+            "route": "agent_execution",
+            "route_reason": "agent_execution_intent",
+            "execution_context": execution_context,
+        }
+        log_graph_event(
+            "orchestrator", "route=agent_execution", _orch_state,
+            extra={
+                "intent": intent,
+                "effective_mode": effective_mode,
+                "workflow_kind": workflow_plan.get("workflow_kind"),
+                "matter_type": workflow_plan.get("matter_type"),
+                "use_trust_engine": use_trust_engine,
+                "optimized": bool(optimized_message),
+                "matter_confidence": matter_classification.get("confidence"),
+            },
+            duration_ms=(time.monotonic() - _t0) * 1000,
+        )
+        return _orch_state
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Node: Selected Agent Execution  (Phase 1: bridge to CopilotService)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _node_agent_execution(self, state: CopilotGraphState) -> CopilotGraphState:
+        """Call the original CopilotService.handle_message().
+
+        Phase 1 hybrid bridge: individual service paths will be migrated to
+        dedicated sub-nodes in subsequent phases without touching any external
+        interface.
+        """
+        _t0 = time.monotonic()
+        log_graph_event(
+            "agent_execution", "start", state,
+            extra={
+                "intent": state.get("intent"),
+                "effective_mode": state.get("effective_mode"),
+                "use_trust_engine": state.get("use_trust_engine"),
+                "optimized": bool(state.get("optimized_message")),
+                "prefetched_context": True,
+            },
+        )
+        pipeline_request: CopilotPipelineRequest = state["pipeline_request"]
         result = self.copilot_service.handle_message(
-            db=db,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            user_role=user_role,
+            db=state["db"],
+            tenant_id=state["tenant_id"],
+            user_id=state.get("user_id"),
+            user_role=state["user_role"],
             message=pipeline_request.message,
             top_k=pipeline_request.top_k,
             use_external_research=pipeline_request.use_external_research,
-            mode=effective_mode,
+            mode=state["effective_mode"],
             legal_search_multilingual_output=pipeline_request.legal_search_multilingual_output,
             legal_search_code_scope=pipeline_request.legal_search_code_scope,
             reasoning_level=pipeline_request.reasoning_level,
             agent_mode=pipeline_request.agent_mode,
-            workspace_case_id=workspace_case_id,
-            workspace_document_id=workspace_document_id,
-            conversation_history=merged_history,
-            preparsed_command=parsed,
+            workspace_case_id=state.get("workspace_case_id"),
+            workspace_document_id=state.get("workspace_document_id"),
+            preparsed_command=state["parsed"],
             skip_autocorrect=True,
-            preoptimized_query=optimized_message,
-            allowed_case_ids=allowed_case_ids,
-            allowed_document_ids=allowed_document_ids,
-            case_context=case_context,
-            case_snapshot=snapshot_payload,
+            preoptimized_query=state.get("optimized_message"),
+            allowed_case_ids=state.get("allowed_case_ids"),
+            allowed_document_ids=state.get("allowed_document_ids"),
+            # ── Step 3A: pass graph state as prefetched context ───────────────
+            prefetched_case_context=state.get("case_context"),
+            prefetched_case_snapshot=state.get("case_snapshot") or state.get("snapshot_payload"),
+            prefetched_history=list(state.get("memory_items") or state.get("merged_history") or []),
+            prefetched_memory_items=state.get("memory_items"),
+            prefetched_route=state.get("route"),
         )
+        log_graph_event(
+            "agent_execution", "end", state,
+            extra={
+                "result_intent": result.get("parsed_intent"),
+                "used_fallback": result.get("used_fallback"),
+                "confidence": result.get("confidence"),
+            },
+            duration_ms=(time.monotonic() - _t0) * 1000,
+        )
+        return {
+            **state,
+            "result": result,
+            "copilot_result": result,
+            "agent_outputs": {**state.get("agent_outputs", {}), "copilot_service": result},
+        }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Node: Verifier
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _node_verifier(self, state: CopilotGraphState) -> CopilotGraphState:
+        """Build the global output contract, run the legal agent pack, and
+        enforce the trust engine."""
+        _t0 = time.monotonic()
+        log_graph_event(
+            "verifier", "start", state,
+            extra={
+                "intent": state.get("intent"),
+                "effective_mode": state.get("effective_mode"),
+                "use_trust_engine": state.get("use_trust_engine"),
+                "workflow_kind": (state.get("workflow_plan") or {}).get("workflow_kind"),
+            },
+        )
+        pipeline_request: CopilotPipelineRequest = state["pipeline_request"]
+        result: dict[str, Any] = state["result"]
+        workflow_plan: dict[str, Any] = state["workflow_plan"]
+        case_context: dict[str, Any] = state["case_context"]
+        intent: str = state["intent"]
+        effective_mode: str = state["effective_mode"]
+        use_trust_engine: bool = state["use_trust_engine"]
+        stage_records: list[PipelineStageRecord] = list(state.get("stage_records") or [])
 
         global_output_contract = self._build_global_output_contract(
             result=result,
@@ -627,13 +1184,17 @@ class RuntimeCopilotOrchestrator:
             )
 
         if not use_trust_engine:
-            legal_agent_pack_payload = {
+            legal_agent_pack_payload: dict[str, Any] = {
                 "workflow_template": workflow_plan.get("workflow_kind"),
                 "agent_sequence": [],
                 "disabled": True,
                 "reason": "Trust/legal workflow diagnostics skipped for this mode.",
                 "verification": {"verification_status": "not_run_mode_not_trust_eligible"},
             }
+            _graph_logger.info(
+                "[GRAPH] verifier → trust_skipped | mode=%s intent=%s | rid=%s",
+                effective_mode, intent, state.get("request_id", "-"),
+            )
         elif settings.LEGAL_AGENT_KILL_SWITCH:
             legal_agent_pack_payload = {
                 "workflow_template": workflow_plan.get("workflow_kind"),
@@ -642,6 +1203,10 @@ class RuntimeCopilotOrchestrator:
                 "reason": "LEGAL_AGENT_KILL_SWITCH is enabled.",
                 "verification": {"verification_status": "unverified"},
             }
+            _graph_logger.warning(
+                "[GRAPH] verifier → kill_switch_active | rid=%s",
+                state.get("request_id", "-"),
+            )
         else:
             legal_agent_pack_payload = legal_workflow_agent_pack.run(
                 workflow_plan=workflow_plan,
@@ -649,6 +1214,7 @@ class RuntimeCopilotOrchestrator:
                 case_context=case_context,
                 result=result,
             )
+
         if use_trust_engine:
             global_output_contract = self._enrich_global_output_contract_with_agent_pack(
                 output_contract=global_output_contract,
@@ -715,6 +1281,44 @@ class RuntimeCopilotOrchestrator:
                 metadata={"mode": effective_mode, "intent": intent},
             )
 
+        _verifier_result = {
+            **state,
+            "result": result,
+            "stage_records": stage_records,
+            "global_output_contract": global_output_contract,
+            "legal_agent_pack_payload": legal_agent_pack_payload,
+            "verification_result": {
+                "global_output_contract": global_output_contract,
+                "legal_agent_pack_payload": legal_agent_pack_payload,
+                "trust_ran": settings.LEGAL_TRUST_ENGINE_ENABLED and use_trust_engine,
+            },
+            "trust_enabled": use_trust_engine,
+        }
+        log_graph_event(
+            "verifier", "end", _verifier_result,
+            extra={
+                "verification_status": global_output_contract.get("verification_status"),
+                "confidence": global_output_contract.get("confidence"),
+                "trust_ran": settings.LEGAL_TRUST_ENGINE_ENABLED and use_trust_engine,
+                "agent_pack_disabled": bool(legal_agent_pack_payload.get("disabled")),
+            },
+            duration_ms=(time.monotonic() - _t0) * 1000,
+        )
+        return _verifier_result
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Node: Composer
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _node_composer(self, state: CopilotGraphState) -> CopilotGraphState:
+        """Append the final execution-trace stage records."""
+        _t0 = time.monotonic()
+        log_graph_event("composer", "start", state)
+        result: dict[str, Any] = state["result"]
+        stage_records: list[PipelineStageRecord] = list(state.get("stage_records") or [])
+        global_output_contract: dict[str, Any] = state["global_output_contract"]
+        legal_agent_pack_payload: dict[str, Any] = state["legal_agent_pack_payload"]
+
         self._append_stage(
             stage_records,
             name="copilot_execution",
@@ -754,17 +1358,81 @@ class RuntimeCopilotOrchestrator:
                 "missing_fact_count": len(global_output_contract.get("missing_facts") or []),
             },
         )
+        _composer_result = {
+            **state,
+            "result": result,
+            "final_response": result,
+            "stage_records": stage_records,
+        }
+        log_graph_event(
+            "composer", "end", _composer_result,
+            extra={
+                "verification_status": global_output_contract.get("verification_status"),
+                "agent_sequence_len": len(legal_agent_pack_payload.get("agent_sequence") or []),
+            },
+            duration_ms=(time.monotonic() - _t0) * 1000,
+        )
+        return _composer_result
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Node: Memory Write
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _node_memory_write(self, state: CopilotGraphState) -> CopilotGraphState:
+        """Persist the exchange in memory, write the audit log, and inject
+        pipeline metadata into the result dict."""
+        _t0 = time.monotonic()
+        log_graph_event("memory_write", "start", state, extra={"route": state.get("route")})
+        result: dict[str, Any] = state["result"]
+        pipeline_request: CopilotPipelineRequest = state["pipeline_request"]
+        stage_records: list[PipelineStageRecord] = list(state.get("stage_records") or [])
+        route = str(state.get("route") or "agent_execution")
+
+        if route == "attachment_disabled":
+            # No memory write for this early-exit path.
+            _graph_logger.info(
+                "[GRAPH] memory_write → skipped | route=attachment_disabled | rid=%s duration_ms=%.1f",
+                state.get("request_id", "-"), (time.monotonic() - _t0) * 1000,
+            )
+            return {**state, "result": result}
+
+        if route == "casual_chat":
+            self.memory_service.append_exchange(
+                db=state["db"],
+                tenant_id=state["tenant_id"],
+                user_id=state.get("user_id"),
+                mode="default",
+                parsed_intent=str(state.get("intent") or "ask_global"),
+                user_message=pipeline_request.message,
+                assistant_message=str(result.get("answer") or ""),
+                case_id=None,
+                document_id=None,
+                metadata=self._build_memory_metadata(result),
+            )
+            log_graph_event(
+                "memory_write", "end", state,
+                extra={"route": "casual_chat", "persisted": True},
+                duration_ms=(time.monotonic() - _t0) * 1000,
+            )
+            return {**state, "result": result}
+
+        # ── Normal agent_execution path ────────────────────────────────────
+        execution_context = state["execution_context"]
+        case_context: dict[str, Any] = state["case_context"]
+        snapshot_payload = state.get("snapshot_payload")
+        workflow_plan: dict[str, Any] = state["workflow_plan"]
+        effective_mode: str = state["effective_mode"]
 
         resolved_case_id, resolved_document_id = self._resolve_memory_scope(
             response_payload=result,
-            fallback_case_id=workspace_case_id,
-            fallback_document_id=workspace_document_id,
+            fallback_case_id=state.get("workspace_case_id"),
+            fallback_document_id=state.get("workspace_document_id"),
         )
         self.memory_service.append_exchange(
-            db=db,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            mode=str(result.get("mode") or mode or "default"),
+            db=state["db"],
+            tenant_id=state["tenant_id"],
+            user_id=state.get("user_id"),
+            mode=str(result.get("mode") or pipeline_request.mode or "default"),
             parsed_intent=(str(execution_context.parsed_intent or result.get("parsed_intent") or "").strip() or None),
             user_message=pipeline_request.message,
             assistant_message=str(result.get("answer") or ""),
@@ -774,9 +1442,9 @@ class RuntimeCopilotOrchestrator:
         )
         structured_result = result.get("structured_result") if isinstance(result.get("structured_result"), dict) else {}
         ai_response_audit_service.record(
-            db=db,
-            tenant_id=tenant_id,
-            user_id=user_id,
+            db=state["db"],
+            tenant_id=state["tenant_id"],
+            user_id=state.get("user_id"),
             endpoint="/ai/copilot",
             question=pipeline_request.message,
             answer=str(result.get("answer") or ""),
@@ -800,7 +1468,6 @@ class RuntimeCopilotOrchestrator:
             detail="Persisted user/assistant exchange into case memory.",
             metadata={"case_id": resolved_case_id, "document_id": resolved_document_id},
         )
-
         self._inject_pipeline_metadata(
             result=result,
             request=pipeline_request,
@@ -813,7 +1480,25 @@ class RuntimeCopilotOrchestrator:
             workflow_plan=workflow_plan,
             effective_mode=effective_mode,
         )
-        return result
+        _mw_result = {
+            **state,
+            "result": result,
+            "stage_records": stage_records,
+            "resolved_case_id": resolved_case_id,
+            "resolved_document_id": resolved_document_id,
+        }
+        log_graph_event(
+            "memory_write", "end", _mw_result,
+            extra={
+                "route": "agent_execution",
+                "resolved_case_id": resolved_case_id,
+                "resolved_document_id": resolved_document_id,
+                "confidence": result.get("confidence"),
+                "used_fallback": result.get("used_fallback"),
+            },
+            duration_ms=(time.monotonic() - _t0) * 1000,
+        )
+        return _mw_result
 
     @staticmethod
     def _resolve_memory_scope(
@@ -2072,7 +2757,9 @@ class RuntimeCopilotOrchestrator:
         has_case_scope = isinstance(candidate.get("case_id"), int) or isinstance(workspace_case_id, int)
         has_document_scope = isinstance(candidate.get("document_id"), int) or isinstance(workspace_document_id, int)
 
-        if workflow_kind == "client_explanation" and has_case_scope and original_intent in self.LEGAL_ANALYSIS_INTENTS:
+        if original_intent in self.EXPLICIT_ANALYSIS_INTENTS:
+            reason = "explicit_analysis_intent_preserved"
+        elif workflow_kind == "client_explanation" and has_case_scope and original_intent in self.LEGAL_ANALYSIS_INTENTS:
             resolved_intent = "draft_client_email_case"
             reason = "client_explanation_route"
         elif workflow_kind == "drafting" and has_case_scope and original_intent in self.LEGAL_ANALYSIS_INTENTS:

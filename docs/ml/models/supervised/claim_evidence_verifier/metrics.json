@@ -1,0 +1,269 @@
+{
+  "task": "claim_evidence_verifier",
+  "description": "Classify whether an evidence snippet supports, contradicts, or is insufficient for a claim.",
+  "dataset": "docs\\ml\\data\\supervised\\claim_evidence_examples.csv",
+  "rows": 30,
+  "train_rows": 24,
+  "test_rows": 6,
+  "label_distribution": {
+    "contradicted": 10,
+    "insufficient": 10,
+    "supported": 10
+  },
+  "candidate_models": {
+    "multinomial_nb": {
+      "accuracy": 0.8333,
+      "macro_f1": 0.8222,
+      "weighted_f1": 0.8222,
+      "classification_report": {
+        "contradicted": {
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "f1-score": 0.8,
+          "support": 2.0
+        },
+        "insufficient": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 2.0
+        },
+        "supported": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "accuracy": 0.8333333333333334,
+        "macro avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        },
+        "weighted avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "contradicted",
+          "insufficient",
+          "supported"
+        ],
+        "matrix": [
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            0,
+            2,
+            0
+          ],
+          [
+            1,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    "logistic_regression": {
+      "accuracy": 0.6667,
+      "macro_f1": 0.6667,
+      "weighted_f1": 0.6667,
+      "classification_report": {
+        "contradicted": {
+          "precision": 0.5,
+          "recall": 1.0,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "insufficient": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "supported": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "accuracy": 0.6666666666666666,
+        "macro avg": {
+          "precision": 0.8333333333333334,
+          "recall": 0.6666666666666666,
+          "f1-score": 0.6666666666666666,
+          "support": 6.0
+        },
+        "weighted avg": {
+          "precision": 0.8333333333333334,
+          "recall": 0.6666666666666666,
+          "f1-score": 0.6666666666666666,
+          "support": 6.0
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "contradicted",
+          "insufficient",
+          "supported"
+        ],
+        "matrix": [
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            1,
+            1,
+            0
+          ],
+          [
+            1,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    "linear_svm": {
+      "accuracy": 0.6667,
+      "macro_f1": 0.6667,
+      "weighted_f1": 0.6667,
+      "classification_report": {
+        "contradicted": {
+          "precision": 0.5,
+          "recall": 1.0,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "insufficient": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "supported": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "accuracy": 0.6666666666666666,
+        "macro avg": {
+          "precision": 0.8333333333333334,
+          "recall": 0.6666666666666666,
+          "f1-score": 0.6666666666666666,
+          "support": 6.0
+        },
+        "weighted avg": {
+          "precision": 0.8333333333333334,
+          "recall": 0.6666666666666666,
+          "f1-score": 0.6666666666666666,
+          "support": 6.0
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "contradicted",
+          "insufficient",
+          "supported"
+        ],
+        "matrix": [
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            1,
+            1,
+            0
+          ],
+          [
+            1,
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    "char_linear_svm": {
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "weighted_f1": 1.0,
+      "classification_report": {
+        "contradicted": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 2.0
+        },
+        "insufficient": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 2.0
+        },
+        "supported": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 2.0
+        },
+        "accuracy": 1.0,
+        "macro avg": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 6.0
+        },
+        "weighted avg": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 6.0
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "contradicted",
+          "insufficient",
+          "supported"
+        ],
+        "matrix": [
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            0,
+            2,
+            0
+          ],
+          [
+            0,
+            0,
+            2
+          ]
+        ]
+      }
+    }
+  },
+  "best_model": "char_linear_svm",
+  "best_metrics": {
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "weighted_f1": 1.0
+  }
+}

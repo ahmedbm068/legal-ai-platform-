@@ -1,0 +1,85 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 1512 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(PATIENT OPERATIONS IMPACT SUMMARY) Tj
+0 -12 Td
+(Prepared by: MedCare Patient Operations) Tj
+0 -12 Td
+(Date: March 31, 2026) Tj
+0 -12 Td
+(Affected Services) Tj
+0 -12 Td
+(The March 21 outage affected MRI scheduling at the Ariana clinic. Patients with) Tj
+0 -12 Td
+(urgent referrals were prioritized for rerouting to partner clinics.) Tj
+0 -12 Td
+(Impact Figures) Tj
+0 -12 Td
+(- Delayed appointments: 23) Tj
+0 -12 Td
+(- Same-day external referrals: 9) Tj
+0 -12 Td
+(- Cancelled appointments later rebooked: 4) Tj
+0 -12 Td
+(- Patient complaints received by March 29: 7) Tj
+0 -12 Td
+(- Direct external scan costs: 8,920 TND) Tj
+0 -12 Td
+(- Estimated internal overtime cost: 1,480 TND) Tj
+0 -12 Td
+(Customer Communications) Tj
+0 -12 Td
+(Staff used approved disruption scripts. No patient diagnosis details were shared) Tj
+0 -12 Td
+(with BioServe. Two patients requested written explanations for insurance files.) Tj
+0 -12 Td
+(Compliance Notes) Tj
+0 -12 Td
+(No immediate patient injury was reported. Compliance recommends preserving all) Tj
+0 -12 Td
+(ticket records, service logs, patient scheduling records, and external clinic) Tj
+0 -12 Td
+(invoices. If downtime repeats in April, a regulator notification assessment may) Tj
+0 -12 Td
+(be needed.) Tj
+0 -12 Td
+(Evidence Gaps) Tj
+0 -12 Td
+(The summary estimates do not yet include reputational harm or lost future) Tj
+0 -12 Td
+(appointments. Legal should avoid overstating damages until finance support is) Tj
+0 -12 Td
+(complete.) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1874
+%%EOF

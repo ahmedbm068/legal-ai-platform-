@@ -11,6 +11,7 @@ Objective:
 
 - `training_master_plan_2026-03-31.md`: end-to-end plan, timeline, milestones.
 - `colab_runbook.md`: Colab-first workflow and artifact export rules.
+- `supervised_models_runbook.md`: local classical ML training path for non-LLM models.
 - `notebooks/01_reranker_all_in_one.ipynb`: single local notebook for data prep, split, validation, train, and test.
 - `model_report_template.md`: base template for any new model.
 - `reports/01_retrieval_reranker_report.md`
@@ -18,6 +19,22 @@ Objective:
 - `reports/03_obligation_deadline_extractor_report.md`
 - `reports/04_contradiction_detector_report.md`
 - `reports/05_case_risk_stratification_report.md`
+
+## Local Supervised Model Demo
+
+To show trainable models beyond LLM prompting, run:
+
+```bash
+.\.venv\Scripts\python.exe scripts\train_supervised_legal_models.py
+```
+
+This trains three small scikit-learn classifiers from `docs/ml/data/supervised/`:
+
+- document type classifier
+- claim-evidence verifier
+- case risk triage classifier
+
+Artifacts and metrics are saved under `docs/ml/models/supervised/`.
 
 ## Model Priority
 

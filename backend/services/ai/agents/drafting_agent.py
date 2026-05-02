@@ -80,15 +80,19 @@ class DraftingAgent(BaseAgent):
         case_title: str,
         case_summary: str,
         jurisdiction_country: str | None,
+        client_name: str | None = None,
+        lawyer_name: str | None = None,
     ) -> str:
         key_points = cls._extract_key_points(case_summary, limit=4)
         summary_sentence = key_points[0] if key_points else cls._trim(case_summary, 320)
         jurisdiction_note = f" This matter is being handled under {jurisdiction_country} context." if jurisdiction_country else ""
+        greeting_name = cls._clean_text(client_name or "") or "Client"
+        signature_name = cls._clean_text(lawyer_name or "") or "Your Legal Team"
 
         lines = [
             f"Subject: Case #{case_id} update - {case_title}",
             "",
-            "Dear Client,",
+            f"Dear {greeting_name},",
             "",
             f"I wanted to share a clear update on case #{case_id} ({case_title}).{jurisdiction_note}",
             "",
@@ -116,10 +120,10 @@ class DraftingAgent(BaseAgent):
                 "- Share a focused action plan with deadlines and responsibilities.",
                 "",
                 "Please let me know if you would like a call this week to walk through this update line by line.",
-                "",
-                "Best regards,",
-                "Your Legal Team",
-            ]
+            "",
+            "Best regards,",
+            signature_name,
+        ]
         )
 
         return "\n".join(lines).strip()
@@ -131,6 +135,8 @@ class DraftingAgent(BaseAgent):
         case_title: str,
         case_summary: str,
         jurisdiction_country: str | None = None,
+        client_name: str | None = None,
+        lawyer_name: str | None = None,
     ) -> AgentResult:
         normalized_summary = (case_summary or "").strip()
         if not normalized_summary:
@@ -155,6 +161,8 @@ class DraftingAgent(BaseAgent):
             )
             distilled_points = self._extract_key_points(normalized_summary, limit=8)
             points_block = "\n".join(f"- {item}" for item in distilled_points) or "- No distilled points were available from the summary."
+            greeting_name = self._clean_text(client_name or "") or "Client"
+            signature_name = self._clean_text(lawyer_name or "") or "Your Legal Team"
             prompt = f"""
 You are the Drafting Agent inside a legal AI platform, writing to a non-lawyer client.
 
@@ -169,11 +177,12 @@ Do not mention AI, model behavior, prompts, "grounded summary", or internal tool
 
 Output format requirements:
 1) Subject line
-2) Greeting: "Dear Client,"
+2) Greeting: "Dear {greeting_name},"
 3) One concise status paragraph
 4) "Key points" section with 3-5 bullets (specific, client-facing)
 5) "Next steps" section with exactly 2-3 bullets (concrete and practical)
 6) Reassuring closing + invitation for questions
+7) Sign off as "{signature_name}"
 
 Length target: 160-240 words.
 Tone: calm, professional, transparent, and action-oriented.
@@ -183,6 +192,8 @@ Return only the email body.
 {jurisdiction_line}
 Case id: {case_id}
 Case title: {case_title}
+Client name: {greeting_name}
+Lawyer name: {signature_name}
 
 Distilled points from case materials:
 {points_block}
@@ -214,6 +225,8 @@ Grounded case summary:
             case_title=case_title,
             case_summary=normalized_summary,
             jurisdiction_country=jurisdiction_country,
+            client_name=client_name,
+            lawyer_name=lawyer_name,
         )
         trace.append("Drafting agent produced a template-based fallback email.")
 

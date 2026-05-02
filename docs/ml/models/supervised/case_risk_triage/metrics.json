@@ -1,0 +1,269 @@
+{
+  "task": "case_risk_triage",
+  "description": "Predict low, medium, or high legal case risk from case facts.",
+  "dataset": "docs\\ml\\data\\supervised\\case_risk_examples.csv",
+  "rows": 30,
+  "train_rows": 24,
+  "test_rows": 6,
+  "label_distribution": {
+    "high": 11,
+    "low": 10,
+    "medium": 9
+  },
+  "candidate_models": {
+    "multinomial_nb": {
+      "accuracy": 0.8333,
+      "macro_f1": 0.8222,
+      "weighted_f1": 0.8222,
+      "classification_report": {
+        "high": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 2.0
+        },
+        "low": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "medium": {
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "f1-score": 0.8,
+          "support": 2.0
+        },
+        "accuracy": 0.8333333333333334,
+        "macro avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        },
+        "weighted avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "high",
+          "low",
+          "medium"
+        ],
+        "matrix": [
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            0,
+            2
+          ]
+        ]
+      }
+    },
+    "logistic_regression": {
+      "accuracy": 0.8333,
+      "macro_f1": 0.8222,
+      "weighted_f1": 0.8222,
+      "classification_report": {
+        "high": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 2.0
+        },
+        "low": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "medium": {
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "f1-score": 0.8,
+          "support": 2.0
+        },
+        "accuracy": 0.8333333333333334,
+        "macro avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        },
+        "weighted avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "high",
+          "low",
+          "medium"
+        ],
+        "matrix": [
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            0,
+            2
+          ]
+        ]
+      }
+    },
+    "linear_svm": {
+      "accuracy": 0.8333,
+      "macro_f1": 0.8222,
+      "weighted_f1": 0.8222,
+      "classification_report": {
+        "high": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 2.0
+        },
+        "low": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "medium": {
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "f1-score": 0.8,
+          "support": 2.0
+        },
+        "accuracy": 0.8333333333333334,
+        "macro avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        },
+        "weighted avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "high",
+          "low",
+          "medium"
+        ],
+        "matrix": [
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            0,
+            2
+          ]
+        ]
+      }
+    },
+    "char_linear_svm": {
+      "accuracy": 0.8333,
+      "macro_f1": 0.8222,
+      "weighted_f1": 0.8222,
+      "classification_report": {
+        "high": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1-score": 1.0,
+          "support": 2.0
+        },
+        "low": {
+          "precision": 1.0,
+          "recall": 0.5,
+          "f1-score": 0.6666666666666666,
+          "support": 2.0
+        },
+        "medium": {
+          "precision": 0.6666666666666666,
+          "recall": 1.0,
+          "f1-score": 0.8,
+          "support": 2.0
+        },
+        "accuracy": 0.8333333333333334,
+        "macro avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        },
+        "weighted avg": {
+          "precision": 0.8888888888888888,
+          "recall": 0.8333333333333334,
+          "f1-score": 0.8222222222222223,
+          "support": 6.0
+        }
+      },
+      "confusion_matrix": {
+        "labels": [
+          "high",
+          "low",
+          "medium"
+        ],
+        "matrix": [
+          [
+            2,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            0,
+            2
+          ]
+        ]
+      }
+    }
+  },
+  "best_model": "multinomial_nb",
+  "best_metrics": {
+    "accuracy": 0.8333,
+    "macro_f1": 0.8222,
+    "weighted_f1": 0.8222
+  }
+}

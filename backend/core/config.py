@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     SCANNED_PDF_MIN_NATIVE_TEXT_CHARS: int = 240
 
     # Frontend
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
+    CORS_ORIGINS: str = "http://localhost:5175,http://127.0.0.1:5175,http://localhost:5174,http://127.0.0.1:5174"
 
     # Client portal email
     CLIENT_PORTAL_FIRM_NAME: str = "Arbi Mostaissier"

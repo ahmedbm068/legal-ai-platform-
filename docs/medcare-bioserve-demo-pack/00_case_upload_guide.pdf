@@ -1,0 +1,117 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 2420 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(# MedCare v BioServe Demo Pack) Tj
+0 -12 Td
+(This is a realistic synthetic case pack for testing the full legal AI workflow.) Tj
+0 -12 Td
+(All parties and facts are fictional.) Tj
+0 -12 Td
+(## Recommended Case Values) Tj
+0 -12 Td
+(- Client name: MedCare Clinics SARL) Tj
+0 -12 Td
+(- Case title: MedCare v BioServe - Medical Equipment Maintenance Dispute) Tj
+0 -12 Td
+(- Practice area: Commercial Litigation / Healthcare Operations) Tj
+0 -12 Td
+(- Priority: High) Tj
+0 -12 Td
+(- Status: Open) Tj
+0 -12 Td
+(- Jurisdiction: Tunisia) Tj
+0 -12 Td
+(## Upload Order) Tj
+0 -12 Td
+(1. 01_equipment_maintenance_agreement.pdf) Tj
+0 -12 Td
+(2. 02_internal_incident_report_march_outage.pdf) Tj
+0 -12 Td
+(3. 03_client_breach_notice.pdf) Tj
+0 -12 Td
+(4. 04_bioserve_response_letter.pdf) Tj
+0 -12 Td
+(5. 05_invoice_and_reconciliation_sheet.pdf) Tj
+0 -12 Td
+(6. 06_service_logs_extract.pdf) Tj
+0 -12 Td
+(7. 07_patient_operations_impact_summary.pdf) Tj
+0 -12 Td
+(8. 08_internal_legal_memo.pdf) Tj
+0 -12 Td
+(9. 09_without_prejudice_settlement_offer.pdf) Tj
+0 -12 Td
+(10. 10_management_call_summary.pdf) Tj
+0 -12 Td
+(## Demo Prompts) Tj
+0 -12 Td
+(1. Summarize the case in 8 bullets with the main contract, breach, invoice, and healthcare operations issues.) Tj
+0 -12 Td
+(2. Build a strict chronology with dates, deadlines, and source documents.) Tj
+0 -12 Td
+(3. Identify contradictions between MedCare and BioServe positions.) Tj
+0 -12 Td
+(4. What are the strongest and weakest pieces of evidence for MedCare?) Tj
+0 -12 Td
+(5. Extract every deadline and propose calendar reminders.) Tj
+0 -12 Td
+(6. Rank the legal risks from high to low and explain the evidence behind each one.) Tj
+0 -12 Td
+(7. Draft a client-facing update email that preserves MedCare's rights.) Tj
+0 -12 Td
+(8. Draft a without-prejudice negotiation strategy for the April 9 settlement call.) Tj
+0 -12 Td
+(9. What documents are missing or should be requested next?) Tj
+0 -12 Td
+(10. Prepare a partner review memo with recommended next actions.) Tj
+0 -12 Td
+(## Expected Workflow Coverage) Tj
+0 -12 Td
+(- PDF ingestion and text extraction) Tj
+0 -12 Td
+(- Matter classification) Tj
+0 -12 Td
+(- Timeline and deadline extraction) Tj
+0 -12 Td
+(- Contradiction detection) Tj
+0 -12 Td
+(- Evidence strength analysis) Tj
+0 -12 Td
+(- Risk triage) Tj
+0 -12 Td
+(- Settlement and drafting assistance) Tj
+0 -12 Td
+(- Source-grounded RAG answers) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+2782
+%%EOF

@@ -26,6 +26,7 @@ from backend.services.ai.runtime_services import (
     rag_service,
     shared_document_pipeline,
 )
+from backend.services.draft_document_payload_service import build_draft_document_payload, is_drafting_request
 from backend.api.rag_schema import (
     AskRequest,
     AskResponse,
@@ -260,7 +261,7 @@ def copilot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return copilot_orchestration_service.run(
+    response = copilot_orchestration_service.run(
         db=db,
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
@@ -280,6 +281,24 @@ def copilot(
         save_attachments_to_case=data.save_attachments_to_case,
         attachment_case_id=data.attachment_case_id,
     )
+    if is_drafting_request(data.message, response.get("parsed_intent"), response.get("action_category")):
+        answer = str(response.get("answer") or response.get("message") or "")
+        sources = response.get("sources") if isinstance(response.get("sources"), list) else []
+        citations = response.get("citations") if isinstance(response.get("citations"), list) else []
+        response["open_editor"] = True
+        response["draft_document"] = build_draft_document_payload(
+            prompt=data.message,
+            answer=answer,
+            parsed_intent=response.get("parsed_intent"),
+            case_id=data.workspace_case_id,
+            sources=sources,
+            citations=citations,
+        )
+        response["message"] = "I drafted it and opened it in the editor."
+    else:
+        response["open_editor"] = False
+        response["draft_document"] = None
+    return response
 
 
 @router.post("/optimize-prompt", response_model=PromptOptimizationResponse)

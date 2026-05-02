@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 
 from backend.core.config import settings
 from backend.api.voice_schema import VoiceRecordingOut, VoiceTranscriptionResponse, VoiceUploadResponse
@@ -111,7 +112,10 @@ def list_case_recordings(
 ):
     get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
-    query = db.query(VoiceRecording).filter(VoiceRecording.case_id == case_id)
+    query = db.query(VoiceRecording).filter(
+        VoiceRecording.case_id == case_id,
+        VoiceRecording.archived_at.is_(None),
+    )
     recordings = apply_tenant_scope(query, VoiceRecording.tenant_id, current_user).order_by(
         VoiceRecording.created_at.desc(), VoiceRecording.id.desc()
     ).all()
@@ -155,6 +159,18 @@ def get_recording_file(
         media_type=recording.mime_type or "application/octet-stream",
         filename=recording.filename,
     )
+
+
+@router.post("/{recording_id}/archive", status_code=status.HTTP_200_OK)
+def archive_recording(
+    recording_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    recording = get_tenant_recording_or_404(db=db, recording_id=recording_id, current_user=current_user)
+    recording.archived_at = func.now()
+    db.commit()
+    return {"message": "Voice recording moved to archive", "recording_id": recording.id, "archived": True}
 
 
 @router.post("/upload", response_model=VoiceUploadResponse, status_code=status.HTTP_201_CREATED)

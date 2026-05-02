@@ -1,0 +1,7 @@
+text,label,prediction,correct
+text: We hereby notify you that your failure to perform obligations constitutes breach and reserve all rights.,legal_letter,legal_letter,true
+text: Software license agreement defining parties scope of services limitation of liability intellectual property and termination rights.,contract,contract,true
+text: Rent invoice with monthly rent service charges late fee amount due and due date.,invoice,invoice,true
+text: Civil complaint names defendant lists allegations jurisdiction facts and prayer for relief.,complaint,complaint,true
+text: Final ruling states reasons for decision orders payment and dismisses remaining claims.,court_judgment,court_judgment,true
+text: Legal risk memorandum assessing exposure probability of success and next investigative steps.,case_memo,case_memo,true

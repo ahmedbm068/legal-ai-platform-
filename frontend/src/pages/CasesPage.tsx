@@ -3,9 +3,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
 import { saveEditorDraftSeed } from "../editorDraftSeed";
 
-type CaseTab = "overview" | "documents" | "timeline" | "assistant" | "tasks";
+type CaseTab = "overview" | "documents" | "timeline" | "assistant" | "tasks" | "calendar";
 
-const VALID_TABS = new Set<CaseTab>(["overview", "documents", "timeline", "assistant", "tasks"]);
+const VALID_TABS = new Set<CaseTab>(["overview", "documents", "timeline", "assistant", "tasks", "calendar"]);
 
 function parseCaseId(value?: string) {
     const parsed = Number(value);
@@ -74,6 +74,7 @@ export default function CasesPage() {
         { id: "overview", label: t("tabOverview", "Overview") },
         { id: "documents", label: t("tabDocuments", "Documents") },
         { id: "timeline", label: t("tabTimeline", "Timeline") },
+        { id: "calendar", label: t("tabCalendar", "Calendar") },
         { id: "assistant", label: t("tabAssistant", "Assistant") },
         { id: "tasks", label: t("tabTasks", "Tasks") },
     ];
@@ -224,6 +225,10 @@ export default function CasesPage() {
 
     function handleTabSelect(tab: CaseTab) {
         if (!activeCaseId) return;
+        if (tab === "calendar") {
+            navigate(`/cases/${activeCaseId}/calendar`);
+            return;
+        }
         navigate(`/cases/${activeCaseId}/${tab}`);
     }
 
@@ -441,6 +446,15 @@ export default function CasesPage() {
                                             </li>
                                         )) : <li>{t("noTimelineEvents", "No timeline events yet.")}</li>}
                                     </ul>
+                                ) : null}
+
+                                {activeTab === "calendar" ? (
+                                    <div className="shell-detail-block">
+                                        <p>{t("caseCalendarNotice", "Open the matter calendar for hearings, deadlines, extracted document dates, reminders, and review status.")}</p>
+                                        <Link className="shell-inline-link" to={`/cases/${activeCase.id}/calendar`}>
+                                            {t("openCaseCalendar", "Open case calendar")}
+                                        </Link>
+                                    </div>
                                 ) : null}
 
                                 {activeTab === "assistant" ? (

@@ -76,6 +76,20 @@ class CommandParsingService:
         "liability",
         "liabilities",
     ]
+    EXPLICIT_RISK_KEYWORDS = [
+        "risk",
+        "risks",
+        "risk assessment",
+        "analyze risk",
+        "analyse risk",
+        "rank risk",
+        "rank the legal risks",
+        "legal risks",
+        "exposure",
+        "exposures",
+        "liability",
+        "liabilities",
+    ]
     INSIGHT_KEYWORDS = [
         "insight",
         "insights",
@@ -111,6 +125,18 @@ class CommandParsingService:
         "support this claim",
         "supporting evidence",
         "back this up",
+    ]
+    EVIDENCE_STRENGTH_KEYWORDS = [
+        "strongest evidence",
+        "weakest evidence",
+        "strongest and weakest",
+        "weakest and strongest",
+        "pieces of evidence",
+        "evidence strength",
+        "rank evidence",
+        "rank the evidence",
+        "best evidence",
+        "worst evidence",
     ]
     DEADLINE_MONITOR_KEYWORDS = [
         "monitor deadlines",
@@ -678,6 +704,11 @@ class CommandParsingService:
         if target_type == "case" and self._contains_any(lowered, self.DELETE_CASE_KEYWORDS):
             return "delete_case", "high"
 
+        if self._contains_any(lowered, ["draft", "write", "prepare"]) and self._contains_any(lowered, ["email", "mail", "client update"]):
+            if target_type == "case":
+                return "draft_client_email_case", "high"
+            return "ask_global", "medium"
+
         if target_type == "case" and self._contains_any(lowered, self.UPDATE_CASE_KEYWORDS):
             if self._contains_any(lowered, self.UPDATE_STATUS_KEYWORDS):
                 return "update_case_status", "high"
@@ -705,6 +736,11 @@ class CommandParsingService:
 
         if self._contains_any(lowered, ["optimize prompt", "improve prompt", "rewrite prompt", "better prompt", "prompt optimizer"]):
             return "optimize_prompt", "high"
+
+        if self._contains_any(lowered, self.EVIDENCE_STRENGTH_KEYWORDS):
+            if target_type == "case" or self._contains_any(lowered, ["case", "matter", "workspace"]):
+                return "evaluate_case_evidence", "high"
+            return "evaluate_case_evidence", "medium"
 
         if self._contains_any(lowered, self.EVIDENCE_TRACE_KEYWORDS):
             if target_type == "case" or self._contains_any(lowered, ["case", "matter", "workspace"]):
@@ -744,20 +780,22 @@ class CommandParsingService:
         # Handle compound requests first: "summarize ... and analyze risks ..."
         if target_type == "case":
             wants_summary = self._looks_like_summary_request(lowered=lowered, target_type=target_type)
-            wants_risks = self._contains_any(lowered, self.RISK_KEYWORDS)
+            wants_risks = self._contains_any(lowered, self.EXPLICIT_RISK_KEYWORDS)
             if wants_summary and self._contains_any(lowered, self.SUMMARY_ONLY_HINTS):
                 return "summarize_case", "high"
             if wants_summary and wants_risks:
                 return "summarize_and_analyze_risks_case", "high"
+            if wants_summary:
+                return "summarize_case", "high"
 
         if target_type == "document":
             wants_summary = self._looks_like_summary_request(lowered=lowered, target_type=target_type)
             if wants_summary and self._contains_any(lowered, self.SUMMARY_ONLY_HINTS):
                 return "summarize_document", "high"
 
-        if self._contains_any(lowered, ["draft", "write", "prepare"]) and self._contains_any(lowered, ["email", "mail", "client update"]):
+        if self._contains_any(lowered, ["timeline", "chronology", "chronological", "sequence of events", "case events"]):
             if target_type == "case":
-                return "draft_client_email_case", "high"
+                return "build_timeline_case", "high"
             return "ask_global", "medium"
 
         if self._contains_any(lowered, ["deadline", "deadlines", "due date", "due dates", "notice period", "hearing date", "hearing dates", "time limit"]):
@@ -765,11 +803,6 @@ class CommandParsingService:
                 return "list_deadlines_case", "high"
             if target_type == "document":
                 return "ask_document", "medium"
-            return "ask_global", "medium"
-
-        if self._contains_any(lowered, ["timeline", "chronology", "chronological", "sequence of events", "case events"]):
-            if target_type == "case":
-                return "build_timeline_case", "high"
             return "ask_global", "medium"
 
         if self._contains_any(lowered, self.INSIGHT_KEYWORDS):

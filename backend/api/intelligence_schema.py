@@ -97,6 +97,7 @@ class ProcessDocumentResponse(BaseModel):
     redacted_preview: str
     status: str
     pii_items_count: int
+    calendar_sync: Optional[Dict[str, Any]] = None
 
 
 class ImportantDateItem(BaseModel):

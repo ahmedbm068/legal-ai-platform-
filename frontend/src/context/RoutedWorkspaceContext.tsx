@@ -76,6 +76,14 @@ type SendCaseMessageOptions = {
     topK?: number;
     reasoningLevel?: "low" | "medium" | "high";
     workspaceDocumentId?: number | null;
+    uploadedDocumentIds?: string[];
+    uploadedFiles?: Array<{
+        id: string;
+        filename: string;
+        mimeType: string;
+        temporary?: boolean;
+    }>;
+    displayPrompt?: string;
 };
 
 type RoutedWorkspaceContextValue = {
@@ -300,6 +308,8 @@ function createAssistantMessage(response: CopilotResponse): ChatMessage {
         artifact: response.artifact,
         jurisdiction: response.jurisdiction,
         reasoningResult: response.reasoning_result,
+        openEditor: response.open_editor,
+        draftDocument: response.draft_document,
         rawAnswer: response.answer,
     });
 }
@@ -667,9 +677,10 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const sendCaseMessage = useCallback(async (caseId: number, prompt: string, options?: SendCaseMessageOptions) => {
-        if (!token || !caseId) return;
+        if (!token || caseId < 0) return;
         const trimmed = prompt.trim();
-        if (!trimmed) return;
+        const displayPrompt = (options?.displayPrompt || trimmed).trim();
+        if (!trimmed || !displayPrompt) return;
 
         const mode = options?.workspaceMode || "chat";
         const requestMode = mode === "legal_search" ? "legal_search" : "default";
@@ -677,15 +688,24 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
         const reasoningLevel = options?.reasoningLevel ?? "medium";
         const useExternalResearch = Boolean(options?.externalModeEnabled) || mode === "legal_search";
         const workspaceDocumentId = options?.workspaceDocumentId ?? null;
+        const uploadedDocumentIds = options?.uploadedDocumentIds || [];
+        const uploadedFiles = options?.uploadedFiles || [];
+        const workspaceCaseId = caseId > 0 ? caseId : null;
 
         const sessions = chatState.sessionsByCase[caseId] || [];
         const activeSessionId = getActiveSessionId(caseId);
-        const sessionId = activeSessionId || createChatSession(caseId, trimmed);
+        const sessionId = activeSessionId || createChatSession(caseId, displayPrompt);
 
         const cachedSession = sessions.find((item) => item.id === sessionId);
         const existingMessages = cachedSession?.messages || [];
 
-        const userMessage = createMessage("user", trimmed);
+        const userMessage = createMessage("user", displayPrompt, uploadedFiles.length ? {
+            attachments: uploadedFiles.map((file) => ({
+                clientId: file.id,
+                name: file.filename,
+                mimeType: file.mimeType,
+            })),
+        } : undefined);
         appendMessage(caseId, sessionId, userMessage);
 
         const abortController = new AbortController();
@@ -693,26 +713,41 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
 
         setCopilotLoading(true);
         try {
-            const response = await workspaceApi.copilot(token, trimmed, {
-                topK,
-                reasoningLevel,
-                workspaceCaseId: caseId,
-                workspaceDocumentId,
-                useExternalResearch,
-                mode: requestMode,
-                legalSearchMultilingualOutput: mode === "legal_search",
-                agentMode: mode === "agent",
-                conversationHistory: [...existingMessages, userMessage]
-                    .slice(-12)
-                    .map((message) => ({
-                        role: message.role,
-                        content: message.content,
-                        parsed_intent: message.meta?.parsedIntent,
-                        case_id: caseId,
-                        document_id: null,
-                    })),
-                signal: abortController.signal,
-            });
+            const conversationHistory = [...existingMessages, userMessage]
+                .slice(-12)
+                .map((message) => ({
+                    role: message.role,
+                    content: message.content,
+                    parsed_intent: message.meta?.parsedIntent,
+                    case_id: workspaceCaseId,
+                    document_id: null,
+                }));
+            const response = uploadedDocumentIds.length
+                ? await workspaceApi.askWithFiles(token, trimmed, {
+                    uploadedDocumentIds,
+                    caseId: workspaceCaseId,
+                    chatSessionId: sessionId,
+                    topK,
+                    reasoningLevel,
+                    useExternalResearch,
+                    mode: requestMode,
+                    legalSearchMultilingualOutput: mode === "legal_search",
+                    agentMode: mode === "agent",
+                    conversationHistory,
+                    signal: abortController.signal,
+                })
+                : await workspaceApi.copilot(token, trimmed, {
+                    topK,
+                    reasoningLevel,
+                    workspaceCaseId,
+                    workspaceDocumentId,
+                    useExternalResearch,
+                    mode: requestMode,
+                    legalSearchMultilingualOutput: mode === "legal_search",
+                    agentMode: mode === "agent",
+                    conversationHistory,
+                    signal: abortController.signal,
+                });
 
             appendMessage(caseId, sessionId, createAssistantMessage(response));
         } catch (caught) {
