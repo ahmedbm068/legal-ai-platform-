@@ -3885,11 +3885,6 @@ Return JSON only with this schema:
         except Exception:
             return None
 
-    def _append_unique(self, items: List[str], value: Optional[str]) -> None:
-        cleaned = self._normalize_text(value)
-        if cleaned and cleaned not in items:
-            items.append(cleaned)
-
     def _build_source(
         self,
         *,
@@ -5417,27 +5412,6 @@ Uploaded case document context:
             paragraph = paragraph[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
 
         return paragraph or fallback
-
-    def _is_reasonable_party(self, value: str) -> bool:
-        lowered = value.lower().strip()
-        if not lowered:
-            return False
-
-        blocked_fragments = [
-            "invoice records",
-            "warehouse logs",
-            "document overview",
-            "this document",
-            "question answering",
-            "sample document",
-            "used to test",
-            "key dates"
-        ]
-
-        if any(fragment in lowered for fragment in blocked_fragments):
-            return False
-
-        return len(value) <= 60
 
     def _summarize_document(
         self,
