@@ -309,10 +309,12 @@ class CopilotResponseAssemblyService:
             and grounding == _GROUNDING_CASE
             and sources_count >= 3
         ):
+            ai_insight["grounding_type"] = "Case-grounded (document-based)"
             ai_insight["grounding_description"] = (
-                "This answer is strongly grounded in retrieved case documents "
-                "with supporting evidence."
+                "This answer is strongly grounded in case documents, "
+                "but not supported by verified legal provisions."
             )
+            ai_insight["legal_grounding"] = "None"
             ai_insight["confidence_level"] = "high"
             ai_insight["lawyer_note"] = (
                 "The case record supports this response. "
