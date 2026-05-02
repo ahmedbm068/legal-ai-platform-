@@ -60,6 +60,8 @@ class CopilotRequest(BaseModel):
     attachments: List[CopilotAttachment] = Field(default_factory=list, max_length=8)
     save_attachments_to_case: bool = False
     attachment_case_id: Optional[int] = Field(default=None, ge=1)
+    # Dev-only: bypass response cache for this request (use in tests only).
+    skip_cache: bool = False
 
 
 class AgentWorkflowRequest(BaseModel):

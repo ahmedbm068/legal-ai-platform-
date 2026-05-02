@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 import threading
 import time
+from contextvars import ContextVar
 from typing import Any
 
 from backend.core.config import settings
+
+# Dev-only flag: set to True via _SKIP_CACHE.set(True) to bypass cache for a request.
+# Uses ContextVar so it is isolated per async task / thread.
+_SKIP_CACHE: ContextVar[bool] = ContextVar("_skip_cache", default=False)
 
 
 class CacheService:
@@ -40,6 +45,8 @@ class CacheService:
         return ":".join(cleaned)
 
     def get_json(self, key: str) -> dict[str, Any] | list[Any] | None:
+        if _SKIP_CACHE.get():
+            return None
         client = self._get_client()
         if client is not None:
             raw = client.get(key)
@@ -66,6 +73,8 @@ class CacheService:
                 return None
 
     def set_json(self, key: str, value: dict[str, Any] | list[Any], ttl_seconds: int = 300) -> None:
+        if _SKIP_CACHE.get():
+            return
         serialized = json.dumps(value, ensure_ascii=False)
         client = self._get_client()
         if client is not None:

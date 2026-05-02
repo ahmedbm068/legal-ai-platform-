@@ -139,6 +139,7 @@ def call_copilot(
         "reasoning_level": reasoning_level,
         "top_k": 5,
         "use_external_research": False,  # keep tests deterministic
+        "skip_cache": True,              # always get a fresh LLM response in tests
     }
     if workspace_case_id is not None:
         payload["workspace_case_id"] = workspace_case_id

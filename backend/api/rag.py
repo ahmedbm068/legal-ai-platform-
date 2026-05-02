@@ -16,6 +16,7 @@ from backend.models.document import Document
 from backend.models.generated_artifact_version import GeneratedArtifactVersion
 from backend.models.user import User
 from backend.services.jobs.job_queue_service import background_job_service
+from backend.services.cache_service import _SKIP_CACHE
 from backend.services.use_cases.ingestion_use_case import ingestion_use_case
 from backend.services.ai.artifact_versioning_service import artifact_versioning_service
 from backend.services.ai.agents.prompt_optimizer_agent import prompt_optimizer_agent
@@ -261,26 +262,30 @@ def copilot(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    response = copilot_orchestration_service.run(
-        db=db,
-        tenant_id=current_user.tenant_id,
-        user_id=current_user.id,
-        user_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
-        message=data.message,
-        top_k=data.top_k,
-        use_external_research=data.use_external_research,
-        mode=data.mode,
-        legal_search_multilingual_output=data.legal_search_multilingual_output,
-        legal_search_code_scope=data.legal_search_code_scope,
-        reasoning_level=data.reasoning_level,
-        agent_mode=data.agent_mode,
-        workspace_case_id=data.workspace_case_id,
-        workspace_document_id=data.workspace_document_id,
-        conversation_history=[item.model_dump() for item in data.conversation_history],
-        attachments=[item.model_dump() for item in data.attachments],
-        save_attachments_to_case=data.save_attachments_to_case,
-        attachment_case_id=data.attachment_case_id,
-    )
+    _token = _SKIP_CACHE.set(data.skip_cache)
+    try:
+        response = copilot_orchestration_service.run(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            user_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
+            message=data.message,
+            top_k=data.top_k,
+            use_external_research=data.use_external_research,
+            mode=data.mode,
+            legal_search_multilingual_output=data.legal_search_multilingual_output,
+            legal_search_code_scope=data.legal_search_code_scope,
+            reasoning_level=data.reasoning_level,
+            agent_mode=data.agent_mode,
+            workspace_case_id=data.workspace_case_id,
+            workspace_document_id=data.workspace_document_id,
+            conversation_history=[item.model_dump() for item in data.conversation_history],
+            attachments=[item.model_dump() for item in data.attachments],
+            save_attachments_to_case=data.save_attachments_to_case,
+            attachment_case_id=data.attachment_case_id,
+        )
+    finally:
+        _SKIP_CACHE.reset(_token)
     if is_drafting_request(data.message, response.get("parsed_intent"), response.get("action_category")):
         answer = str(response.get("answer") or response.get("message") or "")
         sources = response.get("sources") if isinstance(response.get("sources"), list) else []
