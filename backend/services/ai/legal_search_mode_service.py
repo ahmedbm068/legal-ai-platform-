@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -17,6 +18,15 @@ from backend.services.ai.external_research_service import external_research_serv
 from backend.services.ai.jurisdiction_context_service import jurisdiction_context_service
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.reranker_service import reranker_service
+from backend.services.ai.legal_search_components import (
+    JurisdictionRouter,
+    LegalDomainClassifier,
+    LegalSourceRelevanceFilter,
+    RestrictedLegalCorpusRetriever,
+    LegalSearchResponseBuilder,
+)
+
+_logger = logging.getLogger(__name__)
 
 
 class LegalSearchModeService:
@@ -83,6 +93,11 @@ class LegalSearchModeService:
     def __init__(self) -> None:
         self.client = llm_gateway.create_client()
         self.model = llm_gateway.default_model
+        self.jurisdiction_router = JurisdictionRouter()
+        self.domain_classifier = LegalDomainClassifier()
+        self.relevance_filter = LegalSourceRelevanceFilter()
+        self.corpus_retriever = RestrictedLegalCorpusRetriever()
+        self.response_builder = LegalSearchResponseBuilder()
 
     def run(
         self,
@@ -121,11 +136,16 @@ class LegalSearchModeService:
                 country=self._infer_country_from_context(message=message, conversation_history=conversation_history),
             )
 
-        country = self._resolve_country(
+        case_bound = (case_id is not None)
+        country, _jurisdiction_resolution = self.jurisdiction_router.resolve(
             case=resolved_case,
+            case_is_bound=case_bound,
             message=message,
             conversation_history=conversation_history,
+            normalize_fn=jurisdiction_context_service.normalize_country,
         )
+        if country is None:
+            return self._jurisdiction_missing_response(case_id=case_id)
         detected_user_language = self._detect_user_language(message)
         localized_lawyer_review_note = self._localized_lawyer_review_note(detected_user_language)
         jurisdiction = jurisdiction_context_service.get_response_context(country)
@@ -158,22 +178,29 @@ class LegalSearchModeService:
             top_k=top_k,
         )
         case_focus_terms = self._extract_case_focus_terms(query=optimized_query, internal_results=internal_results)
-        case_topic = self._infer_case_topic(
-            country=country,
+        case_topic = self.domain_classifier.classify(
             query=optimized_query,
             case_focus_terms=case_focus_terms,
             internal_results=internal_results,
             code_scope=normalized_code_scope,
+            country=country,
         )
-        legal_sources = self._retrieve_jurisdiction_sources(
+        legal_sources_raw = self._retrieve_jurisdiction_sources(
             country=country,
             query=optimized_query,
             case_focus_terms=case_focus_terms,
             top_k=max(top_k, 5),
             case_topic=case_topic,
+            case_bound=case_bound,
         )
-        local_code_results = sum(1 for item in legal_sources if item.get("source_origin") == "local_code")
-        external_web_results = sum(1 for item in legal_sources if item.get("source_origin") == "external_web")
+        legal_sources, legal_sources_note = self.relevance_filter.filter(
+            query=optimized_query,
+            sources=legal_sources_raw,
+            answer_text="",
+            case_focus_terms=case_focus_terms,
+        )
+        local_code_results = sum(1 for item in legal_sources_raw if item.get("source_origin") == "local_code")
+        external_web_results = sum(1 for item in legal_sources_raw if item.get("source_origin") == "external_web")
         scope = self._scope(
             case_id=resolved_case.id if resolved_case else None,
             document_id=resolved_document.id if resolved_document else None,
@@ -182,6 +209,8 @@ class LegalSearchModeService:
             {
                 "stage": "legal_search_scope_resolution",
                 "country": country,
+                "jurisdiction_resolution": _jurisdiction_resolution,
+                "case_bound": case_bound,
                 "scope": scope,
                 "case_id": resolved_case.id if resolved_case else None,
                 "document_id": resolved_document.id if resolved_document else None,
@@ -191,9 +220,15 @@ class LegalSearchModeService:
                 "internal_results": len(internal_results),
                 "local_code_results": local_code_results,
                 "external_web_results": external_web_results,
-                "total_legal_results": len(legal_sources),
+                "total_legal_results": len(legal_sources_raw),
                 "case_focus_terms": case_focus_terms[:8],
                 "case_topic": case_topic,
+            },
+            {
+                "stage": "legal_source_relevance_filter",
+                "raw_legal_sources_count": len(legal_sources_raw),
+                "relevant_legal_sources_count": len(legal_sources),
+                "legal_sources_note_present": bool(legal_sources_note),
             },
         ]
 
@@ -218,6 +253,7 @@ class LegalSearchModeService:
                     confidence=confidence,
                     verification_status=verification_status,
                     lawyer_review_note=localized_lawyer_review_note,
+                    legal_sources_note=legal_sources_note,
                 ),
                 "used_fallback": False,
                 "fallback_reason": None,
@@ -227,6 +263,7 @@ class LegalSearchModeService:
                 "citations": self._to_api_citations(legal_sources),
                 "execution_trace": execution_trace,
                 "jurisdiction": jurisdiction,
+                "legal_sources_note": legal_sources_note,
             }
             cache_service.set_json(cache_key, payload, ttl_seconds=settings.LEGAL_SEARCH_CACHE_TTL_SECONDS)
             return self._with_cache_metadata(payload, key=cache_key, hit=False)
@@ -256,6 +293,7 @@ class LegalSearchModeService:
                 confidence="low",
                 verification_status="not_verified_no_direct_source",
                 lawyer_review_note=localized_lawyer_review_note,
+                legal_sources_note=legal_sources_note,
             ),
             "used_fallback": True,
             "fallback_reason": "no_direct_legal_source",
@@ -265,6 +303,7 @@ class LegalSearchModeService:
             "citations": self._to_api_citations(legal_sources),
             "execution_trace": execution_trace,
             "jurisdiction": jurisdiction,
+            "legal_sources_note": legal_sources_note,
         }
         cache_service.set_json(cache_key, payload, ttl_seconds=settings.LEGAL_SEARCH_CACHE_TTL_SECONDS)
         return self._with_cache_metadata(payload, key=cache_key, hit=False)
@@ -320,6 +359,33 @@ class LegalSearchModeService:
             "scope": normalized_kind,
             "sources": [],
             "jurisdiction": jurisdiction_context_service.get_response_context(country),
+        }
+
+    def _jurisdiction_missing_response(self, *, case_id: Optional[int]) -> Dict[str, Any]:
+        note = (
+            "The case record does not specify a supported jurisdiction (Tunisia or Germany). "
+            "Please update the case jurisdiction before requesting legal search analysis."
+        )
+        answer = self._format_legal_search_output(
+            country="Unknown",
+            source_lines=[],
+            answer_body=note,
+            fallback_notice="Jurisdiction is required for corpus-restricted legal search.",
+            confidence="low",
+            verification_status="not_verified_jurisdiction_missing",
+            lawyer_review_note=self.LAWYER_REVIEW_NOTE,
+            legal_sources_note=LegalSourceRelevanceFilter.MISSING_AUTHORITY_NOTE,
+        )
+        return {
+            "answer": answer,
+            "used_fallback": True,
+            "fallback_reason": "jurisdiction_missing",
+            "confidence": "low",
+            "scope": "case" if case_id else "global",
+            "sources": [],
+            "citations": [],
+            "jurisdiction": None,
+            "legal_sources_note": LegalSourceRelevanceFilter.MISSING_AUTHORITY_NOTE,
         }
 
     def _resolve_document_for_context(
@@ -584,6 +650,7 @@ class LegalSearchModeService:
         case_focus_terms: List[str],
         top_k: int,
         case_topic: Optional[Dict[str, Any]],
+        case_bound: bool = False,
     ) -> List[Dict[str, Any]]:
         preferred_code_families = self._normalize_code_scope((case_topic or {}).get("code_families"))
         local_sources = self._retrieve_local_legal_code_sources(
@@ -629,7 +696,7 @@ class LegalSearchModeService:
                 preferred_code_families=preferred_code_families,
             )
 
-        if len(gathered) < max(4, top_k):
+        if not case_bound and len(gathered) < max(4, top_k):
             for item_query in search_queries[:3]:
                 research = external_research_service.search(
                     query=item_query,
@@ -1709,6 +1776,7 @@ Internal case retrieval JSON (context only):
         confidence: str,
         verification_status: str,
         lawyer_review_note: str,
+        legal_sources_note: Optional[str] = None,
     ) -> str:
         lines = ["[Legal Source Answer]", f"- Country: {country}", "- Sources:"]
         if source_lines:
@@ -1726,6 +1794,8 @@ Internal case retrieval JSON (context only):
                 f"- Lawyer review note: {lawyer_review_note}",
             ]
         )
+        if legal_sources_note:
+            lines.extend(["", "[Legal Authority Status]", legal_sources_note.strip()])
         if fallback_notice:
             lines.extend(["", "[Fallback Notice]", fallback_notice.strip()])
         return "\n".join(lines).strip()
