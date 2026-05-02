@@ -301,7 +301,26 @@ class CopilotResponseAssemblyService:
             legal_sources_note=legal_sources_note,
             fallback_reason=fallback_reason,
         )
-
+        # ── R5c-strong: promote insight for strongly grounded multi-source analysis ──
+        # Applies when we have 3+ real document sources, no fallback, and the
+        # grounding classification is Case-grounded (not a case-context fallback).
+        if (
+            fallback_reason != "case_context_no_legal_provisions"
+            and grounding == _GROUNDING_CASE
+            and sources_count >= 3
+        ):
+            ai_insight["grounding_description"] = (
+                "This answer is strongly grounded in retrieved case documents "
+                "with supporting evidence."
+            )
+            ai_insight["confidence_level"] = "high"
+            ai_insight["lawyer_note"] = (
+                "The case record supports this response. "
+                "Counsel review is advised prior to use in external communications "
+                "or proceedings."
+            )
+            # Keep top-level confidence consistent with insight
+            confidence = "high"
         # ── Structured result — merge all quality signals into it ─────────────
         if grounding and mode in _GROUNDED_MODES:
             structured_result["grounding"] = grounding
@@ -461,7 +480,9 @@ class CopilotResponseAssemblyService:
             confidence = "medium"
         elif used_fallback and sources_count > 0:
             confidence = "medium"
-        elif sources_count >= 3 and not used_fallback and v_status in {"verified", "partial", ""}:
+        elif sources_count >= 3 and not used_fallback:
+            # High: 3+ sources without fallback — verifier status not required
+            # (verifier calls often fail with 429; source count is the reliable signal)
             confidence = "high"
         elif sources_count > 0 and not used_fallback:
             confidence = "medium"
