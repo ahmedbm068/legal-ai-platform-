@@ -311,6 +311,7 @@ function createAssistantMessage(response: CopilotResponse): ChatMessage {
         openEditor: response.open_editor,
         draftDocument: response.draft_document,
         rawAnswer: response.answer,
+        aiInsight: response.ai_insight,
     });
 }
 

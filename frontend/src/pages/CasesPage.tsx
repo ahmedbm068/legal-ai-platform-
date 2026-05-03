@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
 import { saveEditorDraftSeed } from "../editorDraftSeed";
+import IntelligencePanel from "../components/IntelligencePanel";
 
 type CaseTab = "overview" | "documents" | "timeline" | "assistant" | "tasks" | "calendar";
 
@@ -63,10 +64,12 @@ export default function CasesPage() {
         caseContextLoading,
         caseContextError,
         documents,
+        recordings,
         calendarAppointments,
         consultations,
         imageBatches,
         locale,
+        language,
         t,
     } = useRoutedWorkspace();
 
@@ -418,6 +421,17 @@ export default function CasesPage() {
                                             <p><strong>{t("created", "Created")}</strong><span>{formatDate(activeCase.created_at, locale, t("noDate", "No date"))}</span></p>
                                             <p><strong>{t("clientMatters", "Client matters")}</strong><span>{activePortfolio?.cases.length || 1}</span></p>
                                         </div>
+                                        <IntelligencePanel
+                                            language={language}
+                                            caseItem={activeCase}
+                                            client={activeClient}
+                                            documents={documents}
+                                            consultations={consultations}
+                                            recordings={recordings}
+                                            analysis={null}
+                                            latestAssistantMessage={null}
+                                            onLaunchAction={(prompt) => navigate(`/assistant/${activeCase.id}?q=${encodeURIComponent(prompt)}`)}
+                                        />
                                     </div>
                                 ) : null}
 

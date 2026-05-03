@@ -1053,6 +1053,21 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
           </div>
         ) : null}
 
+        {message.role === "assistant" && message.meta?.aiInsight ? (
+          <div className="ai-insight-strip" aria-label="AI Insight">
+            <span className="ai-insight-label">{tb("aiInsightGrounding", "AI Insight")}</span>
+            {message.meta.aiInsight.grounding_type ? (
+              <span className="ai-insight-badge">{message.meta.aiInsight.grounding_type}</span>
+            ) : null}
+            {message.meta.aiInsight.confidence_level ? (
+              <span className="ai-insight-badge">{tb("confidenceLabel", "Confidence")}: {message.meta.aiInsight.confidence_level}</span>
+            ) : null}
+            {message.meta.aiInsight.lawyer_note ? (
+              <span className="ai-insight-note">{message.meta.aiInsight.lawyer_note}</span>
+            ) : null}
+          </div>
+        ) : null}
+
         {message.meta?.attachments?.length ? (
           <div className="message-attachment-chips" aria-label="Attached files">
             {message.meta.attachments.map((attachment) => (

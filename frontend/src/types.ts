@@ -592,6 +592,13 @@ export interface CopilotResponse {
   review_record_id?: number | null;
   open_editor?: boolean;
   draft_document?: DraftDocumentPayload | null;
+  ai_insight?: {
+    grounding_type?: string;
+    confidence_level?: string;
+    legal_grounding?: string;
+    grounding_description?: string;
+    lawyer_note?: string;
+  } | null;
 }
 
 export interface DraftDocumentPayload {
@@ -870,5 +877,12 @@ export interface ChatMessage {
       mimeType: string;
     }>;
     rawAnswer?: string | null;
+    aiInsight?: {
+      grounding_type?: string;
+      confidence_level?: string;
+      legal_grounding?: string;
+      grounding_description?: string;
+      lawyer_note?: string;
+    } | null;
   };
 }

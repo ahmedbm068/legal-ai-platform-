@@ -6382,6 +6382,7 @@
 }
 
 @media (max-width: 1180px) {
+
     .shell-root.sidebar-expanded:has(.minimal-assistant-page),
     .shell-root.sidebar-expanded {
         grid-template-columns: minmax(240px, 280px) 1fr;
@@ -6397,6 +6398,7 @@
 }
 
 @media (max-width: 860px) {
+
     .shell-root.sidebar-collapsed,
     .shell-root.sidebar-expanded,
     .shell-root.sidebar-collapsed:has(.minimal-assistant-page),
@@ -6588,5 +6590,726 @@
 
     .premium-legal-editor {
         min-height: 680px;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════
+   DASHBOARD — Rich analytics layout
+═══════════════════════════════════════════════════════ */
+
+.db-page {
+    gap: 1.25rem;
+    padding-bottom: 1.5rem;
+}
+
+.db-page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.db-title {
+    margin: 0.15rem 0 0;
+    font-size: 1.55rem;
+    font-weight: 700;
+    color: var(--shell-ink);
+}
+
+.db-header-actions {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.db-action-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.42rem 1rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid var(--shell-border);
+    color: var(--shell-ink);
+    background: var(--shell-panel);
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.db-action-btn:hover {
+    background: var(--shell-accent-soft);
+    border-color: var(--shell-accent);
+}
+
+.db-action-btn-primary {
+    background: var(--shell-accent);
+    color: #fff;
+    border-color: var(--shell-accent);
+}
+
+[data-theme="dark"] .db-action-btn-primary {
+    color: #0d1715;
+}
+
+.db-action-btn-primary:hover {
+    opacity: 0.88;
+    background: var(--shell-accent);
+}
+
+/* KPI row */
+.db-kpi-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.85rem;
+}
+
+.db-kpi-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.1rem 1.25rem;
+    border-radius: 14px;
+    border: 1px solid var(--shell-border);
+    background: var(--shell-panel);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
+    cursor: pointer;
+    transition: box-shadow 0.18s, transform 0.14s;
+    outline: none;
+}
+
+.db-kpi-card:hover {
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.1);
+    transform: translateY(-1px);
+}
+
+.db-kpi-card:focus-visible {
+    outline: 2px solid var(--shell-accent);
+}
+
+[data-theme="dark"] .db-kpi-card {
+    background: var(--shell-panel);
+    box-shadow: 0 2px 14px rgba(0, 0, 0, 0.2);
+}
+
+.db-kpi-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.db-icon-cases {
+    background: rgba(47, 110, 79, 0.12);
+}
+
+.db-icon-active {
+    background: rgba(240, 165, 0, 0.12);
+}
+
+.db-icon-docs {
+    background: rgba(99, 102, 241, 0.12);
+}
+
+.db-icon-calendar {
+    background: rgba(14, 165, 233, 0.12);
+}
+
+[data-theme="dark"] .db-icon-cases {
+    background: rgba(113, 208, 172, 0.14);
+}
+
+[data-theme="dark"] .db-icon-active {
+    background: rgba(240, 190, 121, 0.14);
+}
+
+[data-theme="dark"] .db-icon-docs {
+    background: rgba(129, 140, 248, 0.14);
+}
+
+[data-theme="dark"] .db-icon-calendar {
+    background: rgba(56, 189, 248, 0.14);
+}
+
+.db-kpi-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    min-width: 0;
+}
+
+.db-kpi-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--shell-muted);
+}
+
+.db-kpi-value {
+    font-size: 1.75rem;
+    font-weight: 800;
+    line-height: 1.1;
+    color: var(--shell-ink);
+    letter-spacing: -0.02em;
+}
+
+.db-kpi-sub {
+    font-size: 0.74rem;
+    color: var(--shell-muted);
+}
+
+.db-kpi-warn {
+    color: var(--shell-warning) !important;
+    font-weight: 600;
+}
+
+/* Main grid */
+.db-main-grid {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 0.85rem;
+    align-items: start;
+}
+
+/* Firm Snapshot card */
+.db-snapshot-card {
+    padding: 1.25rem;
+}
+
+.db-section-title {
+    margin: 0 0 0.85rem;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--shell-ink);
+}
+
+.db-section-meta {
+    font-size: 0.76rem;
+    color: var(--shell-muted);
+}
+
+.db-snapshot-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.1rem;
+}
+
+/* Donut */
+.db-donut-wrap {
+    position: relative;
+    width: 150px;
+    height: 150px;
+    flex-shrink: 0;
+}
+
+.db-donut-svg {
+    width: 150px;
+    height: 150px;
+}
+
+.db-donut-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.db-donut-center strong {
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: var(--shell-ink);
+    line-height: 1.1;
+}
+
+.db-donut-center span {
+    font-size: 0.7rem;
+    color: var(--shell-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* Snapshot stats list */
+.db-snapshot-stats {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.db-stat-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.db-stat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.db-stat-label {
+    flex: 1;
+    font-size: 0.8rem;
+    color: var(--shell-muted);
+}
+
+.db-stat-val {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--shell-ink);
+}
+
+.db-divider {
+    border: none;
+    border-top: 1px solid var(--shell-border);
+    margin: 0.3rem 0;
+}
+
+/* Right column */
+.db-right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+/* Hearings card */
+.db-hearings-card {
+    padding: 1.25rem;
+}
+
+.db-hearings-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.8rem;
+}
+
+.db-hearings-header {
+    display: grid;
+    grid-template-columns: 110px 1fr 110px;
+    gap: 0.5rem;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    background: var(--shell-bg);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--shell-muted);
+    margin-bottom: 0.3rem;
+}
+
+.db-hearing-row {
+    display: grid;
+    grid-template-columns: 110px 1fr 110px;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.65rem 0.6rem;
+    border-radius: 8px;
+    border-bottom: 1px solid var(--shell-border);
+    transition: background 0.12s;
+}
+
+.db-hearing-row:last-child {
+    border-bottom: none;
+}
+
+.db-hearing-row:hover {
+    background: var(--shell-accent-soft);
+}
+
+.db-hearing-date {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+}
+
+.db-hearing-date strong {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--shell-ink);
+}
+
+.db-hearing-date span {
+    font-size: 0.72rem;
+    color: var(--shell-muted);
+}
+
+.db-hearing-title {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+    min-width: 0;
+}
+
+.db-hearing-title strong {
+    font-size: 0.83rem;
+    font-weight: 600;
+    color: var(--shell-ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.db-hearing-title span {
+    font-size: 0.7rem;
+    color: var(--shell-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Status pills */
+.db-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.18rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    white-space: nowrap;
+}
+
+.db-pill-green {
+    background: rgba(47, 110, 79, 0.12);
+    color: var(--shell-ok);
+}
+
+.db-pill-blue {
+    background: rgba(14, 165, 233, 0.12);
+    color: #0369a1;
+}
+
+.db-pill-orange {
+    background: rgba(240, 165, 0, 0.12);
+    color: var(--shell-warning);
+}
+
+.db-pill-gray {
+    background: rgba(107, 114, 128, 0.1);
+    color: #6b7280;
+}
+
+[data-theme="dark"] .db-pill-green {
+    background: rgba(113, 208, 172, 0.14);
+    color: var(--shell-ok);
+}
+
+[data-theme="dark"] .db-pill-blue {
+    background: rgba(56, 189, 248, 0.14);
+    color: #38bdf8;
+}
+
+[data-theme="dark"] .db-pill-orange {
+    background: rgba(240, 190, 121, 0.14);
+    color: var(--shell-warning);
+}
+
+[data-theme="dark"] .db-pill-gray {
+    background: rgba(255, 255, 255, 0.08);
+    color: #9ca3af;
+}
+
+.db-ai-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 0.35rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.62rem;
+    font-weight: 800;
+    background: var(--shell-accent-soft);
+    color: var(--shell-accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Mini calendar */
+.db-minical-card {
+    padding: 1.1rem 1.25rem;
+}
+
+.db-minical-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 0.3rem;
+    margin-top: 0.25rem;
+}
+
+.db-cal-day {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.18rem;
+    padding: 0.45rem 0.2rem;
+    border-radius: 10px;
+    transition: background 0.12s;
+}
+
+.db-cal-day:hover {
+    background: var(--shell-accent-soft);
+}
+
+.db-cal-name {
+    font-size: 0.64rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--shell-muted);
+}
+
+.db-cal-num {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--shell-ink);
+}
+
+.db-cal-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--shell-accent);
+}
+
+.db-cal-day.is-today {
+    background: var(--shell-accent);
+    border-radius: 10px;
+}
+
+.db-cal-day.is-today .db-cal-name,
+.db-cal-day.is-today .db-cal-num {
+    color: #fff;
+}
+
+[data-theme="dark"] .db-cal-day.is-today .db-cal-name,
+[data-theme="dark"] .db-cal-day.is-today .db-cal-num {
+    color: #0d1715;
+}
+
+.db-cal-day.has-event .db-cal-num {
+    font-weight: 800;
+}
+
+/* Empty rows */
+.db-empty-row {
+    padding: 1.5rem 0.6rem;
+    font-size: 0.82rem;
+    color: var(--shell-muted);
+    text-align: center;
+}
+
+/* Active cases table */
+.db-cases-card {
+    padding: 1.25rem;
+}
+
+.db-cases-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.8rem;
+}
+
+.db-see-all {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--shell-accent);
+    text-decoration: none;
+}
+
+.db-see-all:hover {
+    opacity: 0.78;
+}
+
+.db-cases-header {
+    display: grid;
+    grid-template-columns: 2fr 1.4fr 1fr 0.8fr 0.7fr;
+    gap: 0.5rem;
+    padding: 0.35rem 0.6rem;
+    border-radius: 6px;
+    background: var(--shell-bg);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--shell-muted);
+    margin-bottom: 0.3rem;
+}
+
+.db-case-row {
+    display: grid;
+    grid-template-columns: 2fr 1.4fr 1fr 0.8fr 0.7fr;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.72rem 0.6rem;
+    border-radius: 8px;
+    border-bottom: 1px solid var(--shell-border);
+    transition: background 0.12s;
+}
+
+.db-case-row:last-child {
+    border-bottom: none;
+}
+
+.db-case-row:hover {
+    background: var(--shell-accent-soft);
+}
+
+.db-case-name {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+    min-width: 0;
+}
+
+.db-case-name strong {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--shell-ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.db-case-name span {
+    font-size: 0.7rem;
+    color: var(--shell-muted);
+}
+
+.db-case-client {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+}
+
+.db-client-avatar {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--shell-accent-soft);
+    color: var(--shell-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    border: 1px solid var(--shell-accent);
+}
+
+.db-case-client span:last-child {
+    font-size: 0.8rem;
+    color: var(--shell-ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.db-jurisdiction {
+    font-size: 0.76rem;
+    color: var(--shell-muted);
+    text-transform: capitalize;
+}
+
+.db-case-actions {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.db-row-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.22rem 0.55rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid var(--shell-border);
+    color: var(--shell-ink);
+    background: transparent;
+    transition: background 0.12s;
+}
+
+.db-row-link:hover {
+    background: var(--shell-accent-soft);
+    border-color: var(--shell-accent);
+}
+
+.db-row-link-ai {
+    background: var(--shell-accent-soft);
+    border-color: var(--shell-accent);
+    color: var(--shell-accent);
+}
+
+.db-row-link-ai:hover {
+    background: var(--shell-accent);
+    color: #fff;
+}
+
+[data-theme="dark"] .db-row-link-ai:hover {
+    color: #0d1715;
+}
+
+/* Responsive */
+@media (max-width: 1100px) {
+    .db-kpi-row {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .db-main-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .db-cases-header,
+    .db-case-row {
+        grid-template-columns: 2fr 1.2fr 0.9fr 0.8fr;
+    }
+
+    .db-cases-header>span:nth-child(3),
+    .db-case-row>.db-jurisdiction {
+        display: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .db-kpi-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .db-cases-header {
+        display: none;
+    }
+
+    .db-case-row {
+        grid-template-columns: 1fr auto auto;
+        gap: 0.4rem;
+    }
+
+    .db-case-row>.db-case-client,
+    .db-case-row>.db-jurisdiction {
+        display: none;
+    }
+
+    .db-hearings-header {
+        display: none;
+    }
+
+    .db-hearing-row {
+        grid-template-columns: 90px 1fr auto;
     }
 }
