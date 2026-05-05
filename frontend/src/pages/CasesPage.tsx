@@ -422,7 +422,7 @@ export default function CasesPage() {
                                             <p><strong>{t("clientMatters", "Client matters")}</strong><span>{activePortfolio?.cases.length || 1}</span></p>
                                         </div>
                                         <IntelligencePanel
-                                            language={language}
+                                            language={(language as "en" | "de" | "ar") ?? "en"}
                                             caseItem={activeCase}
                                             client={activeClient}
                                             documents={documents}

@@ -1,0 +1,129 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 3448 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(IT FORENSICS EXTRACT  CLOUDAXIS INCIDENT ANALYSIS) Tj
+0 -12 Td
+(Reference: ITFE-TV-2026-05-02) Tj
+0 -12 Td
+(Prepared by: TechVenture IT Security and External Consultant) Tj
+0 -12 Td
+(Date: May 2, 2026) Tj
+0 -12 Td
+(Purpose) Tj
+0 -12 Td
+(This extract documents technical findings from TechVenture's review of available) Tj
+0 -12 Td
+(logs, API exports, and CloudAxis-provided incident documentation.) Tj
+0 -12 Td
+(Key Technical Findings) Tj
+0 -12 Td
+(1\) Migration Scheduling Evidence) Tj
+0 -12 Td
+(CloudAxis internal change management records \(shared on request\) show the) Tj
+0 -12 Td
+(infrastructure migration was scheduled in CloudAxis's internal system on April 24,) Tj
+0 -12 Td
+(2026  one day before the claimed zero-day vulnerability discovery date.) Tj
+0 -12 Td
+(This is inconsistent with CloudAxis's claim that it was an emergency response.) Tj
+0 -12 Td
+(2\) Backup Snapshot Gap) Tj
+0 -12 Td
+(CloudAxis provided backup log exports showing:) Tj
+0 -12 Td
+(- Last successful full backup: April 20, 2026 at 02:15) Tj
+0 -12 Td
+(- Last successful incremental backup: April 25, 2026 at 02:15) Tj
+0 -12 Td
+(- Snapshot creation for migration: April 26, 2026 at 11:30) Tj
+0 -12 Td
+(- Snapshot marked as failed: April 26, 2026 at 14:15) Tj
+0 -12 Td
+(- First recovery attempt: April 27, 2026 at 06:00) Tj
+0 -12 Td
+(The data gap is confirmed as April 25 14:00 to April 26 14:20 \(approximately) Tj
+0 -12 Td
+(24 hours 20 minutes\) not 18 hours as CloudAxis claims.) Tj
+0 -12 Td
+(3\) P1 Escalation Log Discrepancy) Tj
+0 -12 Td
+(CloudAxis claims internal P1 escalation occurred at 18:45 on April 26.) Tj
+0 -12 Td
+(TechVenture ticket portal shows no external escalation update was posted until) Tj
+0 -12 Td
+(April 27 at 06:00. The SLA clock for P1 resolution commenced at 14:35 on April 26) Tj
+0 -12 Td
+(when TechVenture opened the ticket. Resolution at April 27 09:15 = 18 hours 40 minutes.) Tj
+0 -12 Td
+(The 8 business hour P1 SLA was materially exceeded regardless of internal escalation.) Tj
+0 -12 Td
+(4\) Data Classification of Lost Records) Tj
+0 -12 Td
+(- April 25 payroll batch: contains personal data of 214 employees) Tj
+0 -12 Td
+(\(names, salary data, bank account references\)) Tj
+0 -12 Td
+(- This data is personal data under Act 63-2004) Tj
+0 -12 Td
+(- Loss of this data likely triggers a regulatory notification obligation) Tj
+0 -12 Td
+(- CloudAxis's 28 April notification was 26 hours after confirmed discovery) Tj
+0 -12 Td
+(5\) ISO 27001 Certificate Status) Tj
+0 -12 Td
+(CloudAxis's publicly available ISO 27001 certificate expired on March 3, 2026.) Tj
+0 -12 Td
+(No renewal certificate has been provided. The agreement requires active) Tj
+0 -12 Td
+(certification throughout the contract term. This is an independent contractual breach.) Tj
+0 -12 Td
+(Evidence Quality Assessment) Tj
+0 -12 Td
+(- Machine-generated timestamps from CloudAxis backup logs are strong evidence) Tj
+0 -12 Td
+(- Internal CloudAxis change management records contradict the force-majeure defense) Tj
+0 -12 Td
+(- The certificate expiry is documented and not disputed) Tj
+0 -12 Td
+(- Data classification of lost payroll records is clear and well-supported) Tj
+0 -12 Td
+(Gaps Remaining) Tj
+0 -12 Td
+(- CloudAxis has not provided the full migration run-book or approval chain) Tj
+0 -12 Td
+(- The zero-day vulnerability claim has not been independently verified) Tj
+0 -12 Td
+(- Customer transaction reconciliation is not yet complete) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+3810
+%%EOF

@@ -13,6 +13,7 @@ import { persistChatStateToLocalStorage } from "../chatStorage";
 import { type ThemeMode, type UiLanguage, translateRouted } from "./routedI18n";
 import type {
     CalendarAppointment,
+    CalendarEvent,
     CaseItem,
     ChatMessage,
     Client,
@@ -863,15 +864,75 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
             };
         }
 
-        const items = await workspaceApi.listMyCalendarAppointments(token);
+        const [appointments, calEvents] = await Promise.all([
+            workspaceApi.listMyCalendarAppointments(token).catch(() => [] as CalendarAppointment[]),
+            workspaceApi.listCalendarEvents(token).catch(() => [] as CalendarEvent[]),
+        ]);
+
+        // Only meaningful event types — "document_date" is just the document's own date (noise).
+        const NOISE_TYPES = new Set(["document_date"]);
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+
+        // Map CalendarEvent (document-extracted) → CalendarAppointment shape.
+        // Store the source document filename in `notes` so the dashboard can display it.
+        const mappedEvents: CalendarAppointment[] = calEvents
+            .filter((ev) => !ev.deleted_at && !NOISE_TYPES.has(ev.event_type))
+            .filter((ev) => new Date(ev.start_datetime) >= startOfToday)
+            .map((ev) => ({
+                id: ev.id + 1_000_000, // offset to avoid id collision with Appointment ids
+                case_id: ev.case_id ?? 0,
+                tenant_id: ev.tenant_id,
+                lawyer_id: ev.lawyer_id ?? null,
+                client_id: ev.client_id ?? null,
+                consultation_request_id: null,
+                created_by_user_id: null,
+                title: ev.title,
+                description: ev.description ?? null,
+                appointment_type: ev.event_type,
+                visibility_scope: "shared",
+                status: ev.status,
+                scheduled_at: ev.start_datetime,
+                duration_minutes: 30,
+                location: ev.location ?? null,
+                timezone_name: ev.timezone ?? "UTC",
+                ai_summary: ev.source_quote ?? null,
+                ai_recommendation: ev.requires_review ? "Requires lawyer review." : null,
+                ai_confidence: ev.extraction_confidence != null
+                    ? String(Math.round(ev.extraction_confidence * 100))
+                    : null,
+                ai_source: "document_extraction",
+                // Encode source filename in notes field for display in timeline
+                notes: ev.document_filename ?? null,
+                case_title: ev.case_title ?? null,
+                client_name: ev.client_name ?? null,
+                lawyer_name: null,
+                is_ai_suggested: true,
+                created_at: ev.created_at,
+                updated_at: ev.updated_at,
+            }));
+
+        // Deduplicate by title+date against manual appointments.
+        const apptKeys = new Set(
+            appointments.map((a) => `${a.scheduled_at.slice(0, 10)}|${a.title.trim().toLowerCase()}`)
+        );
+        const dedupedEvents = mappedEvents.filter(
+            (e) => !apptKeys.has(`${e.scheduled_at.slice(0, 10)}|${e.title.trim().toLowerCase()}`)
+        );
+
+        const all = [...appointments, ...dedupedEvents];
         const now = Date.now();
-        const sorted = items.slice().sort((left, right) => left.scheduled_at.localeCompare(right.scheduled_at));
+
+        // nextItems: only upcoming events, sorted soonest-first, up to 12
+        const upcoming = all
+            .filter((item) => new Date(item.scheduled_at).getTime() >= startOfToday.getTime())
+            .sort((a, b) => a.scheduled_at.localeCompare(b.scheduled_at));
 
         return {
-            totalAppointments: items.length,
-            upcomingAppointments: items.filter((item) => new Date(item.scheduled_at).getTime() >= now).length,
-            aiSuggestedAppointments: items.filter((item) => item.is_ai_suggested).length,
-            nextItems: sorted.slice(0, 5),
+            totalAppointments: all.length,
+            upcomingAppointments: upcoming.length,
+            aiSuggestedAppointments: all.filter((item) => item.is_ai_suggested).length,
+            nextItems: upcoming.slice(0, 12),
         };
     }, [token]);
 

@@ -6,8 +6,7 @@ from sqlalchemy.orm import Session
 from backend.api.document_schema import EvidenceAnalysisReviewOut
 from backend.api.evidence_review_schema import EvidenceReviewDecisionRequest, EvidenceReviewListResponse
 from backend.core.deps import get_current_user, get_db
-from backend.core.enums import UserRole
-from backend.core.permissions import apply_tenant_scope, require_roles
+from backend.core.permissions import apply_tenant_scope, require_lawyer
 from backend.models.case import Case
 from backend.models.evidence_analysis_review import EvidenceAnalysisReview
 from backend.models.user import User
@@ -58,9 +57,8 @@ def decide_evidence_review(
     review_id: int,
     data: EvidenceReviewDecisionRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.lawyer])
     review = _get_tenant_review_or_404(db=db, review_id=review_id, current_user=current_user)
     updated = image_document_service.apply_review_decision(
         db=db,

@@ -4,6 +4,7 @@ from enum import Enum
 class UserRole(str, Enum):
     admin = "admin"
     lawyer = "lawyer"
+    client = "client"
     assistant = "assistant"
 
 

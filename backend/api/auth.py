@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from backend.core.config import settings
@@ -8,7 +8,8 @@ from backend.core.deps import get_db, get_current_user
 from backend.core.enums import UserRole
 from backend.core.hashing import hash_password, verify_password
 from backend.core.jwt_handler import create_access_token
-from backend.core.permissions import require_roles
+from backend.core.permissions import require_admin
+from backend.core.rate_limiter import limiter
 from backend.core.tenants import slugify_tenant_name
 from backend.models.staff_invite import StaffInvite
 from backend.models.user import User
@@ -112,7 +113,8 @@ def _resolve_invited_registration(
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(user_data: UserRegister, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(request: Request, response: Response, user_data: UserRegister, db: Session = Depends(get_db)):
     normalized_email = user_data.email.lower().strip()
 
     existing_user = db.query(User).filter(
@@ -151,7 +153,8 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
-def login(user_data: UserLogin, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, response: Response, user_data: UserLogin, db: Session = Depends(get_db)):
     normalized_email = user_data.email.lower().strip()
 
     user = db.query(User).filter(
@@ -183,9 +186,8 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
 def create_staff_invite(
     data: StaffInviteCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_admin),
 ):
-    require_roles(current_user, [UserRole.admin])
 
     invite = StaffInvite(
         tenant_id=current_user.tenant_id,

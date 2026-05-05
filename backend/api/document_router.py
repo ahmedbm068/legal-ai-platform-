@@ -73,6 +73,18 @@ def list_case_documents(
     ).all()
 
 
+@router.get("/case/{case_id}/archived", response_model=list[DocumentListItemOut])
+def list_case_archived_documents(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
+    query = db.query(Document).filter(Document.case_id == case_id, Document.archived_at.isnot(None))
+    return apply_tenant_scope(query, Document.tenant_id, current_user).order_by(
+        Document.archived_at.desc(), Document.id.desc()
+    ).all()
+
 @router.get("/{document_id}", response_model=DocumentOut)
 def get_document(
     document_id: int,
@@ -106,6 +118,18 @@ def archive_document(
     document.archived_at = func.now()
     db.commit()
     return {"message": "Document moved to archive", "document_id": document.id, "archived": True}
+
+
+@router.post("/{document_id}/unarchive", status_code=status.HTTP_200_OK)
+def unarchive_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    document = get_tenant_document_or_404(db=db, document_id=document_id, current_user=current_user)
+    document.archived_at = None
+    db.commit()
+    return {"message": "Document restored from archive", "document_id": document.id, "archived": False}
 
 
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -221,6 +245,21 @@ def list_case_image_batches(
     ).all()
 
 
+@router.get("/case/{case_id}/image-batches/archived", response_model=list[ImageDocumentBatchOut])
+def list_case_archived_image_batches(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
+    query = db.query(ImageDocumentBatch).filter(
+        ImageDocumentBatch.case_id == case_id,
+        ImageDocumentBatch.archived_at.isnot(None),
+    )
+    return apply_tenant_scope(query, ImageDocumentBatch.tenant_id, current_user).order_by(
+        ImageDocumentBatch.archived_at.desc(), ImageDocumentBatch.id.desc()
+    ).all()
+
 @router.get("/image-batches/{batch_id}", response_model=ImageBatchDetailResponse)
 def get_image_batch(
     batch_id: int,
@@ -241,6 +280,18 @@ def archive_image_batch(
     batch.archived_at = func.now()
     db.commit()
     return {"message": "Image batch moved to archive", "batch_id": batch.id, "archived": True}
+
+
+@router.post("/image-batches/{batch_id}/unarchive", status_code=status.HTTP_200_OK)
+def unarchive_image_batch(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    batch = get_tenant_image_batch_or_404(db=db, batch_id=batch_id, current_user=current_user)
+    batch.archived_at = None
+    db.commit()
+    return {"message": "Image batch restored from archive", "batch_id": batch.id, "archived": False}
 
 
 @router.get("/image-assets/{asset_id}/file")

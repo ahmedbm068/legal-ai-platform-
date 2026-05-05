@@ -12,18 +12,25 @@ interface AppErrorBoundaryProps {
 
 interface AppErrorBoundaryState {
   error: Error | null;
+  componentStack: string;
 }
 
 export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
-  state: AppErrorBoundaryState = { error: null };
+  state: AppErrorBoundaryState = { error: null, componentStack: "" };
 
-  static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<AppErrorBoundaryState> {
     return { error };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("Application render failed", error, info.componentStack);
+    console.error("[AppErrorBoundary] Render failed:", error.message);
+    console.error(info.componentStack);
+    this.setState({ componentStack: info.componentStack ?? "" });
   }
+
+  private softReset = () => {
+    this.setState({ error: null, componentStack: "" });
+  };
 
   private recoverWorkspace = () => {
     for (const key of RECOVERY_STORAGE_KEYS) {
@@ -48,7 +55,13 @@ export default class AppErrorBoundary extends Component<AppErrorBoundaryProps, A
             workspace.
           </p>
           <code>{this.state.error.message || "Render error"}</code>
+          {import.meta.env.DEV && this.state.componentStack && (
+            <pre className="app-crash-stack">{this.state.componentStack}</pre>
+          )}
           <div className="app-crash-actions">
+            <button type="button" onClick={this.softReset}>
+              Try again
+            </button>
             <button type="button" onClick={() => window.location.reload()}>
               Reload
             </button>

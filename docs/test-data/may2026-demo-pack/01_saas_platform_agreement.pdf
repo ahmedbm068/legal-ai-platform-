@@ -1,0 +1,125 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 3280 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(SAAS PLATFORM SERVICES AGREEMENT) Tj
+0 -12 Td
+(Agreement ID: SPSA-TV-CA-2025-011) Tj
+0 -12 Td
+(Effective Date: October 15, 2025) Tj
+0 -12 Td
+(Parties: TechVenture SARL \(Customer\) and CloudAxis Solutions SARL \(Provider\)) Tj
+0 -12 Td
+(Governing law: Tunisia) Tj
+0 -12 Td
+(1\) Scope of Services) Tj
+0 -12 Td
+(CloudAxis provides TechVenture with a cloud-based enterprise resource planning) Tj
+0 -12 Td
+(platform including financial management, HR, payroll processing, customer data) Tj
+0 -12 Td
+(storage, and business intelligence reporting modules.) Tj
+0 -12 Td
+(2\) Service Level Commitments) Tj
+0 -12 Td
+(- Platform availability: 99.7 percent measured monthly \(excluding maintenance\)) Tj
+0 -12 Td
+(- Planned maintenance window: Sundays 02:00 to 05:00 maximum 4 hours per month) Tj
+0 -12 Td
+(- Incident response P1 \(critical\): acknowledgment within 30 minutes, resolution) Tj
+0 -12 Td
+(plan within 2 hours, full resolution within 8 business hours) Tj
+0 -12 Td
+(- Data backup: automated daily incremental, weekly full backup retained 90 days) Tj
+0 -12 Td
+(- Recovery Time Objective \(RTO\): 4 hours for P1 outages) Tj
+0 -12 Td
+(- Recovery Point Objective \(RPO\): maximum 24 hours data loss) Tj
+0 -12 Td
+(3\) Data Protection Obligations) Tj
+0 -12 Td
+(- CloudAxis must not transfer TechVenture data outside Tunisia without written consent) Tj
+0 -12 Td
+(- CloudAxis must notify TechVenture of any data breach within 24 hours of discovery) Tj
+0 -12 Td
+(- All personal data processed under this agreement is subject to Tunisian data) Tj
+0 -12 Td
+(protection law Act 63-2004 and any subsequent amendments) Tj
+0 -12 Td
+(- CloudAxis must maintain ISO 27001 certification or equivalent throughout the term) Tj
+0 -12 Td
+(4\) Commercial Terms) Tj
+0 -12 Td
+(- Monthly subscription fee: 34,500 TND excluding VAT) Tj
+0 -12 Td
+(- Overuse compute charges: 280 TND per additional 100 GB per month) Tj
+0 -12 Td
+(- Professional services: 850 TND per day on request) Tj
+0 -12 Td
+(- Payment terms: Net 30 from valid invoice) Tj
+0 -12 Td
+(- TechVenture may withhold disputed amounts with written reasons within 15 days) Tj
+0 -12 Td
+(of invoice receipt) Tj
+0 -12 Td
+(5\) Business Continuity and Liability) Tj
+0 -12 Td
+(- CloudAxis must maintain a tested disaster recovery plan reviewed annually) Tj
+0 -12 Td
+(- Liability cap: six months of subscription fees for direct damages) Tj
+0 -12 Td
+(- Cap does not apply to data breach, intentional misconduct, or regulatory) Tj
+0 -12 Td
+(penalties caused by CloudAxis failure) Tj
+0 -12 Td
+(- Force-majeure clause excludes planned infrastructure migrations) Tj
+0 -12 Td
+(6\) Termination) Tj
+0 -12 Td
+(- Either party may terminate for material breach with 10 business days written notice) Tj
+0 -12 Td
+(- TechVenture may terminate immediately if a data breach affects customer personal data) Tj
+0 -12 Td
+(- Transition assistance: CloudAxis must provide 60 days of data export support) Tj
+0 -12 Td
+(at no additional charge after termination notice) Tj
+0 -12 Td
+(7\) Dispute Resolution) Tj
+0 -12 Td
+(- Senior management negotiation within 5 business days of written notice) Tj
+0 -12 Td
+(- If unresolved: mediation in Tunis within 20 calendar days) Tj
+0 -12 Td
+(- If mediation fails: binding arbitration under CATO rules) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+3642
+%%EOF

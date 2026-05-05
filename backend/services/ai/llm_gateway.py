@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
+import time
 from types import SimpleNamespace
 from typing import Any, Optional
 
 from openai import OpenAI
 
 from backend.core.config import settings
+from backend.services.ai.llm_metrics import record_llm_call
 from backend.services.ai.vision_errors import (
     RemoteVisionProviderError,
     UnsupportedMultimodalProviderError,
@@ -258,7 +260,15 @@ class _ResponsesCompat:
             native_responses = getattr(self._raw_client, "responses", None)
             if native_responses and hasattr(native_responses, "create"):
                 try:
+                    _t0 = time.monotonic()
                     raw_response = native_responses.create(model=model, input=input, **kwargs)
+                    record_llm_call(
+                        model=model,
+                        response=raw_response,
+                        duration_ms=(time.monotonic() - _t0) * 1000.0,
+                        api="responses",
+                        extra={"provider": self._provider.provider_name},
+                    )
                     return SimpleNamespace(
                         output_text=self._gateway.extract_output_text(raw_response),
                         raw_response=raw_response,
@@ -295,10 +305,18 @@ class _ResponsesCompat:
         if max_output_tokens is not None:
             chat_kwargs["max_tokens"] = max_output_tokens
 
+        _t_chat_start = time.monotonic()
         raw_response = chat_api.create(
             model=model,
             messages=messages,
             **chat_kwargs,
+        )
+        record_llm_call(
+            model=model,
+            response=raw_response,
+            duration_ms=(time.monotonic() - _t_chat_start) * 1000.0,
+            api="chat",
+            extra={"provider": self._provider.provider_name},
         )
         return SimpleNamespace(
             output_text=self._gateway.extract_output_text(raw_response),

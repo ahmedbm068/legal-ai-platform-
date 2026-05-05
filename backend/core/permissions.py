@@ -1,4 +1,5 @@
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
+from backend.core.deps import get_current_user
 from backend.models.user import User
 from backend.core.enums import UserRole
 
@@ -36,3 +37,22 @@ def require_roles(current_user: User, allowed_roles: list[UserRole]):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have permission to perform this action"
         )
+
+
+# ── Route-scoping Depends factories ──────────────────────────────────────────
+# Usage:  current_user: User = Depends(require_lawyer)
+#         current_user: User = Depends(require_client)
+#         current_user: User = Depends(require_admin)
+
+def _role_guard(*allowed: UserRole):
+    """Return a FastAPI dependency that enforces role membership."""
+    def _dep(current_user: User = Depends(get_current_user)) -> User:
+        require_roles(current_user, list(allowed))
+        return current_user
+    return _dep
+
+
+require_lawyer = _role_guard(UserRole.lawyer)
+require_client = _role_guard(UserRole.client)
+require_admin  = _role_guard(UserRole.admin)
+require_staff  = _role_guard(UserRole.lawyer, UserRole.assistant)  # lawyer or assistant

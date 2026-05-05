@@ -15,8 +15,7 @@ from backend.api.calendar_schema import (
     CalendarReminderOut,
 )
 from backend.core.deps import get_current_user, get_db
-from backend.core.enums import UserRole
-from backend.core.permissions import require_roles
+from backend.core.permissions import require_lawyer
 from backend.models.calendar_event import CalendarEvent
 from backend.models.calendar_reminder import CalendarReminder
 from backend.models.case import Case
@@ -99,9 +98,8 @@ def list_global_events(
 def create_global_event(
     payload: CalendarEventCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     case = get_tenant_case_or_404(db, payload.case_id, current_user) if payload.case_id else None
     event, _created = calendar_event_service.create_event(
         db=db,
@@ -128,9 +126,8 @@ def update_event(
     event_id: int,
     payload: CalendarEventUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     event = get_tenant_event_or_404(db, event_id, current_user)
     updated = calendar_event_service.update_event(db=db, event=event, payload=payload, reviewer_id=current_user.id)
     updated = get_tenant_event_or_404(db, updated.id, current_user)
@@ -141,9 +138,8 @@ def update_event(
 def delete_event(
     event_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     event = get_tenant_event_or_404(db, event_id, current_user)
     deleted = calendar_event_service.soft_delete_event(db=db, event=event)
     return {"message": "Calendar event archived.", "event": calendar_event_service.serialize_event(deleted)}
@@ -177,9 +173,8 @@ def create_case_event(
     case_id: int,
     payload: CalendarEventCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     case = get_tenant_case_or_404(db, case_id, current_user)
     payload.case_id = case.id
     event, _created = calendar_event_service.create_event(
@@ -214,9 +209,8 @@ def list_pending_extracted_dates(
 def accept_extracted_date(
     event_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     event = get_tenant_event_or_404(db, event_id, current_user)
     accepted = calendar_event_service.accept_event(db=db, event=event, reviewer_id=current_user.id)
     accepted = get_tenant_event_or_404(db, accepted.id, current_user)
@@ -227,9 +221,8 @@ def accept_extracted_date(
 def reject_extracted_date(
     event_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     event = get_tenant_event_or_404(db, event_id, current_user)
     rejected = calendar_event_service.reject_event(db=db, event=event, reviewer_id=current_user.id)
     return {"message": "AI-detected date rejected and archived for audit.", "event": calendar_event_service.serialize_event(rejected)}
@@ -240,9 +233,8 @@ def create_event_reminder(
     event_id: int,
     payload: CalendarReminderCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     event = get_tenant_event_or_404(db, event_id, current_user)
     reminder = calendar_reminder_service.create_reminder(
         db=db,

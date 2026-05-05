@@ -278,8 +278,17 @@ export const workspaceApi = {
 
     getDocumentFile: (token: string, documentId: number) => requestBlob(`/documents/${documentId}/file`, token),
 
+    listArchivedCaseDocuments: (token: string, caseId: number) =>
+        request<DocumentItem[]>(`/documents/case/${caseId}/archived`, { token }),
+
     archiveDocument: (token: string, documentId: number) =>
         request<{ message: string; document_id: number; archived: boolean }>(`/documents/${documentId}/archive`, {
+            method: "POST",
+            token,
+        }),
+
+    unarchiveDocument: (token: string, documentId: number) =>
+        request<{ message: string; document_id: number; archived: boolean }>(`/documents/${documentId}/unarchive`, {
             method: "POST",
             token,
         }),
@@ -325,6 +334,9 @@ export const workspaceApi = {
             token,
         }),
 
+    listArchivedCaseImageBatches: (token: string, caseId: number) =>
+        request<ImageDocumentBatch[]>(`/documents/case/${caseId}/image-batches/archived`, { token }),
+
     getImageBatch: (token: string, batchId: number) =>
         request<ImageBatchDetailResponse>(`/documents/image-batches/${batchId}`, {
             token,
@@ -334,6 +346,12 @@ export const workspaceApi = {
 
     archiveImageBatch: (token: string, batchId: number) =>
         request<{ message: string; batch_id: number; archived: boolean }>(`/documents/image-batches/${batchId}/archive`, {
+            method: "POST",
+            token,
+        }),
+
+    unarchiveImageBatch: (token: string, batchId: number) =>
+        request<{ message: string; batch_id: number; archived: boolean }>(`/documents/image-batches/${batchId}/unarchive`, {
             method: "POST",
             token,
         }),
@@ -653,6 +671,15 @@ export const workspaceApi = {
             method: "POST",
             token,
         }),
+
+    unarchiveVoiceRecording: (token: string, recordingId: number) =>
+        request<{ message: string; recording_id: number; archived: boolean }>(`/voice/${recordingId}/unarchive`, {
+            method: "POST",
+            token,
+        }),
+
+    listArchivedCaseVoiceRecordings: (token: string, caseId: number) =>
+        request<VoiceRecording[]>(`/voice/case/${caseId}/archived`, { token }),
 
     uploadVoiceRecording: (
         token: string,

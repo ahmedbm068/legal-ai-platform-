@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback, type ChangeEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
 import { workspaceApi } from "../workspaceApi";
@@ -186,12 +186,91 @@ export default function DocumentsPage() {
     const [preview, setPreview] = useState<PreviewState | null>(null);
     const [recording, setRecording] = useState(false);
     const [recordingError, setRecordingError] = useState<string | null>(null);
+    const [showArchive, setShowArchive] = useState(false);
+    const [archivedItems, setArchivedItems] = useState<QueueItem[]>([]);
+    const [archivedLoading, setArchivedLoading] = useState(false);
+    const [archivedError, setArchivedError] = useState<string | null>(null);
+    const [restoringItemId, setRestoringItemId] = useState<string | null>(null);
     const previewRef = useRef<PreviewState | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const recordingChunksRef = useRef<BlobPart[]>([]);
 
     const activeCaseId = routeCaseId ?? selectedCaseId;
+
+    const loadArchivedItems = useCallback(async () => {
+        if (!token || !activeCaseId) return;
+        setArchivedLoading(true);
+        setArchivedError(null);
+        try {
+            const [docs, voices, batches] = await Promise.all([
+                workspaceApi.listArchivedCaseDocuments(token, activeCaseId),
+                workspaceApi.listArchivedCaseVoiceRecordings(token, activeCaseId),
+                workspaceApi.listArchivedCaseImageBatches(token, activeCaseId),
+            ]);
+            const docRows: QueueItem[] = docs.map((d) => ({
+                id: `doc-${d.id}`,
+                sourceId: d.id,
+                fileType: "pdf" as const,
+                filename: d.filename,
+                createdAt: d.upload_timestamp,
+                status: d.processing_status ?? "archived",
+                attention: t("archivedFile", "Archived"),
+            }));
+            const voiceRows: QueueItem[] = voices.map((v) => ({
+                id: `voice-${v.id}`,
+                sourceId: v.id,
+                fileType: "voice" as const,
+                filename: v.filename,
+                createdAt: v.created_at,
+                status: v.transcription_status ?? "archived",
+                attention: t("archivedFile", "Archived"),
+            }));
+            const batchRows: QueueItem[] = batches.map((b) => ({
+                id: `batch-${b.id}`,
+                sourceId: b.id,
+                fileType: "image" as const,
+                filename: b.title ?? `Batch #${b.id}`,
+                createdAt: b.created_at,
+                status: b.status ?? "archived",
+                attention: t("archivedFile", "Archived"),
+                generatedDocumentId: b.generated_document_id ?? null,
+            }));
+            setArchivedItems([...docRows, ...voiceRows, ...batchRows].sort(
+                (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            ));
+        } catch (err) {
+            setArchivedError(err instanceof Error ? err.message : t("archiveLoadFailed", "Failed to load archived files."));
+        } finally {
+            setArchivedLoading(false);
+        }
+    }, [token, activeCaseId, t]);
+
+    const toggleArchive = useCallback(() => {
+        setShowArchive((prev) => {
+            if (!prev) void loadArchivedItems();
+            return !prev;
+        });
+    }, [loadArchivedItems]);
+
+    const restoreItem = useCallback(async (item: QueueItem) => {
+        if (!token) return;
+        setRestoringItemId(item.id);
+        try {
+            if (item.fileType === "pdf") {
+                await workspaceApi.unarchiveDocument(token, item.sourceId);
+            } else if (item.fileType === "voice") {
+                await workspaceApi.unarchiveVoiceRecording(token, item.sourceId);
+            } else {
+                await workspaceApi.unarchiveImageBatch(token, item.sourceId);
+            }
+            setArchivedItems((prev) => prev.filter((i) => i.id !== item.id));
+        } catch {
+            setArchivedError(t("restoreFailed", "Unable to restore item. Please try again."));
+        } finally {
+            setRestoringItemId(null);
+        }
+    }, [token]);
 
     useEffect(() => {
         if (routeCaseId && routeCaseId !== selectedCaseId) {
@@ -624,6 +703,15 @@ export default function DocumentsPage() {
                                     <option value="pending">{t("pending", "Pending")}</option>
                                     <option value="warning">{t("needsAttention", "Needs attention")}</option>
                                 </select>
+                                <button
+                                    className={`documents-archive-toggle-btn${showArchive ? " active" : ""}`}
+                                    onClick={toggleArchive}
+                                    title={showArchive ? t("hideArchive", "Hide archive") : t("viewArchive", "View archived files")}
+                                    type="button"
+                                >
+                                    <ArchiveIcon />
+                                    {showArchive ? t("hideArchive", "Hide archive") : t("viewArchive", "Archive")}
+                                </button>
                             </div>
                         </div>
                         {caseContextLoading ? <p>{t("refreshingCaseQueue", "Refreshing case queue...")}</p> : null}
@@ -699,7 +787,84 @@ export default function DocumentsPage() {
                             </tbody>
                         </table>
                     </article>
-                </>
+                    {showArchive ? (
+                        <article className="shell-card documents-archive-card">
+                            <div className="documents-queue-head">
+                                <div>
+                                    <p className="shell-page-kicker">{t("archive", "Archive")}</p>
+                                    <h3>{t("archivedFiles", "Archived files")}</h3>
+                                </div>
+                                {archivedLoading ? null : (
+                                    <button className="documents-archive-refresh-btn" onClick={() => void loadArchivedItems()} type="button">
+                                        {t("refresh", "Refresh")}
+                                    </button>
+                                )}
+                            </div>
+                            {archivedLoading ? (
+                                <p className="documents-archive-loading">{t("loadingArchive", "Loading archived files...")}</p>
+                            ) : archivedError ? (
+                                <p className="documents-archive-error">{archivedError}</p>
+                            ) : (
+                                <table className="shell-table documents-queue-table">
+                                    <thead>
+                                        <tr>
+                                            <th>{t("tableFile", "File")}</th>
+                                            <th>{t("tableType", "Type")}</th>
+                                            <th>{t("status", "Status")}</th>
+                                            <th>{t("updated", "Updated")}</th>
+                                            <th>{t("actions", "Actions")}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {archivedItems.length ? archivedItems.map((item) => (
+                                            <tr className="documents-queue-row archived" key={item.id}>
+                                                <td>
+                                                    <span className={`documents-file-icon ${item.fileType}`}>{fileTypeLabel(item.fileType, t).slice(0, 3)}</span>
+                                                    <span className="documents-file-main">
+                                                        <strong>{item.filename}</strong>
+                                                        <small>{item.id}</small>
+                                                    </span>
+                                                </td>
+                                                <td><span className="documents-type-pill">{fileTypeLabel(item.fileType, t)}</span></td>
+                                                <td><span className="shell-status warning">{t("archived", "archived")}</span></td>
+                                                <td><span className="documents-date">{formatDate(item.createdAt, locale)}</span></td>
+                                                <td>
+                                                    <div className="documents-row-actions">
+                                                        <button
+                                                            aria-label={t("openFile", "Open")}
+                                                            className="documents-icon-button"
+                                                            disabled={openingItemId === item.id}
+                                                            onClick={() => void openQueueItem(item)}
+                                                            title={t("openFile", "Open")}
+                                                            type="button"
+                                                        >
+                                                            <OpenIcon />
+                                                        </button>
+                                                        <button
+                                                            aria-label={t("restoreFile", "Restore")}
+                                                            className="documents-restore-btn"
+                                                            disabled={restoringItemId === item.id}
+                                                            onClick={() => void restoreItem(item)}
+                                                            title={t("restoreFileTitle", "Restore to active documents")}
+                                                            type="button"
+                                                        >
+                                                            {restoringItemId === item.id
+                                                                ? t("restoring", "Restoring…")
+                                                                : t("restoreFile", "Restore")}
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )) : (
+                                            <tr>
+                                                <td colSpan={5}>{t("noArchivedFiles", "No archived files found for this case.")}</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            )}
+                        </article>
+                    ) : null}                </>
             )}
 
             <input
@@ -725,14 +890,44 @@ export default function DocumentsPage() {
                 type="file"
             />
             {preview && activePreviewFile ? (
-                <div className="documents-preview-backdrop" role="dialog" aria-modal="true" aria-label={preview.title}>
-                    <div className="documents-preview-card">
+                <div
+                    className="documents-preview-backdrop"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label={preview.title}
+                    onClick={closePreview}
+                    onKeyDown={(e) => e.key === "Escape" && closePreview()}
+                    tabIndex={-1}
+                >
+                    <div className="documents-preview-card" onClick={(e) => e.stopPropagation()}>
                         <header className="documents-preview-header">
-                            <div>
-                                <p className="shell-page-kicker">{t("filePreview", "File preview")}</p>
-                                <h3>{preview.title}</h3>
+                            <div className="documents-preview-header-left">
+                                <span className="documents-preview-kind-badge">
+                                    {activePreviewFile.kind === "image" ? "IMAGE" : activePreviewFile.kind === "audio" ? "AUDIO" : "PDF"}
+                                </span>
+                                <h3 className="documents-preview-title" title={preview.title}>{preview.title}</h3>
                             </div>
-                            <button onClick={closePreview} type="button">{t("close", "Close")}</button>
+                            <div className="documents-preview-header-actions">
+                                <a
+                                    aria-label={t("openInNewTab", "Open in new tab")}
+                                    className="documents-preview-action-btn"
+                                    href={activePreviewFile.url}
+                                    rel="noopener noreferrer"
+                                    target="_blank"
+                                    title={t("openInNewTab", "Open in new tab")}
+                                >
+                                    <svg aria-hidden="true" fill="none" height="16" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24" width="16"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" x2="21" y1="14" y2="3" /></svg>
+                                </a>
+                                <button
+                                    aria-label={t("close", "Close")}
+                                    className="documents-preview-close-btn"
+                                    onClick={closePreview}
+                                    title={t("close", "Close")}
+                                    type="button"
+                                >
+                                    <svg aria-hidden="true" fill="none" height="18" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" viewBox="0 0 24 24" width="18"><line x1="18" x2="6" y1="6" y2="18" /><line x1="6" x2="18" y1="6" y2="18" /></svg>
+                                </button>
+                            </div>
                         </header>
                         {preview.files.length > 1 ? (
                             <div className="documents-preview-tabs" role="tablist" aria-label={t("previewFiles", "Preview files")}>
@@ -741,6 +936,7 @@ export default function DocumentsPage() {
                                         className={index === preview.activeIndex ? "active" : ""}
                                         key={file.id}
                                         onClick={() => setPreview((current) => current ? { ...current, activeIndex: index } : current)}
+                                        role="tab"
                                         type="button"
                                     >
                                         {index + 1}. {file.title}
@@ -753,11 +949,12 @@ export default function DocumentsPage() {
                                 <img alt={activePreviewFile.title} src={activePreviewFile.url} />
                             ) : activePreviewFile.kind === "audio" ? (
                                 <div className="documents-preview-audio">
+                                    <svg aria-hidden="true" className="documents-preview-audio-icon" fill="none" height="40" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="40"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
                                     <strong>{activePreviewFile.title}</strong>
                                     <audio controls src={activePreviewFile.url} />
                                 </div>
                             ) : (
-                                <iframe src={activePreviewFile.url} title={activePreviewFile.title} />
+                                <iframe src={`${activePreviewFile.url}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`} title={activePreviewFile.title} />
                             )}
                         </div>
                     </div>

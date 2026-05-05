@@ -15,6 +15,9 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from backend.models.case import Case as _Case
+from backend.services.ai.legal_trust_service import INSUFFICIENT_EVIDENCE_MESSAGE as _INSUF_MSG
+
 _logger = logging.getLogger("copilot.legal_search")
 
 
@@ -92,13 +95,11 @@ class CopilotLegalSearchExecutionService:
         # When the trust state normalisation yields insufficient evidence for a
         # case-scoped query, replace the bare message with a structured 5-section
         # case-context answer so lawyers always get actionable output.
-        from backend.services.ai.legal_trust_service import INSUFFICIENT_EVIDENCE_MESSAGE as _INSUF_MSG
         if (
             result.get("scope") == "case"
             and result.get("answer") == _INSUF_MSG
             and case_id is not None
         ):
-            from backend.models.case import Case as _Case
             _r5c_case = (
                 db.query(_Case)
                 .filter(_Case.id == case_id, _Case.tenant_id == tenant_id)

@@ -5,7 +5,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
@@ -13,6 +13,7 @@ from backend.core.config import settings
 from backend.api.voice_schema import VoiceRecordingOut, VoiceTranscriptionResponse, VoiceUploadResponse
 from backend.core.deps import get_current_user, get_db
 from backend.core.permissions import apply_tenant_scope
+from backend.core.rate_limiter import limiter
 from backend.models.call_session import CallSession
 from backend.models.case import Case
 from backend.models.user import User
@@ -132,6 +133,25 @@ def list_case_recordings(
     return recordings
 
 
+@router.get("/case/{case_id}/archived", response_model=list[VoiceRecordingOut])
+def list_case_archived_recordings(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
+    query = db.query(VoiceRecording).filter(
+        VoiceRecording.case_id == case_id,
+        VoiceRecording.archived_at.isnot(None),
+    )
+    return apply_tenant_scope(query, VoiceRecording.tenant_id, current_user).order_by(
+        VoiceRecording.archived_at.desc(), VoiceRecording.id.desc()
+    ).all()
+
+
+    return recordings
+
+
 @router.get("/{recording_id}", response_model=VoiceRecordingOut)
 def get_recording(
     recording_id: int,
@@ -171,6 +191,18 @@ def archive_recording(
     recording.archived_at = func.now()
     db.commit()
     return {"message": "Voice recording moved to archive", "recording_id": recording.id, "archived": True}
+
+
+@router.post("/{recording_id}/unarchive", status_code=status.HTTP_200_OK)
+def unarchive_recording(
+    recording_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    recording = get_tenant_recording_or_404(db=db, recording_id=recording_id, current_user=current_user)
+    recording.archived_at = None
+    db.commit()
+    return {"message": "Voice recording restored from archive", "recording_id": recording.id, "archived": False}
 
 
 @router.post("/upload", response_model=VoiceUploadResponse, status_code=status.HTTP_201_CREATED)
@@ -241,7 +273,10 @@ def upload_voice_recording(
 
 
 @router.post("/transcribe", response_model=VoiceTranscriptionResponse)
+@limiter.limit("20/minute")
 def transcribe_voice_input(
+    request: Request,
+    response: Response,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):

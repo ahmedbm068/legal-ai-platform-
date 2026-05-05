@@ -1,0 +1,115 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 3025 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(CRITICAL INCIDENT REPORT  PLATFORM OUTAGE AND DATA LOSS) Tj
+0 -12 Td
+(Report ID: IR-TECHVENTURE-2026-04-28) Tj
+0 -12 Td
+(Prepared by: TechVenture IT and Operations) Tj
+0 -12 Td
+(Date: April 28, 2026) Tj
+0 -12 Td
+(Incident Classification: P1 CRITICAL  Confirmed Data Loss) Tj
+0 -12 Td
+(Incident Summary) Tj
+0 -12 Td
+(On April 26, 2026 at 14:20, TechVenture's CloudAxis ERP platform became) Tj
+0 -12 Td
+(unavailable. CloudAxis confirmed on April 27 at 09:15 that the outage was caused) Tj
+0 -12 Td
+(by a failed infrastructure migration that was not disclosed to TechVenture in) Tj
+0 -12 Td
+(advance. CloudAxis further confirmed on April 28 at 11:00 that approximately) Tj
+0 -12 Td
+(72 hours of incremental backup data was not recoverable due to a snapshot error) Tj
+0 -12 Td
+(during the migration.) Tj
+0 -12 Td
+(Timeline) Tj
+0 -12 Td
+(- April 26, 14:20: Platform access lost  TechVenture staff report login failure) Tj
+0 -12 Td
+(- April 26, 14:35: P1 ticket opened with CloudAxis helpdesk) Tj
+0 -12 Td
+(- April 26, 15:10: CloudAxis acknowledged ticket, stated investigating) Tj
+0 -12 Td
+(- April 26, 18:45: CloudAxis identified root cause as infrastructure migration) Tj
+0 -12 Td
+(- April 26, 18:45: TechVenture notified for first time about the migration) Tj
+0 -12 Td
+(- April 27, 09:15: CloudAxis confirmed unplanned migration triggered the outage) Tj
+0 -12 Td
+(- April 27, 22:00: Partial platform access restored for read-only operations) Tj
+0 -12 Td
+(- April 28, 11:00: CloudAxis confirmed backup snapshot error causing data loss) Tj
+0 -12 Td
+(- April 28, 14:00: Full platform access restored but data gap confirmed) Tj
+0 -12 Td
+(Data Loss Impact) Tj
+0 -12 Td
+(- Affected period: April 25, 14:00 to April 26, 14:00 \(approx. 24 hours of data\)) Tj
+0 -12 Td
+(- Modules affected: payroll entries, customer orders, financial postings) Tj
+0 -12 Td
+(- Payroll batch processing for April 25 requires full re-entry) Tj
+0 -12 Td
+(- 847 customer transaction records may need manual reconciliation) Tj
+0 -12 Td
+(- 3 financial postings for April 25 are unrecoverable from CloudAxis backups) Tj
+0 -12 Td
+(SLA Breach Analysis) Tj
+0 -12 Td
+(- Platform was unavailable for approximately 23 hours 40 minutes) Tj
+0 -12 Td
+(- SLA target: 99.7% monthly availability \(max downtime ~2.2 hours per month\)) Tj
+0 -12 Td
+(- Actual April downtime to date: approximately 24 hours \(critical SLA breach\)) Tj
+0 -12 Td
+(- P1 resolution SLA of 8 business hours was exceeded by approximately 14 hours) Tj
+0 -12 Td
+(- Data RPO breach: confirmed 24+ hours data loss against 24-hour RPO commitment) Tj
+0 -12 Td
+(Preliminary Business Impact) Tj
+0 -12 Td
+(- Payroll team: 14 hours of manual re-entry work estimated) Tj
+0 -12 Td
+(- Finance team: 3 unrecoverable postings require manual reconstruction) Tj
+0 -12 Td
+(- Customer operations: 847 transaction records require reconciliation) Tj
+0 -12 Td
+(- IT overtime: 31 hours of emergency response time logged) Tj
+0 -12 Td
+(- Estimated internal response cost: 28,400 TND) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+3387
+%%EOF

@@ -477,13 +477,102 @@ class CopilotCaseAnalysisMixin:
         }
 
     @staticmethod
-    def _normalize_risk_items(items: List[str]) -> List[str]:
+    def _looks_like_prompt_template_noise(text: str) -> bool:
+        """Return True when *text* looks like leaked LLM prompt/schema boilerplate
+        rather than a genuine legal risk item.
+        """
+        candidate = str(text or "").strip()
+        if not candidate:
+            return False
+        lower = candidate.lower()
+
+        # Hard keyword patterns that only appear in prompt templates
+        PROMPT_PHRASES = (
+            "return valid json",
+            "return json only",
+            "valid json only",
+            "use only the provided",
+            "do not invent",
+            "do not wrap the json",
+            "you are the case reasoning agent",
+            "you are a legal",
+            "task: reason over",
+            '"overview": "string"',
+            '"narrative_summary"',
+            '"main_issues"',
+            '"key_dates"',
+            '"recommended_next_steps"',
+            "json schema",
+            "exact schema",
+            "schema:",
+            "jurisdiction guardrails",
+            "constitution references",
+            "risk focus areas",
+            "what success looks like",
+            "optimize prompt",
+            "<case_id>",
+            "<document_id>",
+            "pdf_ready.md",
+            "` - `",
+        )
+        if any(phrase in lower for phrase in PROMPT_PHRASES):
+            return True
+
+        # Standalone single-word schema keys leaked as list items
+        SCHEMA_KEYS = {
+            "overview", "narrative_summary", "main_issues", "key_dates",
+            "legal_risks", "recommended_next_steps", "sources", "string",
+        }
+        if candidate.strip('"\'').lower() in SCHEMA_KEYS:
+            return True
+
+        # Starts with JSON punctuation (leaked object/array fragment)
+        stripped = candidate.lstrip()
+        if stripped and stripped[0] in ('{', '[') and ('}' in stripped or ']' in stripped):
+            return True
+
+        # Instruction-style opening words
+        INSTRUCTION_STARTS = (
+            "task:",
+            "rules:",
+            "output:",
+            "format:",
+            "instructions:",
+            "constraint:",
+        )
+        if any(lower.startswith(prefix) for prefix in INSTRUCTION_STARTS):
+            return True
+
+        return False
+
+    @staticmethod
+    def _normalize_risk_items(items: object) -> List[str]:  # type: ignore[override]
+        """Normalise a list of legal-risk strings returned by the LLM.
+
+        Defensive against non-list / non-string values so a malformed LLM
+        response never causes an unhandled exception.
+        """
+        if not items:
+            return []
+        if isinstance(items, str):
+            items = [items]
+        elif not isinstance(items, list):
+            try:
+                items = list(items)  # type: ignore[arg-type]
+            except TypeError:
+                return []
+
         normalized: List[str] = []
         for item in items:
-            raw = str(item or "").strip()
+            # Flatten dicts e.g. {"risk": "…"} to their first string value
+            if isinstance(item, dict):
+                item = next((v for v in item.values() if isinstance(v, str)), None)
+            if item is None:
+                continue
+            raw = str(item).strip()
             if not raw:
                 continue
-            if CopilotService._looks_like_prompt_template_noise(raw):
+            if CopilotCaseAnalysisMixin._looks_like_prompt_template_noise(raw):
                 continue
 
             split_candidate = re.sub(r"\s+(?=\d+[).]\s+)", "\n", raw)
@@ -494,7 +583,7 @@ class CopilotCaseAnalysisMixin:
                 cleaned = re.sub(r"^\d+[).]\s*", "", cleaned)
                 if not cleaned:
                     continue
-                if CopilotService._looks_like_prompt_template_noise(cleaned):
+                if CopilotCaseAnalysisMixin._looks_like_prompt_template_noise(cleaned):
                     continue
                 cleaned = cleaned[0].upper() + cleaned[1:] if cleaned else cleaned
                 if cleaned not in normalized:

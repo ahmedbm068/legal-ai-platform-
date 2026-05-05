@@ -30,6 +30,7 @@ joblib==1.5.2
 scikit-learn==1.8.0
 sentence-transformers==5.1.1
 six==1.17.0
+slowapi==0.1.9
 SQLAlchemy==2.0.48
 starlette==1.0.0
 typing-inspection==0.4.2

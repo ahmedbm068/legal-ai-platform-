@@ -1,0 +1,117 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 3135 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(RESPONSE TO NOTICE OF BREACH  CLOUDAXIS SOLUTIONS) Tj
+0 -12 Td
+(Reference: RESP-CA-2026-05-02) Tj
+0 -12 Td
+(Date: May 2, 2026) Tj
+0 -12 Td
+(From: CloudAxis Solutions SARL) Tj
+0 -12 Td
+(To: TechVenture SARL) Tj
+0 -12 Td
+(Subject: Response to formal breach notice NOB-TV-2026-04-30.) Tj
+0 -12 Td
+(1\) Infrastructure Migration Position) Tj
+0 -12 Td
+(CloudAxis acknowledges that TechVenture was not given advance written notice of) Tj
+0 -12 Td
+(the April 26 migration. CloudAxis states this was an emergency security patch) Tj
+0 -12 Td
+(migration required to address a zero-day vulnerability discovered on April 25.) Tj
+0 -12 Td
+(CloudAxis claims force-majeure cyber-threat provisions may apply and requests) Tj
+0 -12 Td
+(further discussion of the applicability of the planned maintenance clause.) Tj
+0 -12 Td
+(2\) SLA Availability Position) Tj
+0 -12 Td
+(CloudAxis accepts that platform availability in April fell below the 99.7% SLA) Tj
+0 -12 Td
+(target. CloudAxis proposes to apply a service credit equivalent to 15% of the) Tj
+0 -12 Td
+(monthly subscription fee per the SLA credit schedule in the agreement.) Tj
+0 -12 Td
+(CloudAxis disputes that the outage constitutes a material breach warranting) Tj
+0 -12 Td
+(termination, noting the agreement requires a pattern of two consecutive months) Tj
+0 -12 Td
+(below target before termination rights are triggered.) Tj
+0 -12 Td
+(3\) P1 Response Position) Tj
+0 -12 Td
+(CloudAxis denies a formal P1 breach. CloudAxis states that internal escalation) Tj
+0 -12 Td
+(occurred within 4 hours of ticket acceptance but that the communication was not) Tj
+0 -12 Td
+(externally visible. CloudAxis offers to review ticket escalation protocols.) Tj
+0 -12 Td
+(4\) Data Loss Position) Tj
+0 -12 Td
+(CloudAxis confirms data loss of approximately 18 hours of incremental data) Tj
+0 -12 Td
+(\(not 24 hours as TechVenture claims\). CloudAxis states that backup restoration) Tj
+0 -12 Td
+(recovered some of the April 25 payroll records. A full reconciliation report) Tj
+0 -12 Td
+(will be provided by May 8, 2026.) Tj
+0 -12 Td
+(5\) Data Breach Notification Position) Tj
+0 -12 Td
+(CloudAxis disputes that its April 28 notification was outside the 24-hour window.) Tj
+0 -12 Td
+(CloudAxis states the clock began when data loss was confirmed, not when the) Tj
+0 -12 Td
+(outage began. CloudAxis has engaged external legal counsel on this point.) Tj
+0 -12 Td
+(6\) Commercial Proposal) Tj
+0 -12 Td
+(CloudAxis offers the following to resolve the dispute without escalation:) Tj
+0 -12 Td
+(- Service credit of 15% of April subscription \(5,175 TND\) applied to May invoice) Tj
+0 -12 Td
+(- Waiver of May overuse compute charges estimated at 2,100 TND) Tj
+0 -12 Td
+(- Complimentary professional services day \(850 TND value\) for data reconciliation) Tj
+0 -12 Td
+(- Commitment to provide disaster recovery plan update by May 12, 2026) Tj
+0 -12 Td
+(CloudAxis requests that TechVenture hold the May 9 executive call before) Tj
+0 -12 Td
+(deciding on termination to explore a structured resolution path.) Tj
+0 -12 Td
+(Deadline for TechVenture response to this proposal: May 6, 2026 at 17:00.) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+3497
+%%EOF

@@ -470,6 +470,41 @@ BASE_SCHEMA_PATCHES = [
     CREATE INDEX IF NOT EXISTS ix_draft_document_versions_document_version
     ON draft_document_versions (draft_document_id, version_number DESC);
     """,
+    # ── Week 1: general request audit log ──────────────────────────────────
+    """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'userrole')
+        THEN
+            CREATE TYPE userrole AS ENUM ('admin', 'lawyer', 'client', 'assistant');
+        ELSE
+            BEGIN
+                ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'client';
+            EXCEPTION WHEN others THEN NULL;
+            END;
+        END IF;
+    END$$;
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS request_audit_logs (
+        id          SERIAL PRIMARY KEY,
+        tenant_id   INTEGER,
+        user_id     INTEGER,
+        method      VARCHAR(10)  NOT NULL,
+        path        VARCHAR(512) NOT NULL,
+        status_code INTEGER      NOT NULL,
+        duration_ms DOUBLE PRECISION NOT NULL,
+        created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_request_audit_logs_created
+    ON request_audit_logs (created_at DESC);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS ix_request_audit_logs_tenant
+    ON request_audit_logs (tenant_id, created_at DESC);
+    """,
 ]
 
 VECTOR_SCHEMA_PATCHES = [

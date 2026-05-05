@@ -7,8 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.api.appointment_schema import AppointmentActionResponse, AppointmentCreate, AppointmentOut, AppointmentUpdate
 from backend.core.deps import get_current_user, get_db
-from backend.core.enums import UserRole
-from backend.core.permissions import apply_tenant_scope, require_roles
+from backend.core.permissions import apply_tenant_scope, require_lawyer
 from backend.models.appointment import Appointment
 from backend.models.case import Case
 from backend.models.consultation_request import ConsultationRequest
@@ -113,9 +112,8 @@ def create_case_appointment(
     case_id: int,
     payload: AppointmentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     case = get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
     consultation = None
@@ -176,9 +174,8 @@ def update_appointment(
     appointment_id: int,
     payload: AppointmentUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     appointment = get_tenant_appointment_or_404(db=db, appointment_id=appointment_id, current_user=current_user)
 
     if current_user.role != UserRole.admin and appointment.lawyer_id not in {None, current_user.id}:
@@ -225,9 +222,8 @@ def update_appointment(
 def cancel_appointment(
     appointment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     appointment = get_tenant_appointment_or_404(db=db, appointment_id=appointment_id, current_user=current_user)
 
     if current_user.role != UserRole.admin and appointment.lawyer_id not in {None, current_user.id}:

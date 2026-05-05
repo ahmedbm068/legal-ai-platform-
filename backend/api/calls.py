@@ -7,8 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.api.call_schema import CallSessionCreate, CallSessionCreateResponse, CallSessionOut
 from backend.core.deps import get_current_user, get_db
-from backend.core.permissions import apply_tenant_scope, is_admin, require_roles
-from backend.core.enums import UserRole
+from backend.core.permissions import apply_tenant_scope, is_admin, require_lawyer
 from backend.models.call_session import CallSession
 from backend.models.case import Case
 from backend.models.client import Client
@@ -74,9 +73,8 @@ def create_call_session(
     case_id: int,
     payload: CallSessionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     case = get_tenant_case_or_404(db=db, case_id=case_id, current_user=current_user)
 
     client = db.query(Client).filter(Client.id == case.client_id, Client.deleted_at.is_(None)).first()

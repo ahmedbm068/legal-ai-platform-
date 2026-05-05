@@ -19,7 +19,7 @@ export default function SendEmailModal({ defaultSubject, onClose, onSend }: Send
             <p className="shell-page-kicker">Confirm email</p>
             <h3>Send after lawyer review</h3>
           </div>
-          <button onClick={onClose} type="button" aria-label="Close">x</button>
+          <button onClick={onClose} type="button" aria-label="Close">×</button>
         </div>
         <label className="editor-field">
           <span>To</span>
@@ -37,7 +37,7 @@ export default function SendEmailModal({ defaultSubject, onClose, onSend }: Send
           <button className="shell-secondary-button" onClick={onClose} type="button">Cancel</button>
           <button
             className="shell-primary-button"
-            disabled={!to.trim() || !subject.trim()}
+            disabled={!to.trim() || !to.includes("@") || !subject.trim()}
             onClick={() => onSend({ to: to.trim(), subject: subject.trim(), cc: cc.split(",").map((item) => item.trim()).filter(Boolean) })}
             type="button"
           >

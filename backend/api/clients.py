@@ -2,9 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
-from backend.core.permissions import apply_tenant_scope, require_roles
+from backend.core.permissions import apply_tenant_scope, require_admin, require_lawyer
 from backend.core.deps import get_db, get_current_user
-from backend.core.enums import UserRole
 from backend.models.user import User
 from backend.models.client import Client
 from backend.api.client_schema import ClientCreate, ClientUpdate, ClientOut
@@ -16,9 +15,8 @@ router = APIRouter(prefix="/clients", tags=["Clients"])
 def create_client(
     client_data: ClientCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_lawyer)
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
 
     normalized_phone = client_data.phone.strip()
     if not normalized_phone:
@@ -73,9 +71,8 @@ def update_client(
     client_id: int,
     client_data: ClientUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_lawyer)
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
 
     query = db.query(Client).filter(
         Client.id == client_id,
@@ -108,9 +105,8 @@ def update_client(
 def delete_client(
     client_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_admin)
 ):
-    require_roles(current_user, [UserRole.admin])
 
     query = db.query(Client).filter(
         Client.id == client_id,

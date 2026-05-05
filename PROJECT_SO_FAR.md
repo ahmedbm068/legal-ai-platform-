@@ -224,7 +224,19 @@ Ongoing strategic goals still visible in docs/backlog:
 
 ## 12) What Was Recently Improved (Latest Development Cycle)
 
-Recent implemented improvements include:
+### Phase A — closed 2026-05-17 (master plan v2)
+
+Six sub-phases shipped in a single sprint, all green at 233/233 tests:
+
+- **A0 — Big Agent registry.** 5 declarative specialist descriptors (research / drafting / review / workspace / workflow) under `backend/services/ai/big_agents/`. Orchestrator emits `big_agent` on `intent_detection`. `/admin/big-agents` exposes the catalog.
+- **A1 — Workspace v2 + Verifier.** Pure `verifier_service` enforces the grounded / partial / refused taxonomy; `/ai/copilot` returns `urn:lai:weak-grounding` problem+json on refusal. New `GET /cases/{id}/workspace` aggregates case + timeline + risk_signals + memory + big_agents.
+- **A2 — Drafting v2 + Citations.** `drafting_outline_service` (5 intent templates) + `citation_insertion_service` (`[cite:doc:N]`, `[cite:source:N]`, `[cite:N]` markers). 3 endpoints: `POST /ai/draft/outline`, `/ai/draft/insert-citation`, `/ai/draft/resolve-markers`.
+- **A3 — Review Table v2.** `document_review_table_service` projects cached `insights_json` into a Vault-style document × question matrix with `evidence_strength` per cell. `GET /cases/{id}/review-table?questions=...`. No LLM per cell — instant render.
+- **A4 — Workflow Blueprints.** `workflow_blueprint_service` exposes 5 Harvey-style blueprints (case_brief_pack, irac_analysis, risk_triage, contract_redline_pack, client_call_recap) with prerequisite checks. `GET /cases/{id}/workflows[/{blueprint_id}]`.
+- **A5 — Multi-agent traceability.** `copilot_traces` table persists every orchestrator run (call_id, big_agent, mini_agents_used, intent, duration_ms, verdict). Admin endpoints `/admin/copilot/traces` + `/admin/copilot/trace/{call_id}`. `/admin/big-agents` `last_24h_call_count` is now real data. Admin `/audit` page extended with a Trace tab + reasoning-trail detail panel.
+
+Earlier cycle improvements still in place:
+
 - Major internal workspace redesign to modern, simpler, chat-focused UX.
 - Collapsible sidebar behavior and icon-based compact navigation.
 - Bibliotheque library browsing view for uploaded assets.

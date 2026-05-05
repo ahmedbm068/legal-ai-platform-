@@ -1,0 +1,121 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 3070 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(DRAFT REGULATORY NOTIFICATION  CONFIDENTIAL LEGAL DOCUMENT) Tj
+0 -12 Td
+(Reference: RND-TV-2026-05-03-DRAFT) Tj
+0 -12 Td
+(Prepared by: TechVenture Legal and Compliance) Tj
+0 -12 Td
+(Date: May 3, 2026) Tj
+0 -12 Td
+(Status: DRAFT  awaiting legal sign-off before submission) Tj
+0 -12 Td
+(Regulatory Body: National Data Protection Authority \(INPDP\), Tunisia) Tj
+0 -12 Td
+(Subject: Notification of personal data incident  CloudAxis platform outage) Tj
+0 -12 Td
+(Filing Deadline: May 15, 2026 \(72 hours from confirmed notification on May 2\)) Tj
+0 -12 Td
+(Note: This is a DRAFT document and has NOT been filed. Final version requires) Tj
+0 -12 Td
+(legal team approval. Deadline is May 15, 2026.) Tj
+0 -12 Td
+(Incident Summary) Tj
+0 -12 Td
+(TechVenture SARL notifies the INPDP of an incident affecting personal data) Tj
+0 -12 Td
+(processed through the CloudAxis ERP platform. The incident occurred on April 26,) Tj
+0 -12 Td
+(2026 and was confirmed on April 28, 2026.) Tj
+0 -12 Td
+(Nature of the Incident) Tj
+0 -12 Td
+(An infrastructure migration performed by TechVenture's SaaS provider CloudAxis) Tj
+0 -12 Td
+(Solutions SARL without advance notice caused a platform outage and resulted in) Tj
+0 -12 Td
+(the confirmed loss of approximately 24 hours of incremental backup data.) Tj
+0 -12 Td
+(Categories of Affected Personal Data) Tj
+0 -12 Td
+(- Payroll records for 214 employees \(names, identification numbers, salary data,) Tj
+0 -12 Td
+(bank account references\) for April 25, 2026) Tj
+0 -12 Td
+(- Customer transaction records for 847 transactions \(business entity data,) Tj
+0 -12 Td
+(order data, payment reference data\)) Tj
+0 -12 Td
+(Note: TechVenture does not believe consumer personal data in the strict sense) Tj
+0 -12 Td
+(is affected. Legal counsel is confirming whether Act 63-2004 reporting thresholds) Tj
+0 -12 Td
+(are triggered for business-to-business transaction data.) Tj
+0 -12 Td
+(Likely Consequences) Tj
+0 -12 Td
+(- Temporary inaccessibility to payroll data creating payroll processing delays) Tj
+0 -12 Td
+(- Potential for incomplete financial records for April 25) Tj
+0 -12 Td
+(- Reputational and operational risk if customers are affected by incomplete orders) Tj
+0 -12 Td
+(Measures Taken by TechVenture) Tj
+0 -12 Td
+(- Formal breach notice sent to CloudAxis on April 30, 2026) Tj
+0 -12 Td
+(- Incident documented and preserved for regulatory purposes) Tj
+0 -12 Td
+(- Data reconstruction underway with CloudAxis and internal teams) Tj
+0 -12 Td
+(- Legal review of regulatory obligations commenced May 1, 2026) Tj
+0 -12 Td
+(Measures Requested from CloudAxis) Tj
+0 -12 Td
+(- Full technical root cause analysis by May 6, 2026) Tj
+0 -12 Td
+(- Confirmation of data recovery status by May 8, 2026) Tj
+0 -12 Td
+(- ISO 27001 certification status confirmation) Tj
+0 -12 Td
+(- Commitment on future notification procedures) Tj
+0 -12 Td
+(Filing Decision) Tj
+0 -12 Td
+(Legal team to confirm by May 10, 2026 whether formal notification to INPDP is) Tj
+0 -12 Td
+(required. Deadline for any required regulatory filing: May 15, 2026.) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+3432
+%%EOF

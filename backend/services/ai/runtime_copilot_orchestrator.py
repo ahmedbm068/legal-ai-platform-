@@ -14,10 +14,12 @@ from backend.services.ai.agents.matter_classification_agent import matter_classi
 from backend.services.ai.agents.prompt_correction_agent import prompt_correction_agent
 from backend.services.ai.agents.prompt_optimizer_agent import prompt_optimizer_agent
 from backend.services.ai.ai_response_audit_service import ai_response_audit_service
+from backend.services.ai.big_agents import big_agent_registry
 from backend.services.ai.case_context_service import case_context_service
 from backend.services.ai.case_snapshot_service import case_snapshot_service
 from backend.services.ai.command_parsing_service import command_parsing_service
 from backend.services.ai.copilot_memory_service import CopilotMemoryService, copilot_memory_service
+from backend.services.ai.copilot_trace_service import copilot_trace_service
 from backend.services.ai.copilot_pipeline_contracts import (
     CopilotExecutionContext,
     CopilotPipelineRequest,
@@ -191,13 +193,13 @@ def log_graph_event(
 
 
 class RuntimeCopilotOrchestrator:
-    OPTIMIZABLE_INTENTS = {
+    OPTIMIZABLE_INTENTS: frozenset[str] = frozenset({
         "ask_document",
         "ask_case",
         "ask_global",
         "summarize_global",
-    }
-    LEGAL_ANALYSIS_INTENTS = {
+    })
+    LEGAL_ANALYSIS_INTENTS: frozenset[str] = frozenset({
         "ask_document",
         "ask_case",
         "ask_global",
@@ -211,8 +213,8 @@ class RuntimeCopilotOrchestrator:
         "compare_case_documents",
         "trace_case_evidence",
         "monitor_deadlines_case",
-    }
-    EXPLICIT_ANALYSIS_INTENTS = {
+    })
+    EXPLICIT_ANALYSIS_INTENTS: frozenset[str] = frozenset({
         "summarize_and_analyze_risks_case",
         "analyze_risks_case",
         "evaluate_case_evidence",
@@ -220,24 +222,24 @@ class RuntimeCopilotOrchestrator:
         "compare_case_documents",
         "trace_case_evidence",
         "monitor_deadlines_case",
-    }
-    DRAFTING_INTENTS = {
+    })
+    DRAFTING_INTENTS: frozenset[str] = frozenset({
         "draft_client_email_case",
         "draft_internal_email_case",
         "draft_partner_strategy_note_case",
         "draft_negotiation_strategy",
         "draft_contract_redline_case",
-    }
-    DOCUMENT_REVIEW_INTENTS = {
+    })
+    DOCUMENT_REVIEW_INTENTS: frozenset[str] = frozenset({
         "summarize_document",
         "compare_case_documents",
         "trace_case_evidence",
         "review_booking_case",
-    }
-    CLIENT_EXPLANATION_INTENTS = {
+    })
+    CLIENT_EXPLANATION_INTENTS: frozenset[str] = frozenset({
         "draft_client_email_case",
-    }
-    CIVIL_OBLIGATION_MARKERS = {
+    })
+    CIVIL_OBLIGATION_MARKERS: frozenset[str] = frozenset({
         "civil obligation",
         "obligation",
         "contract",
@@ -245,16 +247,16 @@ class RuntimeCopilotOrchestrator:
         "liability",
         "payment terms",
         "notice clause",
-    }
-    SUCCESSION_MARKERS = {
+    })
+    SUCCESSION_MARKERS: frozenset[str] = frozenset({
         "succession",
         "inheritance",
         "heritage",
         "heir",
         "testament",
         "estate",
-    }
-    INTERNATIONAL_PRIVATE_MARKERS = {
+    })
+    INTERNATIONAL_PRIVATE_MARKERS: frozenset[str] = frozenset({
         "international private law",
         "droit international prive",
         "international prive",
@@ -262,42 +264,42 @@ class RuntimeCopilotOrchestrator:
         "conflict of laws",
         "exequatur",
         "foreign judgment",
-    }
-    LITIGATION_MEMO_MARKERS = {
+    })
+    LITIGATION_MEMO_MARKERS: frozenset[str] = frozenset({
         "litigation position",
         "position memo",
         "contentious",
         "argument map",
         "pleading",
-    }
-    ARTICLE_APPLICABILITY_MARKERS = {
+    })
+    ARTICLE_APPLICABILITY_MARKERS: frozenset[str] = frozenset({
         "article applicability",
         "which article applies",
         "applicable article",
         "article review",
-    }
-    DRAFTING_MARKERS = {
+    })
+    DRAFTING_MARKERS: frozenset[str] = frozenset({
         "draft",
         "prepare memo",
         "write memo",
         "write email",
         "prepare email",
         "redline",
-    }
-    CLIENT_EXPLANATION_MARKERS = {
+    })
+    CLIENT_EXPLANATION_MARKERS: frozenset[str] = frozenset({
         "explain to client",
         "client explanation",
         "client-ready",
         "plain language",
-    }
-    DOCUMENT_REVIEW_MARKERS = {
+    })
+    DOCUMENT_REVIEW_MARKERS: frozenset[str] = frozenset({
         "review document",
         "document review",
         "compare documents",
         "extract clause",
         "scan clauses",
-    }
-    UNCERTAINTY_MARKERS = {
+    })
+    UNCERTAINTY_MARKERS: frozenset[str] = frozenset({
         "not sure",
         "unclear",
         "uncertain",
@@ -306,7 +308,7 @@ class RuntimeCopilotOrchestrator:
         "insufficient",
         "ambiguous",
         "conflict",
-    }
+    })
     GLOBAL_CONTRACT_SECTION_TITLES = (
         "Matter Understood",
         "Confirmed Facts",
@@ -534,6 +536,23 @@ class RuntimeCopilotOrchestrator:
                     "This response could not be grounded in the available case record. "
                     "It must not be relied upon without independent verification by qualified counsel."
                 )
+
+        # ── Phase B: persist a copilot_trace row for this run ────────────────
+        # Best-effort; failures here must never break the user response.
+        try:
+            copilot_trace_service.record(
+                db=db,
+                state=final_state,
+                result=result,
+                duration_ms=(time.monotonic() - _t_graph) * 1000,
+            )
+            # Surface call_id to the response so clients can deep-link the trace.
+            if isinstance(result, dict):
+                result.setdefault("call_id", request_id)
+        except Exception:
+            _graph_logger.exception(
+                "[GRAPH] trace_persistence_failed | rid=%s", request_id
+            )
         return result
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -712,6 +731,8 @@ class RuntimeCopilotOrchestrator:
         # ── Intent detection ───────────────────────────────────────────────
         parsed = command_parsing_service.parse(corrected_message)
         intent = str(parsed.get("intent") or "ask_global").strip() or "ask_global"
+        big_agent_descriptor = big_agent_registry.find_by_intent(intent)
+        big_agent_name = big_agent_descriptor.name if big_agent_descriptor else None
         self._append_stage(
             stage_records,
             name="intent_detection",
@@ -723,6 +744,7 @@ class RuntimeCopilotOrchestrator:
                 "target_id": parsed.get("target_id"),
                 "confidence": parsed.get("confidence"),
                 "confidence_score": parsed.get("confidence_score"),
+                "big_agent": big_agent_name,
             },
         )
 
@@ -2761,19 +2783,51 @@ class RuntimeCopilotOrchestrator:
         resolved_intent = original_intent
         workflow_kind = str(workflow_plan.get("workflow_kind") or "").strip()
         matter_type = str(workflow_plan.get("matter_type") or "").strip()
+        clean_query = str(candidate.get("clean_query") or "").strip().lower()
         reason = "no_override"
 
         has_case_scope = isinstance(candidate.get("case_id"), int) or isinstance(workspace_case_id, int)
         has_document_scope = isinstance(candidate.get("document_id"), int) or isinstance(workspace_document_id, int)
 
+        # A drafting/client-explanation override should only fire if the user's
+        # query text actually contains drafting/explanation language. Otherwise
+        # the LLM workflow planner can mis-tag plain analysis questions as
+        # "client_explanation" and we end up returning emails for things like
+        # "what are the strongest evidences" or "summarize the case".
+        query_has_client_explanation_markers = self._query_contains_markers(
+            query=clean_query, markers=self.CLIENT_EXPLANATION_MARKERS
+        )
+        query_has_drafting_markers = self._query_contains_markers(
+            query=clean_query, markers=self.DRAFTING_MARKERS
+        )
+
         if original_intent in self.EXPLICIT_ANALYSIS_INTENTS:
             reason = "explicit_analysis_intent_preserved"
-        elif workflow_kind == "client_explanation" and has_case_scope and original_intent in self.LEGAL_ANALYSIS_INTENTS:
+        elif (
+            workflow_kind == "client_explanation"
+            and has_case_scope
+            and original_intent in self.LEGAL_ANALYSIS_INTENTS
+            and (
+                query_has_client_explanation_markers
+                or original_intent in self.CLIENT_EXPLANATION_INTENTS
+            )
+        ):
             resolved_intent = "draft_client_email_case"
             reason = "client_explanation_route"
-        elif workflow_kind == "drafting" and has_case_scope and original_intent in self.LEGAL_ANALYSIS_INTENTS:
+        elif (
+            workflow_kind == "drafting"
+            and has_case_scope
+            and original_intent in self.LEGAL_ANALYSIS_INTENTS
+            and (
+                query_has_drafting_markers
+                or original_intent in self.DRAFTING_INTENTS
+            )
+        ):
             resolved_intent = "draft_partner_strategy_note_case" if matter_type == "litigation position memo" else "draft_internal_email_case"
             reason = "drafting_route"
+        elif original_intent in {"ask_case", "summarize_case", "ask_document", "summarize_document"}:
+            # Already carry explicit scope and no drafting markers — keep as-is.
+            reason = "scoped_analysis_intent_preserved"
         elif workflow_kind == "document_review" and has_document_scope and original_intent in {
             "ask_global",
             "ask_case",

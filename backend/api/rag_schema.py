@@ -12,6 +12,34 @@ class AskRequest(BaseModel):
     document_id: Optional[int] = None
 
 
+class DraftOutlineRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    intent: str = Field(..., min_length=1)
+    objective: Optional[str] = None
+    case_id: Optional[int] = None
+    jurisdiction: Optional[str] = None
+
+
+class CitationInsertionRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    body: str = Field(..., min_length=0)
+    marker_kind: Literal["doc", "source", "citation"] = "source"
+    ref_id: int = Field(..., ge=0)
+    position: Optional[int] = Field(default=None, ge=0)
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class CitationInsertionBulkRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    body: str = Field(..., min_length=0)
+    sources: List[Dict[str, Any]] = Field(default_factory=list)
+    citations: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class SearchRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -284,6 +312,8 @@ class CopilotResponse(BaseModel):
     legal_warning: Optional[str] = None
     legal_sources_note: Optional[str] = None
     ai_insight: Optional[Dict[str, Any]] = None
+    # Phase A1 — Verifier output: {state, reason, should_refuse}
+    verification: Optional[Dict[str, Any]] = None
 
 
 class ReasoningCandidateScore(BaseModel):

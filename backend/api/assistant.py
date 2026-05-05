@@ -10,7 +10,7 @@ import tempfile
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from backend.api.rag_schema import CopilotResponse
 from backend.core.config import settings
 from backend.core.deps import get_current_user, get_db
 from backend.core.permissions import apply_tenant_scope
+from backend.core.rate_limiter import limiter
 from backend.models.case import Case
 from backend.models.document import Document
 from backend.models.document_chunk import DocumentChunk
@@ -318,7 +319,10 @@ Uploaded document context:
 
 
 @router.post("/upload", response_model=AssistantUploadResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit("20/minute")
 def upload_assistant_files(
+    request: Request,
+    response: Response,
     files: list[UploadFile] = File(...),
     case_id: int | None = Form(default=None),
     chat_session_id: str | None = Form(default=None),
@@ -426,7 +430,10 @@ def upload_assistant_files(
 
 
 @router.post("/ask-with-files", response_model=CopilotResponse)
+@limiter.limit("30/minute")
 def ask_with_files(
+    request: Request,
+    response: Response,
     data: AssistantAskWithFilesRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

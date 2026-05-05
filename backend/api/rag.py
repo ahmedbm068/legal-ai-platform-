@@ -3,12 +3,13 @@ from typing import Literal
 import re
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from backend.core.deps import get_db, get_current_user
-from backend.core.enums import UserRole
-from backend.core.permissions import require_roles
+from backend.core.permissions import require_lawyer
+from backend.core.rate_limiter import limiter
 from backend.models.case import Case
 from backend.models.ai_response_audit_log import AIResponseAuditLog
 from backend.models.copilot_feedback import CopilotFeedback
@@ -28,6 +29,13 @@ from backend.services.ai.runtime_services import (
     shared_document_pipeline,
 )
 from backend.services.draft_document_payload_service import build_draft_document_payload, is_drafting_request
+from backend.services.ai.verifier_service import (
+    verifier_service,
+    build_weak_grounding_problem,
+)
+from backend.services.ai.drafting_outline_service import drafting_outline_service
+from backend.services.ai.citation_insertion_service import citation_insertion_service
+from backend.services.ai.case_context_service import case_context_service
 from backend.api.rag_schema import (
     AskRequest,
     AskResponse,
@@ -52,6 +60,9 @@ from backend.api.rag_schema import (
     ArtifactVersionAgentReviseRequest,
     ArtifactVersionMutationResponse,
     AIResponseAuditLogListResponse,
+    DraftOutlineRequest,
+    CitationInsertionRequest,
+    CitationInsertionBulkRequest,
 )
 
 
@@ -240,7 +251,10 @@ def search_chunks(
 
 
 @router.post("/ask", response_model=AskResponse)
+@limiter.limit("30/minute")
 def ask_question(
+    request: Request,
+    response: Response,
     data: AskRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -257,7 +271,10 @@ def ask_question(
 
 
 @router.post("/copilot", response_model=CopilotResponse)
+@limiter.limit("30/minute")
 def copilot(
+    request: Request,
+    response: Response,
     data: CopilotRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -286,6 +303,24 @@ def copilot(
         )
     finally:
         _SKIP_CACHE.reset(_token)
+    # ── Phase A1 — Verifier: classify response into grounded/partial/refused ──
+    verification_outcome = verifier_service.verify(response)
+    response["verification"] = verification_outcome.to_dict()
+    if verification_outcome.should_refuse:
+        problem = build_weak_grounding_problem(
+            detail=(
+                "The available documents and legal sources do not provide enough "
+                "grounded evidence to answer reliably. Add case documents or refine "
+                "the question, then try again."
+            ),
+            instance=str(request.url.path),
+            reason=verification_outcome.reason,
+        )
+        return JSONResponse(
+            status_code=422,
+            content=problem,
+            media_type="application/problem+json",
+        )
     if is_drafting_request(data.message, response.get("parsed_intent"), response.get("action_category")):
         answer = str(response.get("answer") or response.get("message") or "")
         sources = response.get("sources") if isinstance(response.get("sources"), list) else []
@@ -304,6 +339,85 @@ def copilot(
         response["open_editor"] = False
         response["draft_document"] = None
     return response
+
+
+@router.post("/draft/outline")
+@limiter.limit("60/minute")
+def draft_outline(
+    request: Request,
+    data: DraftOutlineRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Phase A2 — Outline-first drafting flow.
+
+    Returns a deterministic, intent-aware outline before the heavy LLM
+    expansion runs. The lawyer reviews / edits the outline and then sends
+    the regular ``/ai/copilot`` request to expand it.
+    """
+
+    if not drafting_outline_service.is_supported(data.intent):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Drafting intent not supported: {data.intent}",
+        )
+
+    case_context: dict | None = None
+    if data.case_id is not None:
+        case_context = case_context_service.build_context(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            case_id=data.case_id,
+        )
+
+    outline = drafting_outline_service.build_outline(
+        intent=data.intent,
+        objective=data.objective,
+        case_context=case_context,
+        jurisdiction=data.jurisdiction,
+    )
+    return outline.to_dict()
+
+
+@router.post("/draft/insert-citation")
+@limiter.limit("120/minute")
+def draft_insert_citation(
+    request: Request,
+    data: CitationInsertionRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Insert a single citation into a draft body.
+
+    Pure deterministic — no DB / LLM. Returns the modified body plus a
+    ``label`` field so the UI can display what was inserted.
+    """
+
+    result = citation_insertion_service.insert_citation(
+        body=data.body,
+        marker_kind=data.marker_kind,
+        ref_id=data.ref_id,
+        sources=data.sources,
+        citations=data.citations,
+        position=data.position,
+    )
+    return result.to_dict()
+
+
+@router.post("/draft/resolve-markers")
+@limiter.limit("60/minute")
+def draft_resolve_markers(
+    request: Request,
+    data: CitationInsertionBulkRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Resolve every ``[cite:*]`` marker in a draft body in one pass."""
+
+    result = citation_insertion_service.parse_inline_markers(
+        body=data.body,
+        sources=data.sources,
+        citations=data.citations,
+    )
+    return result.to_dict()
 
 
 @router.post("/optimize-prompt", response_model=PromptOptimizationResponse)
@@ -514,9 +628,8 @@ def list_ai_response_audit_logs(
     document_id: int | None = Query(default=None, ge=1),
     limit: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.lawyer])
     query = db.query(AIResponseAuditLog).filter(AIResponseAuditLog.tenant_id == current_user.tenant_id)
     if case_id is not None:
         query = query.filter(AIResponseAuditLog.case_id == case_id)
@@ -726,12 +839,14 @@ def select_artifact_version(
 
 
 @router.post("/agent-workflow", response_model=AgentWorkflowResponse)
+@limiter.limit("10/minute")
 def run_agent_workflow(
+    request: Request,
+    response: Response,
     data: AgentWorkflowRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_lawyer)
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     return agent_workflow_service.run_case_workflow(
         db=db,
         tenant_id=current_user.tenant_id,

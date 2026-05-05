@@ -1,0 +1,125 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 2900 >>
+stream
+BT
+/F1 10 Tf
+44 770 Td
+(FINANCIAL IMPACT ASSESSMENT  CLOUDAXIS INCIDENT) Tj
+0 -12 Td
+(Reference: FIA-TV-2026-05-01) Tj
+0 -12 Td
+(Prepared by: TechVenture Finance and Operations) Tj
+0 -12 Td
+(Date: May 1, 2026) Tj
+0 -12 Td
+(Purpose) Tj
+0 -12 Td
+(This assessment documents the quantifiable direct costs incurred by TechVenture) Tj
+0 -12 Td
+(as a result of the CloudAxis platform outage and data loss of April 26-28, 2026.) Tj
+0 -12 Td
+(Direct Internal Costs) Tj
+0 -12 Td
+(Payroll team emergency re-entry and reconciliation work:) Tj
+0 -12 Td
+(- 14 hours senior payroll specialist at 120 TND/hour = 1,680 TND) Tj
+0 -12 Td
+(- 8 hours junior payroll coordinator at 75 TND/hour = 600 TND) Tj
+0 -12 Td
+(- Subtotal payroll recovery: 2,280 TND) Tj
+0 -12 Td
+(Finance team unrecoverable posting reconstruction:) Tj
+0 -12 Td
+(- 6 hours senior financial controller at 140 TND/hour = 840 TND) Tj
+0 -12 Td
+(- 4 hours financial analyst at 95 TND/hour = 380 TND) Tj
+0 -12 Td
+(- Subtotal finance recovery: 1,220 TND) Tj
+0 -12 Td
+(Customer operations reconciliation:) Tj
+0 -12 Td
+(- 847 transaction records at estimated 12 minutes per record) Tj
+0 -12 Td
+(- 3 operations staff at 85 TND/hour = 8,470 TND estimated) Tj
+0 -12 Td
+(- Subtotal customer operations: 8,470 TND) Tj
+0 -12 Td
+(IT emergency response and overtime:) Tj
+0 -12 Td
+(- 31 hours IT team at blended rate of 110 TND/hour = 3,410 TND) Tj
+0 -12 Td
+(- External IT consultant emergency call: 4,800 TND) Tj
+0 -12 Td
+(- Subtotal IT response: 8,210 TND) Tj
+0 -12 Td
+(Legal and compliance review:) Tj
+0 -12 Td
+(- 6 hours in-house counsel at 180 TND/hour = 1,080 TND) Tj
+0 -12 Td
+(- External legal review estimated: 6,000 TND) Tj
+0 -12 Td
+(- Subtotal legal: 7,080 TND) Tj
+0 -12 Td
+(Total Direct Internal Costs to Date: 27,260 TND) Tj
+0 -12 Td
+(Disputed Invoice Items) Tj
+0 -12 Td
+(- April subscription invoice: 34,500 TND base) Tj
+0 -12 Td
+(- TechVenture position: April subscription should be reduced by at least 30%) Tj
+0 -12 Td
+(given the severity and duration of the SLA breach \(estimated credit: 10,350 TND\)) Tj
+0 -12 Td
+(- CloudAxis counter-proposal credit: 5,175 TND \(15%\)) Tj
+0 -12 Td
+(- Difference: 5,175 TND remains disputed) Tj
+0 -12 Td
+(Potential Future Costs) Tj
+0 -12 Td
+(- Regulatory filing costs \(data protection assessment\): estimated 3,500-8,000 TND) Tj
+0 -12 Td
+(- Possible external audit of CloudAxis security controls: estimated 15,000 TND) Tj
+0 -12 Td
+(- Customer compensation claims for delayed orders: not yet quantified) Tj
+0 -12 Td
+(- Reputational harm and lost business: not yet quantified) Tj
+0 -12 Td
+(Summary) Tj
+0 -12 Td
+(Confirmed direct costs: 27,260 TND) Tj
+0 -12 Td
+(Disputed invoice credit balance: minimum 5,175 TND additional due to TechVenture) Tj
+0 -12 Td
+(Total minimum financial exposure for CloudAxis: 32,435 TND) Tj
+0 -12 Td
+(Maximum exposure if regulatory and customer claims crystallize: unclear) Tj
+0 -12 Td
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000311 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+3262
+%%EOF

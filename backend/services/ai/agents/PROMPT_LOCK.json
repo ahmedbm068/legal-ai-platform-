@@ -1,0 +1,27 @@
+{
+    "schema_version": "1",
+    "frozen_at": "2026-05-09T00:00:00Z",
+    "sprint": "week1-day6",
+    "frozen_by": "day6-prompt-freeze",
+    "prompts": {
+        "chronology_prompt.md": {
+            "version": "1.0.0",
+            "sha256": "D2EF3C8D1FFD9D941457037EE26FA042ABD6AAE9AA3D3324BC1BD2A58B12D6FB",
+            "frozen_at": "2026-05-09",
+            "description": "Extracts chronological events from case documents with date, description, and source citation",
+            "status": "frozen"
+        },
+        "summarization_prompt.md": {
+            "version": "1.0.0",
+            "sha256": "32D5998CEF757907F68EED181A207CC0735FC209F534ED0FD738C127612902E7",
+            "frozen_at": "2026-05-09",
+            "description": "Summarizes case documents into N grounded bullet points with mandatory source citations, no hallucinated sections",
+            "status": "frozen"
+        }
+    },
+    "policy": {
+        "change_requires": "new version bump + re-lock",
+        "eval_gate": "must pass ≥ 80% of default_eval_suite before lock bump",
+        "review_required_by": "sprint_owner"
+    }
+}

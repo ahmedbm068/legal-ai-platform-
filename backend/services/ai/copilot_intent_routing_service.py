@@ -443,9 +443,15 @@ User message:
                     next_parsed["requested_count"] = self._extract_count_hint(query_text)
             elif any(
                 token in query_text
-                for token in ["draft", "write", "prepare", "email", "mail", "client update", "posture", "status update"]
+                for token in ["draft", "write", "prepare", "send email", "email to client", "client update email", "mail to"]
             ):
                 next_parsed["intent"] = "draft_client_email_case"
+                next_parsed["case_id"] = workspace_case_id
+                next_parsed["target_type"] = "case"
+                next_parsed["target_id"] = workspace_case_id
+            else:
+                # Generic analysis question in a case workspace — route to ask_case
+                next_parsed["intent"] = "ask_case"
                 next_parsed["case_id"] = workspace_case_id
                 next_parsed["target_type"] = "case"
                 next_parsed["target_id"] = workspace_case_id

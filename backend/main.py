@@ -6,10 +6,16 @@ from time import perf_counter
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.exc import SQLAlchemyError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.api import auth, cases, clients, users
+from backend.api.admin import router as admin_router
 from backend.api.assistant import router as assistant_router
 from backend.api.appointments import router as appointments_router
 from backend.api.calendar_events import router as legal_calendar_router
@@ -27,6 +33,7 @@ from backend.api.rag import router as rag_router
 from backend.api.search import router as search_router
 from backend.api.voice import router as voice_router
 from backend.core.config import settings
+from backend.core.rate_limiter import limiter
 from backend.database.database import Base, engine
 from backend.database.schema_sync import apply_legacy_schema_patches
 from backend.models.background_job import BackgroundJob
@@ -40,6 +47,7 @@ from backend.models.calendar_event_source import CalendarEventSource
 from backend.models.calendar_reminder import CalendarReminder
 from backend.models.calendar_sync_provider import CalendarSyncProvider
 from backend.models.case_context_snapshot import CaseContextSnapshot
+from backend.models.copilot_trace import CopilotTrace
 from backend.models.case_image_asset import CaseImageAsset
 from backend.models.case_memory_entry import CaseMemoryEntry
 from backend.models.client import Client
@@ -56,6 +64,7 @@ from backend.models.evidence_analysis_review import EvidenceAnalysisReview
 from backend.models.generated_artifact_version import GeneratedArtifactVersion
 from backend.models.image_document_batch import ImageDocumentBatch
 from backend.models.prompt_library_entry import PromptLibraryEntry
+from backend.models.request_audit_log import RequestAuditLog
 from backend.models.staff_invite import StaffInvite
 from backend.models.tenant import Tenant
 from backend.models.user import User
@@ -66,6 +75,61 @@ from backend.services.jobs.job_queue_service import background_job_service
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Legal AI Platform", version="1.0.0")
+
+# ── Rate limiter ──────────────────────────────────────────────────────────────
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ── RFC 7807 problem+json error envelopes ────────────────────────────────────
+
+def _problem(status_code: int, title: str, detail: str, instance: str = "") -> JSONResponse:
+    body = {
+        "type": f"https://legal-ai.local/errors/{status_code}",
+        "title": title,
+        "status": status_code,
+        "detail": detail,
+    }
+    if instance:
+        body["instance"] = instance
+    return JSONResponse(
+        status_code=status_code,
+        content=body,
+        media_type="application/problem+json",
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    titles = {
+        400: "Bad Request",
+        401: "Unauthorized",
+        403: "Forbidden",
+        404: "Not Found",
+        405: "Method Not Allowed",
+        409: "Conflict",
+        422: "Unprocessable Entity",
+        429: "Too Many Requests",
+        500: "Internal Server Error",
+    }
+    title = titles.get(exc.status_code, "Error")
+    detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+    return _problem(exc.status_code, title, detail, str(request.url.path))
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    errors = exc.errors()
+    detail = "; ".join(
+        f"{' → '.join(str(l) for l in e['loc'])}: {e['msg']}" for e in errors
+    )
+    return _problem(422, "Validation Error", detail, str(request.url.path))
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return _problem(500, "Internal Server Error", "An unexpected error occurred.", str(request.url.path))
 
 cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
 local_network_origin_regex = (
@@ -106,6 +170,7 @@ app.include_router(rag_router)
 app.include_router(intelligence_router)
 app.include_router(search_router)
 app.include_router(voice_router)
+app.include_router(admin_router)
 
 
 def initialize_database() -> None:
@@ -128,6 +193,41 @@ async def add_request_id_and_timing(request: Request, call_next):
     duration_ms = (perf_counter() - started) * 1000.0
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time-Ms"] = f"{duration_ms:.2f}"
+
+    # ── Request audit log (mutating methods only) ─────────────────────────
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        try:
+            from backend.database.database import SessionLocal
+            from backend.core.jwt_handler import decode_access_token
+
+            tenant_id: int | None = None
+            user_id: int | None = None
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                try:
+                    payload = decode_access_token(auth_header[7:])
+                    user_id = int(payload.get("sub", 0)) or None
+                    tenant_id = int(payload.get("tenant_id", 0)) or None
+                except Exception:
+                    pass
+
+            db = SessionLocal()
+            try:
+                entry = RequestAuditLog(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    method=request.method,
+                    path=str(request.url.path),
+                    status_code=response.status_code,
+                    duration_ms=duration_ms,
+                )
+                db.add(entry)
+                db.commit()
+            finally:
+                db.close()
+        except Exception as _audit_exc:
+            logger.warning("Audit log write failed: %s", _audit_exc)
+
     return response
 
 
@@ -142,6 +242,12 @@ def _prewarm_local_transcription_pipeline() -> None:
 @app.on_event("startup")
 def initialize_app_database() -> None:
     initialize_database()
+
+
+@app.on_event("startup")
+def validate_prompt_integrity() -> None:
+    from backend.core.prompt_lock import validate_prompt_lock
+    validate_prompt_lock()
 
 
 @app.on_event("startup")

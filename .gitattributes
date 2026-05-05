@@ -1,0 +1,4 @@
+*.bin binary
+*.pdf binary
+*.pptx binary
+*.safetensors binary

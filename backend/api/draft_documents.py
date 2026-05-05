@@ -15,8 +15,7 @@ from backend.api.draft_document_schema import (
     DraftDocumentVersionOut,
 )
 from backend.core.deps import get_current_user, get_db
-from backend.core.enums import UserRole
-from backend.core.permissions import require_roles
+from backend.core.permissions import require_lawyer
 from backend.models.draft_document import DraftDocument
 from backend.models.draft_document_version import DraftDocumentVersion
 from backend.models.user import User
@@ -34,9 +33,8 @@ router = APIRouter(prefix="/draft-documents", tags=["Draft Documents"])
 def create_draft_document(
     payload: DraftDocumentCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     document = draft_document_service.create_document(db, current_user=current_user, payload=payload)
     return draft_document_service.serialize(document)
 
@@ -75,9 +73,8 @@ def update_draft_document(
     document_id: int,
     payload: DraftDocumentUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     document = draft_document_service.get_document_or_404(db, current_user=current_user, document_id=document_id)
     updated = draft_document_service.update_document(db, document=document, current_user=current_user, payload=payload)
     return draft_document_service.serialize(updated)
@@ -87,9 +84,8 @@ def update_draft_document(
 def delete_draft_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     document = draft_document_service.get_document_or_404(db, current_user=current_user, document_id=document_id)
     deleted = draft_document_service.soft_delete(db, document=document)
     return {"message": "Draft document archived.", "document": draft_document_service.serialize(deleted)}
@@ -100,9 +96,8 @@ def create_draft_document_version(
     document_id: int,
     payload: DraftDocumentVersionCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     document = draft_document_service.get_document_or_404(db, current_user=current_user, document_id=document_id)
     document.version = int(document.version or 1) + 1
     version = draft_document_service.create_version(
@@ -198,9 +193,8 @@ def send_draft_document_email(
     document_id: int,
     payload: DraftDocumentSendEmailRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_lawyer),
 ):
-    require_roles(current_user, [UserRole.admin, UserRole.lawyer])
     if not payload.confirm:
         raise HTTPException(status_code=400, detail="Email sending requires explicit confirmation.")
     document = draft_document_service.get_document_or_404(db, current_user=current_user, document_id=document_id)
