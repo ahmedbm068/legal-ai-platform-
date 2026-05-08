@@ -1,5 +1,5 @@
 """
-LLM call metrics — token usage, latency, and USD cost.
+LLM call metrics — token usage, latency, USD cost, and optional DB persistence.
 
 Single source of truth for:
   • extracting `usage` from any provider response (OpenAI, Groq, OpenRouter)
@@ -15,9 +15,13 @@ and the call is still logged with token counts.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 _logger = logging.getLogger("llm.metrics")
 
@@ -147,7 +151,68 @@ def record_llm_call(
             record["input_tokens"], record["output_tokens"], record["total_tokens"],
             record["cost_usd"],
         )
+        _persist_via_context(record)
         return record
     except Exception:
         # Instrumentation must never break the caller.
         return {}
+
+
+def _persist_via_context(record: dict[str, Any]) -> None:
+    """Persist the record to llm_call_log if a request-scoped context is set.
+
+    Reads ``db``, ``tenant_id``, ``request_id`` from the contextvar populated
+    by the FastAPI dependency. Silently no-ops when no context is active —
+    e.g. background scripts, tests, or non-LLM-bearing endpoints.
+    """
+    try:
+        from backend.core.llm_call_context import get_llm_call_context
+        ctx = get_llm_call_context()
+        if not ctx:
+            return
+        db = ctx.get("db")
+        if db is None:
+            return
+        persist_llm_call(
+            db,
+            record,
+            tenant_id=ctx.get("tenant_id"),
+            call_id=ctx.get("request_id"),
+        )
+    except Exception:
+        # Persistence failure must never break the response path.
+        return
+
+
+def persist_llm_call(db: "Session", record: dict[str, Any], *, tenant_id: int | None = None, call_id: str | None = None) -> None:
+    """Persist a record returned by record_llm_call to the llm_call_log table.
+
+    Must be called within an active DB session. Never raises.
+    """
+    if not record:
+        return
+    try:
+        from backend.models.llm_call_log import LLMCallLog  # local import to avoid circular
+
+        extra = {k: v for k, v in record.items() if k not in {
+            "model", "api", "duration_ms", "input_tokens", "output_tokens", "total_tokens", "cost_usd",
+        }}
+        entry = LLMCallLog(
+            tenant_id=tenant_id,
+            call_id=call_id,
+            model=str(record.get("model") or "unknown"),
+            api=str(record.get("api") or "responses"),
+            duration_ms=float(record.get("duration_ms") or 0.0),
+            input_tokens=int(record.get("input_tokens") or 0),
+            output_tokens=int(record.get("output_tokens") or 0),
+            total_tokens=int(record.get("total_tokens") or 0),
+            cost_usd=float(record.get("cost_usd") or 0.0),
+            extra_json=json.dumps(extra) if extra else None,
+        )
+        db.add(entry)
+        db.commit()
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass

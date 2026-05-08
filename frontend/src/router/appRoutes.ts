@@ -3,6 +3,7 @@ export type AppRoute = {
     label: string;
     description: string;
     useSelectedCase?: boolean;
+    hidden?: boolean;
 };
 
 export const APP_ROUTES: AppRoute[] = [
@@ -34,6 +35,7 @@ export const APP_ROUTES: AppRoute[] = [
         label: "Legal Editor",
         description: "Draft, verify, version, and export",
         useSelectedCase: true,
+        hidden: true,
     },
     {
         path: "/calendar",

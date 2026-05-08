@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+import os
 import re
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 from openai import APIError, AuthenticationError, RateLimitError
@@ -14,7 +17,27 @@ from backend.services.ai.agents.verifier_agent import verifier_agent
 from backend.services.ai.embedding_service import EmbeddingService
 from backend.services.ai.legal_trust_service import legal_trust_service
 from backend.services.ai.llm_gateway import llm_gateway
+from backend.services.ai.retrieval_enhancement_service import (
+    retrieval_enhancement_service,
+)
 from backend.services.ai.vector_store import VectorStore
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _hyde_rrf_enabled() -> bool:
+    """Feature flag — defaults OFF so behaviour is unchanged unless opted in."""
+
+    return os.environ.get("LAI_ENABLE_HYDE_RRF", "").lower() in {"1", "true", "yes"}
+
+
+# Per-call retrieval audit — populated by retrieve_context when HyDE+RRF runs,
+# consumed by answer_question (and any other caller) so the audit dict reaches
+# the response without changing public method signatures.
+_RETRIEVAL_AUDIT_VAR: ContextVar[Dict[str, Any] | None] = ContextVar(
+    "rag_retrieval_audit", default=None
+)
 
 
 SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+")
@@ -58,12 +81,67 @@ class RagService:
             return []
 
         safe_top_k = self._sanitize_top_k(top_k)
+        # Pull a wider candidate pool from the agent so the fusion / reranking
+        # downstream has room to work. Same multiplier as the legacy path.
+        agent_top_k = max(safe_top_k * 3, 10)
 
+        # ── HyDE + multi-query + RRF (feature-flagged) ──────────────────────
+        # When LAI_ENABLE_HYDE_RRF=1, generate paraphrases + a HyDE
+        # hypothetical passage, run retrieval for each, and merge with
+        # Reciprocal Rank Fusion. The downstream caller still sees the same
+        # list-of-dicts shape so no other code path needs to change.
+        if _hyde_rrf_enabled():
+            def _retrieve_one(q: str) -> List[Dict[str, Any]]:
+                agent_result = self.retrieval_agent.retrieve(
+                    db=db,
+                    tenant_id=tenant_id,
+                    question=q,
+                    top_k=agent_top_k,
+                    case_id=case_id,
+                    document_id=document_id,
+                )
+                if not agent_result.success:
+                    return []
+                return list(agent_result.payload.get("results") or [])
+
+            def _identify(item: Dict[str, Any]) -> Any:
+                # Prefer chunk_id; fall back to (document_id, chunk_index).
+                cid = item.get("chunk_id")
+                if cid is not None:
+                    return ("chunk", cid)
+                return ("doc_chunk", item.get("document_id"), item.get("chunk_index"))
+
+            try:
+                enhanced = retrieval_enhancement_service.enhance_and_retrieve(
+                    query=safe_question,
+                    retrieve_fn=_retrieve_one,
+                    identify_fn=_identify,
+                    top_k=safe_top_k,
+                    use_hyde=True,
+                    use_multi_query=True,
+                )
+                _logger.debug(
+                    "[RAG] hyde_rrf_retrieval | queries=%d hyde=%s mq=%s "
+                    "pool=%d final=%d fusion=%s",
+                    len(enhanced.queries),
+                    enhanced.used_hyde,
+                    enhanced.used_multi_query,
+                    enhanced.candidate_pool_size,
+                    len(enhanced.items),
+                    enhanced.fusion_method,
+                )
+                _RETRIEVAL_AUDIT_VAR.set(enhanced.to_audit_dict())
+                return enhanced.items
+            except Exception:  # noqa: BLE001 — never break retrieval
+                _logger.exception("hyde_rrf_failed_falling_back")
+                # fall through to the legacy single-query path
+
+        # ── Legacy single-query path (default) ──────────────────────────────
         agent_result = self.retrieval_agent.retrieve(
             db=db,
             tenant_id=tenant_id,
             question=safe_question,
-            top_k=max(safe_top_k * 3, 10),
+            top_k=agent_top_k,
             case_id=case_id,
             document_id=document_id,
         )
@@ -189,6 +267,12 @@ class RagService:
             "hit": hit,
             "backend": RagService._cache_backend(),
         }
+        # Surface the HyDE+RRF audit dict if retrieval ran with enhancement on,
+        # so the trust drawer / eval harness can read recall-relevant signals
+        # without changing public method signatures.
+        audit = _RETRIEVAL_AUDIT_VAR.get()
+        if audit:
+            response["retrieval_audit"] = audit
         return response
 
     @staticmethod
@@ -330,6 +414,7 @@ class RagService:
     ) -> Dict[str, Any]:
         safe_question = (question or "").strip()
         safe_top_k = self._sanitize_top_k(top_k)
+        _RETRIEVAL_AUDIT_VAR.set(None)  # reset so a stale audit cannot leak across calls
         cache_key = self._build_cache_key(
             tenant_id=tenant_id,
             question=safe_question,

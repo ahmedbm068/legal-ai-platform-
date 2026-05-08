@@ -1,7 +1,10 @@
 import json
+import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.orm import Session
 
 from backend.core.deps import get_db, get_current_user
@@ -207,11 +210,12 @@ def summarize_document(
             detail=str(exc)
         )
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — summarization pipeline can raise diverse upstream errors
+        logger.exception("summary_generation_failed", extra={"document_id": document_id})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Summary generation failed: {str(exc)}"
-        )
+            detail="Summary generation failed."
+        ) from exc
 
 
 @router.get(
@@ -278,11 +282,12 @@ def regenerate_document_summary(
             detail=str(exc)
         )
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — summarization pipeline can raise diverse upstream errors
+        logger.exception("summary_regeneration_failed", extra={"document_id": document_id})
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Summary regeneration failed: {str(exc)}"
-        )
+            detail="Summary regeneration failed."
+        ) from exc
 
 
 @router.get(

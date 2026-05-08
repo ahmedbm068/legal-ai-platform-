@@ -80,7 +80,10 @@ class CopilotRequest(BaseModel):
     mode: Literal["default", "legal_search"] = "default"
     legal_search_multilingual_output: bool = False
     legal_search_code_scope: List[str] = Field(default_factory=list, max_length=6)
-    reasoning_level: Literal["low", "medium", "high"] = "medium"
+    reasoning_level: Literal["low", "medium", "high", "deep"] = "medium"
+    output_language: Literal["fr", "ar", "en", "auto"] = "auto"
+    language_strict: bool = True
+    return_candidates: bool = False
     agent_mode: bool = False
     workspace_case_id: Optional[int] = Field(default=None, ge=1)
     workspace_document_id: Optional[int] = Field(default=None, ge=1)
@@ -314,6 +317,17 @@ class CopilotResponse(BaseModel):
     ai_insight: Optional[Dict[str, Any]] = None
     # Phase A1 — Verifier output: {state, reason, should_refuse}
     verification: Optional[Dict[str, Any]] = None
+    # Multilingual post-pass output: {requested, detected_input, final, translated, ...}
+    language: Optional[Dict[str, Any]] = None
+    # NLI faithfulness scoring (per-claim entailment vs. retrieved sources)
+    faithfulness: Optional[Dict[str, Any]] = None
+    # Dual-answer deep-reasoning judge payload (only when reasoning_level=deep)
+    judge: Optional[Dict[str, Any]] = None
+    candidates: Optional[List[Dict[str, Any]]] = None
+    # Pydantic-validated IRAC sections (only when LAI_ENABLE_STRUCTURED_IRAC=1)
+    irac: Optional[Dict[str, Any]] = None
+    # HyDE + multi-query + RRF retrieval audit (only when LAI_ENABLE_HYDE_RRF=1)
+    retrieval_audit: Optional[Dict[str, Any]] = None
 
 
 class ReasoningCandidateScore(BaseModel):

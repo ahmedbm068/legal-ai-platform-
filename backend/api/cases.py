@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pathlib import Path
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
@@ -8,6 +10,7 @@ from backend.models.case import Case
 from backend.models.user import User
 from backend.models.client import Client
 from backend.api.case_schema import CaseCreate, CaseUpdate, CaseOut
+from backend.api.voice_schema import VoiceUploadResponse
 from backend.services.ai.agents.summarization_agent import summarization_agent
 from backend.services.ai.agents.chronology_agent import chronology_agent
 from backend.services.ai.case_context_service import case_context_service
@@ -22,6 +25,13 @@ from backend.services.ai.workflow_blueprint_service import (
     workflow_blueprint_service,
 )
 from backend.models.document import Document
+from backend.services.use_cases.ingestion_use_case import ingestion_use_case
+
+_ALLOWED_AUDIO_CONTENT_TYPES = {
+    "audio/webm", "audio/wav", "audio/x-wav", "audio/mpeg",
+    "audio/mp4", "audio/mp3", "audio/ogg", "audio/x-m4a", "audio/m4a",
+}
+_ALLOWED_AUDIO_EXTENSIONS = {".webm", ".wav", ".mp3", ".mp4", ".ogg", ".m4a"}
 
 router = APIRouter(prefix="/cases", tags=["Cases"])
 
@@ -454,4 +464,138 @@ def preview_case_workflow(
         "case_flags": flags,
         "blueprint": blueprint.to_dict(),
         "availability": availability.to_dict(),
+    }
+
+
+@router.post("/{case_id}/voice/upload", response_model=VoiceUploadResponse, status_code=status.HTTP_201_CREATED)
+def upload_voice_for_case(
+    case_id: int,
+    background_tasks: BackgroundTasks,
+    recording_kind: str = Form(default="voice_note"),
+    call_session_id: int | None = Form(default=None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Phase A2 — case-scoped voice upload alias.
+
+    Mirrors POST /voice/upload but with case_id in the path so the URL
+    matches the spec: /cases/{case_id}/voice/upload.
+    """
+    case_query = db.query(Case).filter(Case.id == case_id, Case.deleted_at.is_(None))
+    case = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+
+    normalized_ct = (file.content_type or "").split(";")[0].strip().lower()
+    ext = Path(file.filename).suffix.lower()
+    if normalized_ct not in _ALLOWED_AUDIO_CONTENT_TYPES and ext not in _ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported audio format. Use webm, wav, mp3, mp4, or ogg.")
+
+    recording, job_payload = ingestion_use_case.create_voice_upload(
+        db=db,
+        case=case,
+        file=file,
+        uploaded_by_user_id=current_user.id,
+        call_session_id=call_session_id,
+        recording_kind=recording_kind,
+        background_tasks=background_tasks,
+    )
+    message = (
+        "Call recording uploaded. Transcription is queued."
+        if recording.recording_kind == "call_recording"
+        else "Voice recording uploaded. Transcription is queued."
+    )
+    return {"recording": recording, "message": message, "job": job_payload}
+
+
+@router.get("/{case_id}/parties", response_model=dict)
+def get_case_parties(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Phase A3 — party-role mapping from document insights.
+
+    Aggregates parties_detected from each document's cached insights_json.
+    No LLM call — pure read from already-extracted data.
+    """
+    case_query = db.query(Case).filter(Case.id == case_id, Case.deleted_at.is_(None))
+    case = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    documents = (
+        db.query(Document)
+        .filter(Document.case_id == case.id, Document.tenant_id == current_user.tenant_id)
+        .order_by(Document.upload_timestamp.desc(), Document.id.desc())
+        .all()
+    )
+
+    seen: set[str] = set()
+    parties: list[dict] = []
+    for doc in documents:
+        insights = doc.insights_json or {}
+        for party in insights.get("parties_detected") or []:
+            name = str(party or "").strip()
+            if name and name.lower() not in seen:
+                seen.add(name.lower())
+                parties.append({"name": name, "source_document": doc.filename, "role": None})
+
+    return {
+        "case_id": case_id,
+        "party_count": len(parties),
+        "parties": parties,
+        "documents_scanned": len(documents),
+    }
+
+
+@router.get("/{case_id}/obligations", response_model=dict)
+def get_case_obligations(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Phase A3 — obligation extraction from document insights.
+
+    Aggregates important_dates and legal_risks from each document's
+    cached insights_json. No LLM call.
+    """
+    case_query = db.query(Case).filter(Case.id == case_id, Case.deleted_at.is_(None))
+    case = apply_tenant_scope(case_query, Case.tenant_id, current_user).first()
+    if not case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    documents = (
+        db.query(Document)
+        .filter(Document.case_id == case.id, Document.tenant_id == current_user.tenant_id)
+        .order_by(Document.upload_timestamp.desc(), Document.id.desc())
+        .all()
+    )
+
+    deadlines: list[dict] = []
+    obligations: list[dict] = []
+
+    for doc in documents:
+        insights = doc.insights_json or {}
+        for date_item in insights.get("important_dates") or []:
+            label = str(date_item.get("label") or "").strip()
+            value = str(date_item.get("value") or "").strip()
+            if label or value:
+                deadlines.append({"label": label, "value": value, "source_document": doc.filename})
+        for risk in insights.get("legal_risks") or []:
+            text = str(risk or "").strip()
+            if text:
+                obligations.append({"description": text, "source_document": doc.filename, "type": "legal_risk"})
+
+    return {
+        "case_id": case_id,
+        "deadline_count": len(deadlines),
+        "obligation_count": len(obligations),
+        "deadlines": deadlines,
+        "obligations": obligations,
+        "documents_scanned": len(documents),
     }

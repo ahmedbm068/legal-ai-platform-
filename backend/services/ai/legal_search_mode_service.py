@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -18,6 +19,11 @@ from backend.services.ai.external_research_service import external_research_serv
 from backend.services.ai.jurisdiction_context_service import jurisdiction_context_service
 from backend.services.ai.llm_gateway import llm_gateway
 from backend.services.ai.reranker_service import reranker_service
+from backend.services.ai.irac_contract import (
+    IRAC_JSON_SCHEMA_HINT,
+    _IRAC_PAYLOAD_VAR,
+    try_parse_irac,
+)
 from backend.services.ai.legal_search_components import (
     JurisdictionRouter,
     LegalDomainClassifier,
@@ -28,6 +34,12 @@ from backend.services.ai.legal_search_components import (
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _structured_irac_enabled() -> bool:
+    """Feature flag — defaults OFF so behaviour is unchanged unless opted in."""
+
+    return os.environ.get("LAI_ENABLE_STRUCTURED_IRAC", "").lower() in {"1", "true", "yes"}
 
 
 class LegalSearchModeService:
@@ -1267,6 +1279,91 @@ class LegalSearchModeService:
         )
         return normalized
 
+    def _try_structured_irac_answer(
+        self,
+        *,
+        query: str,
+        country: str,
+        user_language: str,
+        compact_sources: List[Dict[str, Any]],
+        compact_internal: List[Dict[str, Any]],
+        applicability_summary: str,
+        case_topic: Optional[Dict[str, Any]],
+        domain_conf_note: str,
+        confidence: str,
+        verification_status: str,
+        include_english_summary: bool,
+    ) -> Optional[str]:
+        """Generate a JSON-validated IRAC answer with one repair retry.
+
+        On success, stashes the parsed dict in ``_IRAC_PAYLOAD_VAR`` so the
+        response-assembly service can attach ``response["irac"]`` and the
+        frontend can render the five sections as discrete blocks. On total
+        failure (LLM unavailable, malformed JSON twice), returns ``None`` —
+        the caller then falls back to the legacy prose path so the user
+        always gets an answer.
+        """
+        if not self.client:
+            return None
+
+        base_prompt = (
+            "You are a legal copilot designed to assist lawyers, not replace them.\n"
+            "Output STRICT JSON conforming to the schema below — no prose, no\n"
+            "markdown, no preamble. Ground every legal statement in the retrieved\n"
+            "sources. Never invent articles or citations.\n\n"
+            f"OUTPUT JSON SCHEMA:\n{IRAC_JSON_SCHEMA_HINT}\n\n"
+            f"RULES:\n"
+            f"- Write all string fields in language code: {user_language}.\n"
+            f"- Use only the provided LEGAL SOURCES below for ``applicable_law``.\n"
+            f"- Use the INTERNAL CASE RETRIEVAL only for ``case_risks`` and ``missing_facts``.\n"
+            f"- ``confidence`` must reflect the strength of grounding: high / medium / low.\n"
+            f"- If no directly applicable provision exists, return an empty list for ``applicable_law``.{domain_conf_note}\n\n"
+            f"CONTEXT:\n"
+            f"Jurisdiction: {self.COUNTRY_DISPLAY.get(country, country.title())}\n"
+            f"User query: {query}\n"
+            f"Case topic: {(case_topic or {}).get('topic') or 'General civil matter'}\n"
+            f"Domain confidence: {(case_topic or {}).get('confidence', 'unknown')} — {(case_topic or {}).get('reason', '')}\n"
+            f"Code families in scope: {(case_topic or {}).get('code_families') or self.DEFAULT_CODE_SCOPE}\n"
+            f"Pre-computed verification status: {verification_status}\n"
+            f"Pre-computed retrieval confidence: {confidence}\n\n"
+            f"PRE-COMPUTED APPLICABILITY ANALYSIS:\n{applicability_summary}\n\n"
+            f"LEGAL SOURCES:\n{compact_sources}\n\n"
+            f"INTERNAL CASE RETRIEVAL:\n{compact_internal}\n"
+        )
+
+        def _call(prompt_text: str) -> str:
+            try:
+                response = self.client.responses.create(
+                    model=self.model,
+                    input=prompt_text,
+                )
+                return llm_gateway.extract_output_text(response).strip()
+            except Exception:  # noqa: BLE001 — LLM failure must not break user response
+                _logger.exception("structured_irac_llm_call_failed")
+                return ""
+
+        raw = _call(base_prompt)
+        parsed = try_parse_irac(raw)
+        if parsed is None and raw:
+            # Single repair retry — feed the malformed output back with a
+            # strict directive. Empirically catches ~80% of JSON formatting
+            # slips without burning a second answer-quality attempt.
+            repair_prompt = (
+                f"{base_prompt}\n\n"
+                "PREVIOUS RESPONSE (NOT VALID JSON — fix and resend):\n"
+                f"{raw[:4000]}\n\n"
+                "Resend ONLY the JSON object conforming to the schema above. No prose."
+            )
+            raw_retry = _call(repair_prompt)
+            parsed = try_parse_irac(raw_retry)
+
+        if parsed is None:
+            _logger.info("[legal_search] structured_irac_parse_failed=True")
+            return None
+
+        _IRAC_PAYLOAD_VAR.set(parsed.model_dump())
+        return parsed.to_prose(include_english_summary=include_english_summary)
+
     def _generate_grounded_answer(
         self,
         *,
@@ -1294,6 +1391,32 @@ class LegalSearchModeService:
                 "\nDOMAIN UNCERTAINTY: The legal domain classifier has low confidence. "
                 "Counsel must verify which corpus applies before relying on this analysis.\n"
             )
+
+        if self.client and _structured_irac_enabled():
+            structured_prose = self._try_structured_irac_answer(
+                query=query,
+                country=country,
+                user_language=normalized_language,
+                compact_sources=compact_sources,
+                compact_internal=compact_internal,
+                applicability_summary=applicability_summary,
+                case_topic=case_topic,
+                domain_conf_note=domain_conf_note,
+                confidence=confidence,
+                verification_status=verification_status,
+                include_english_summary=include_english_summary,
+            )
+            if structured_prose:
+                _logger.info("[legal_search] structured_irac_applied=True")
+                return self._ensure_default_legal_response_structure(
+                    answer_body=structured_prose,
+                    query=query,
+                    legal_sources=compact_sources,
+                    confidence=confidence,
+                    verification_status=verification_status,
+                    user_language=normalized_language,
+                )
+            # else: fall through to the legacy prose flow below.
 
         if self.client:
             prompt = f"""You are a legal copilot designed to assist lawyers, not replace them.

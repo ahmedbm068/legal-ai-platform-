@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+import logging
 import re
 import json
 
@@ -8,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from backend.core.deps import get_db, get_current_user
+from backend.core.llm_call_context import llm_call_context_dep
 from backend.core.permissions import require_lawyer
 from backend.core.rate_limiter import limiter
 from backend.models.case import Case
@@ -33,6 +35,10 @@ from backend.services.ai.verifier_service import (
     verifier_service,
     build_weak_grounding_problem,
 )
+from backend.services.ai.multilingual_service import multilingual_service
+from backend.services.ai.nli_faithfulness_service import nli_faithfulness_service
+from backend.services.ai.dual_answer_service import dual_answer_service
+import os as _os
 from backend.services.ai.drafting_outline_service import drafting_outline_service
 from backend.services.ai.citation_insertion_service import citation_insertion_service
 from backend.services.ai.case_context_service import case_context_service
@@ -76,7 +82,7 @@ def _parse_json_payload(raw_text: str) -> dict | None:
     try:
         parsed = json.loads(payload_text)
         return parsed if isinstance(parsed, dict) else None
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError):
         pass
 
     fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", payload_text, flags=re.IGNORECASE)
@@ -84,7 +90,7 @@ def _parse_json_payload(raw_text: str) -> dict | None:
         try:
             parsed = json.loads(fenced_match.group(1))
             return parsed if isinstance(parsed, dict) else None
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
     start = payload_text.find("{")
@@ -93,7 +99,7 @@ def _parse_json_payload(raw_text: str) -> dict | None:
         try:
             parsed = json.loads(payload_text[start : end + 1])
             return parsed if isinstance(parsed, dict) else None
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
     return None
@@ -128,7 +134,7 @@ def _loads_json_object(raw_value: str | None) -> dict:
     try:
         payload = json.loads(raw_value)
         return payload if isinstance(payload, dict) else {}
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError):
         return {}
 
 
@@ -138,7 +144,7 @@ def _loads_json_list(raw_value: str | None) -> list:
     try:
         payload = json.loads(raw_value)
         return payload if isinstance(payload, list) else []
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError):
         return []
 
 
@@ -277,7 +283,8 @@ def copilot(
     response: Response,
     data: CopilotRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _llm_ctx: str = Depends(llm_call_context_dep),
 ):
     _token = _SKIP_CACHE.set(data.skip_cache)
     try:
@@ -293,6 +300,9 @@ def copilot(
             legal_search_multilingual_output=data.legal_search_multilingual_output,
             legal_search_code_scope=data.legal_search_code_scope,
             reasoning_level=data.reasoning_level,
+            output_language=data.output_language,
+            language_strict=data.language_strict,
+            return_candidates=data.return_candidates,
             agent_mode=data.agent_mode,
             workspace_case_id=data.workspace_case_id,
             workspace_document_id=data.workspace_document_id,
@@ -306,6 +316,40 @@ def copilot(
     # ── Phase A1 — Verifier: classify response into grounded/partial/refused ──
     verification_outcome = verifier_service.verify(response)
     response["verification"] = verification_outcome.to_dict()
+    # ── Deep-reasoning dual-answer + judge: when reasoning_level=="deep",
+    # generate a steelman counter-candidate and let the judge agent choose.
+    # Replaces response['answer'] with the judge's pick BEFORE downstream
+    # scoring so faithfulness/translation operate on the final text.
+    if data.reasoning_level == "deep":
+        try:
+            dual_answer_service.apply_to_response(
+                response,
+                query=data.message,
+                output_language=data.output_language,
+            )
+        except Exception:  # noqa: BLE001 — must never break the user response
+            logging.getLogger(__name__).exception("dual_answer_enhancement_failed")
+    # ── NLI-based citation faithfulness scoring (opt-in via env). Computed
+    # against the source-language answer BEFORE the multilingual pass so the
+    # premise/hypothesis languages match the retrieved sources.
+    if _os.environ.get("LAI_ENABLE_NLI_FAITHFULNESS", "").lower() in {"1", "true", "yes"}:
+        try:
+            faithfulness_report = nli_faithfulness_service.score_response(response)
+            response["faithfulness"] = faithfulness_report.to_dict()
+        except Exception:  # noqa: BLE001 — must never break the user response
+            logging.getLogger(__name__).exception("nli_faithfulness_scoring_failed")
+    # ── Multilingual post-pass: translate the answer into the requested
+    # output language. Citations and statute names stay in source language.
+    # Skipped automatically when output_language == "auto" or already matches.
+    multilingual_service.ensure_language(
+        response,
+        target_language=data.output_language,
+        language_strict=data.language_strict,
+    )
+    # ── Strip the candidates payload if the client did not request them
+    # (they can be ~10KB; only useful for the demo's "show candidates" UI).
+    if not data.return_candidates and "candidates" in response:
+        response.pop("candidates", None)
     if verification_outcome.should_refuse:
         problem = build_weak_grounding_problem(
             detail=(
@@ -348,6 +392,7 @@ def draft_outline(
     data: DraftOutlineRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _llm_ctx: str = Depends(llm_call_context_dep),
 ):
     """Phase A2 — Outline-first drafting flow.
 
@@ -421,10 +466,13 @@ def draft_resolve_markers(
 
 
 @router.post("/optimize-prompt", response_model=PromptOptimizationResponse)
+@limiter.limit("60/minute")
 def optimize_prompt(
+    request: Request,
     data: PromptOptimizationRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _llm_ctx: str = Depends(llm_call_context_dep),
 ):
     target_type: str | None = None
     target_id: int | None = None
@@ -674,7 +722,9 @@ def list_artifact_versions(
 
 
 @router.post("/artifacts/versions/edit", response_model=ArtifactVersionMutationResponse)
+@limiter.limit("60/minute")
 def create_artifact_version_edit(
+    request: Request,
     data: ArtifactVersionManualEditRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -712,7 +762,9 @@ def create_artifact_version_edit(
 
 
 @router.post("/artifacts/versions/agent-revise", response_model=ArtifactVersionMutationResponse)
+@limiter.limit("20/minute")
 def revise_artifact_version_with_agent(
+    request: Request,
     data: ArtifactVersionAgentReviseRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -876,9 +928,12 @@ def provider_status(
 
 
 @router.post("/test-llm", response_model=LLMTestResponse)
+@limiter.limit("20/minute")
 def test_llm(
+    request: Request,
     data: LLMTestRequest,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    _llm_ctx: str = Depends(llm_call_context_dep),
 ):
     _ = current_user
     client = llm_gateway.create_client()
@@ -916,9 +971,12 @@ def test_llm(
 
 
 @router.post("/translate", response_model=SemanticTranslateResponse)
+@limiter.limit("60/minute")
 def semantic_translate(
+    request: Request,
     data: SemanticTranslateRequest,
     current_user: User = Depends(get_current_user),
+    _llm_ctx: str = Depends(llm_call_context_dep),
 ):
     _ = current_user
     normalized_texts = [str(text or "").strip() for text in data.texts]
@@ -982,8 +1040,10 @@ Input JSON:
                     "translations": cleaned,
                     "used_fallback": False,
                 }
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 — LLM SDK can raise diverse provider errors
+        logging.getLogger(__name__).warning(
+            "semantic_translate.llm_failed", exc_info=exc
+        )
 
     return {
         "target_language": data.target_language,

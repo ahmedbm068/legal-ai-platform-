@@ -429,24 +429,116 @@ export interface ImageDocumentBatch {
   completed_at?: string | null;
 }
 
+export interface BigAgentDescriptor {
+  name: string;
+  tier: string;
+  ui_route?: string | null;
+  mini_agents_used: string[];
+  intents_handled: string[];
+  description: string;
+  delegates_to: string[];
+  last_24h_call_count?: number;
+}
+
+export interface CaseWorkspaceSnapshot {
+  case_id: number;
+  scope: string;
+  case: Record<string, unknown> | null;
+  timeline: Array<Record<string, unknown>>;
+  risk_signals: Array<Record<string, unknown> | string>;
+  memory: Record<string, unknown>;
+  big_agents: BigAgentDescriptor[];
+}
+
+export interface ReviewTableQuestion {
+  id: string;
+  label: string;
+  kind: string;
+}
+
+export interface ReviewTableCell {
+  question_id: string;
+  kind: string;
+  values: string[];
+  evidence_strength: "strong" | "medium" | "weak" | "none" | string;
+  is_empty: boolean;
+}
+
 export interface ReviewTableRow {
-  document_id: number;
+  document_id: number | null;
   filename: string;
-  processing_status: string;
-  summary_status: string;
   document_type?: string | null;
-  document_type_confidence?: number | null;
-  parties: string[];
-  important_dates: string[];
-  legal_risks: string[];
-  recommended_actions: string[];
-  source_kind: string;
+  cells: ReviewTableCell[];
 }
 
 export interface CaseReviewTable {
-  case_id: number;
-  row_count: number;
+  case_id: number | null;
+  questions: ReviewTableQuestion[];
   rows: ReviewTableRow[];
+  coverage: number;
+}
+
+export interface WorkflowStep {
+  name: string;
+  description: string;
+  agent: string;
+  output_keys: string[];
+}
+
+export interface WorkflowBlueprint {
+  id: string;
+  title: string;
+  description: string;
+  harvey_equivalent?: string | null;
+  estimated_runtime_seconds: number;
+  prerequisites: string[];
+  steps: WorkflowStep[];
+  output_keys: string[];
+  executor: string;
+}
+
+export interface WorkflowAvailability {
+  blueprint_id: string;
+  status: "available" | "blocked" | string;
+  missing_prerequisites: string[];
+}
+
+export interface CaseWorkflowCatalog {
+  case_id: number;
+  case_flags: Record<string, boolean>;
+  blueprints: WorkflowBlueprint[];
+  availability: WorkflowAvailability[];
+}
+
+export interface CaseWorkflowPreview {
+  case_id: number;
+  case_flags: Record<string, boolean>;
+  blueprint: WorkflowBlueprint;
+  availability: WorkflowAvailability;
+}
+
+export interface DraftOutlineSection {
+  heading: string;
+  purpose: string;
+  suggested_citations: string[];
+  required: boolean;
+}
+
+export interface DraftOutline {
+  intent: string;
+  title: string;
+  tone: string;
+  audience: string;
+  sections: DraftOutlineSection[];
+  case_hints: string[];
+  jurisdiction?: string | null;
+}
+
+export interface CitationInsertionResponse {
+  body: string;
+  inserted: boolean;
+  label: string | null;
+  reason: string;
 }
 
 export interface PromptLibraryEntry {
@@ -592,6 +684,34 @@ export interface CopilotResponse {
   review_record_id?: number | null;
   open_editor?: boolean;
   draft_document?: DraftDocumentPayload | null;
+  verification_state?: "grounded" | "partial" | "refused" | null;
+  verification?: {
+    state?: "grounded" | "partial" | "refused";
+    reason?: string;
+    should_refuse?: boolean;
+  } | null;
+  irac?: {
+    case_risks?: string;
+    applicable_law?: Array<{
+      reference: string;
+      code_family?: string | null;
+      summary: string;
+      applicability?: "direct" | "partial" | "uncertain";
+    }>;
+    legal_assessment?: string;
+    missing_facts?: string[];
+    counsel_note?: string;
+    confidence?: "high" | "medium" | "low";
+  } | null;
+  retrieval_audit?: {
+    used_hyde?: boolean;
+    used_multi_query?: boolean;
+    queries?: string[];
+    hyde_preview?: string | null;
+    fusion_method?: string;
+    candidate_pool_size?: number;
+    final_count?: number;
+  } | null;
   ai_insight?: {
     grounding_type?: string;
     confidence_level?: string;
@@ -599,6 +719,35 @@ export interface CopilotResponse {
     grounding_description?: string;
     lawyer_note?: string;
   } | null;
+  language?: {
+    requested?: string;
+    detected_input?: string;
+    final?: string;
+    translated?: boolean;
+    used_fallback?: boolean;
+    fallback_reason?: string | null;
+  } | null;
+  faithfulness?: {
+    score?: number;
+    label?: "supported" | "partial" | "unsupported";
+    claims?: Array<{
+      text: string;
+      best_score: number;
+      label: "entailment" | "neutral" | "contradiction";
+      best_source_index: number | null;
+    }>;
+    summary?: string;
+  } | null;
+  judge?: {
+    chosen?: "A" | "B" | "merge";
+    reasoning?: string;
+    scores?: Record<string, number>;
+  } | null;
+  candidates?: Array<{
+    id: "A" | "B";
+    persona: string;
+    text: string;
+  }> | null;
 }
 
 export interface DraftDocumentPayload {
@@ -842,6 +991,47 @@ export interface ConsultationFromTranscriptResponse {
   consultation_request: ConsultationRequest;
 }
 
+export interface SuccessionCalculateRequest {
+  spouse_kind: "husband" | "wife" | "none";
+  sons: number;
+  daughters: number;
+  father_alive: boolean;
+  mother_alive: boolean;
+  full_brothers: number;
+  full_sisters: number;
+  paternal_brothers: number;
+  paternal_sisters: number;
+  maternal_siblings: number;
+  estate_value_tnd: number | null;
+}
+
+export interface SuccessionHeir {
+  heir: string;
+  share_fraction: string;
+  share_percent: number;
+  share_amount_tnd: number | null;
+  article_refs: string[];
+  reasoning: string;
+}
+
+export interface SuccessionCitation {
+  article: string;
+  code_name: string;
+  summary: string;
+  snippet: string;
+  url: string | null;
+}
+
+export interface SuccessionCalculateResponse {
+  heirs: SuccessionHeir[];
+  total_distributed: string;
+  total_percent: number;
+  radd_applied: boolean;
+  awl_applied: boolean;
+  notes: string[];
+  citations: SuccessionCitation[];
+}
+
 export interface ChatMessage {
   id: string;
   role: "assistant" | "user";
@@ -877,6 +1067,8 @@ export interface ChatMessage {
       mimeType: string;
     }>;
     rawAnswer?: string | null;
+    verificationState?: "grounded" | "partial" | "refused" | null;
+    verificationReason?: string | null;
     aiInsight?: {
       grounding_type?: string;
       confidence_level?: string;
@@ -884,5 +1076,11 @@ export interface ChatMessage {
       grounding_description?: string;
       lawyer_note?: string;
     } | null;
+    language?: CopilotResponse["language"];
+    faithfulness?: CopilotResponse["faithfulness"];
+    judge?: CopilotResponse["judge"];
+    candidates?: CopilotResponse["candidates"];
+    irac?: CopilotResponse["irac"];
+    retrievalAudit?: CopilotResponse["retrieval_audit"];
   };
 }

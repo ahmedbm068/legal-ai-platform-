@@ -1888,6 +1888,233 @@
     gap: 0.65rem;
 }
 
+.as-button {
+    border: 1px solid var(--shell-border);
+    border-radius: 9px;
+    background: var(--shell-panel);
+    color: var(--shell-accent);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    padding: 0.5rem 0.72rem;
+    text-decoration: none;
+}
+
+.as-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.primary-action {
+    background: var(--shell-accent);
+    border-color: var(--shell-accent);
+    color: var(--shell-panel);
+}
+
+.lawyer-feature-surface {
+    display: grid;
+    gap: 1rem;
+}
+
+.lawyer-feature-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.85rem;
+}
+
+.lawyer-feature-card,
+.workflow-preview-panel {
+    border: 1px solid var(--shell-border);
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--shell-panel) 94%, transparent);
+    padding: 0.85rem;
+}
+
+.lawyer-feature-card h5,
+.workflow-preview-panel h5 {
+    margin: 0 0 0.55rem;
+    font-size: 0.95rem;
+}
+
+.feature-key-value-list {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.feature-key-value-list p {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid var(--shell-border);
+    padding-bottom: 0.35rem;
+}
+
+.feature-key-value-list span {
+    color: var(--shell-muted);
+    text-align: right;
+}
+
+.agent-chip-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.7rem;
+}
+
+.agent-chip-card {
+    border: 1px solid var(--shell-border);
+    border-radius: 10px;
+    padding: 0.7rem;
+    background: #fff;
+    display: grid;
+    gap: 0.28rem;
+}
+
+.agent-chip-card span,
+.agent-chip-card small,
+.agent-chip-card p {
+    color: var(--shell-muted);
+    margin: 0;
+}
+
+.review-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--shell-border);
+    border-radius: 12px;
+}
+
+.lawyer-review-table {
+    width: 100%;
+    min-width: 880px;
+    border-collapse: collapse;
+    background: var(--shell-panel);
+}
+
+.lawyer-review-table th,
+.lawyer-review-table td {
+    border-bottom: 1px solid var(--shell-border);
+    padding: 0.7rem;
+    text-align: left;
+    vertical-align: top;
+    font-size: 0.86rem;
+}
+
+.lawyer-review-table th {
+    background: var(--shell-accent-soft);
+    color: var(--shell-ink);
+    font-weight: 800;
+}
+
+.lawyer-review-table td:first-child {
+    min-width: 220px;
+}
+
+.lawyer-review-table td span,
+.lawyer-review-table td em,
+.lawyer-review-table td p {
+    color: var(--shell-muted);
+    margin: 0 0 0.25rem;
+}
+
+.lawyer-review-table .evidence-strong {
+    background: color-mix(in srgb, var(--shell-ok) 9%, transparent);
+}
+
+.lawyer-review-table .evidence-medium {
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.lawyer-review-table .evidence-none,
+.lawyer-review-table .evidence-weak {
+    background: rgba(148, 163, 184, 0.08);
+}
+
+.workflow-blueprint-layout {
+    display: grid;
+    grid-template-columns: minmax(260px, 0.85fr) minmax(320px, 1.15fr);
+    gap: 0.9rem;
+}
+
+.workflow-blueprint-list,
+.workflow-step-list {
+    display: grid;
+    gap: 0.7rem;
+}
+
+.workflow-blueprint-card {
+    border: 1px solid var(--shell-border);
+    border-radius: 12px;
+    background: var(--shell-panel);
+    color: var(--shell-ink);
+    cursor: pointer;
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.8rem;
+    text-align: left;
+    font: inherit;
+}
+
+.workflow-blueprint-card.active {
+    border-color: var(--shell-accent);
+    box-shadow: 0 0 0 3px var(--shell-accent-soft);
+}
+
+.workflow-blueprint-card p,
+.workflow-blueprint-card small,
+.workflow-blueprint-card em,
+.workflow-step-list p,
+.workflow-step-list span {
+    color: var(--shell-muted);
+    margin: 0;
+}
+
+.workflow-step-list {
+    list-style: none;
+    margin: 0.85rem 0 0;
+    padding: 0;
+}
+
+.workflow-step-list li {
+    border: 1px solid var(--shell-border);
+    border-radius: 10px;
+    padding: 0.7rem;
+}
+
+.case-metric-grid.compact {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.drafting-control-grid {
+    display: grid;
+    grid-template-columns: minmax(160px, 0.65fr) minmax(220px, 1fr) auto;
+    gap: 0.75rem;
+    align-items: end;
+}
+
+.drafting-control-grid label,
+.draft-body-editor {
+    display: grid;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.drafting-control-grid input,
+.drafting-control-grid select,
+.draft-body-editor textarea {
+    border: 1px solid var(--shell-border);
+    border-radius: 10px;
+    background: var(--shell-panel);
+    color: var(--shell-ink);
+    font: inherit;
+    padding: 0.65rem;
+}
+
+.draft-body-editor textarea {
+    min-height: 260px;
+    resize: vertical;
+    line-height: 1.55;
+}
+
 .shell-action-row button,
 .shell-composer button,
 .shell-action-link {
@@ -2873,6 +3100,10 @@
 [data-theme="dark"] .shell-card,
 [data-theme="dark"] .shell-case-row,
 [data-theme="dark"] .shell-list li,
+[data-theme="dark"] .agent-chip-card,
+[data-theme="dark"] .lawyer-feature-card,
+[data-theme="dark"] .workflow-blueprint-card,
+[data-theme="dark"] .workflow-preview-panel,
 [data-theme="dark"] .shell-tab,
 [data-theme="dark"] .shell-tab-panel,
 [data-theme="dark"] .shell-table td,
@@ -4428,7 +4659,8 @@
     color: var(--copilot-warning);
 }
 
-.assistant-meta-badge.trust-not-grounded {
+.assistant-meta-badge.trust-not-grounded,
+.assistant-meta-badge.trust-refused {
     border-color: rgba(217, 134, 125, 0.54);
     color: var(--copilot-danger);
 }
@@ -5432,7 +5664,7 @@
 }
 
 .minimal-assistant-page .message-head small,
-.minimal-assistant-page .assistant-meta-badge:not(.ai):not(.trust-grounded):not(.trust-partial):not(.trust-not-grounded),
+.minimal-assistant-page .assistant-meta-badge:not(.ai):not(.trust-grounded):not(.trust-partial):not(.trust-not-grounded):not(.trust-refused),
 .minimal-assistant-page .copilot-bubble>.legal-quality-strip,
 .minimal-assistant-page .assistant-grounding-warning.grounded,
 .minimal-assistant-page .trust-risk-panel,
@@ -8268,6 +8500,16 @@
 }
 
 @media (max-width: 768px) {
+    .lawyer-feature-grid,
+    .workflow-blueprint-layout,
+    .drafting-control-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .case-metric-grid.compact {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .db2-kpi-strip {
         grid-template-columns: repeat(2, 1fr);
     }

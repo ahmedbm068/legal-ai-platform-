@@ -31,6 +31,9 @@ class CopilotPipelineRequest(BaseModel):
     legal_search_multilingual_output: bool = False
     legal_search_code_scope: list[str] = Field(default_factory=list)
     reasoning_level: str = "medium"
+    output_language: str = "auto"
+    language_strict: bool = True
+    return_candidates: bool = False
     agent_mode: bool = False
     workspace_case_id: int | None = None
     workspace_document_id: int | None = None

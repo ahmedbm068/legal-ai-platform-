@@ -314,6 +314,53 @@ _BLUEPRINTS: dict[str, WorkflowBlueprint] = {
         output_keys=("transcript", "summary", "action_items", "follow_up_email"),
         executor="copilot_drafting_execution_service",
     ),
+    "succession_entitlement_analysis": WorkflowBlueprint(
+        id="succession_entitlement_analysis",
+        title="Succession entitlement analysis (Tunisia)",
+        description=(
+            "Compute per-heir entitlement under the Tunisian Code de Statut "
+            "Personnel articles 85-152. Pure rules engine — no LLM call. "
+            "Returns exact rational shares, percentages, and TND amounts "
+            "with citations to the official articles."
+        ),
+        harvey_equivalent=None,
+        estimated_runtime_seconds=2,
+        prerequisites=(PREREQ_HAS_JURISDICTION,),
+        steps=(
+            WorkflowStep(
+                name="Identify heirs",
+                description="Enumerate spouse, descendants, ascendants, collaterals.",
+                agent="succession_calculator",
+                output_keys=("identified_heirs",),
+            ),
+            WorkflowStep(
+                name="Apply fardh (Quranic shares)",
+                description="Fixed fractions for spouse, parents, daughters-only, uterine siblings.",
+                agent="succession_calculator",
+                output_keys=("fardh_shares",),
+            ),
+            WorkflowStep(
+                name="Apply asaba (residuary)",
+                description="Sons and daughters absorb the residue at 2:1; father is asaba in absence of male descendants.",
+                agent="succession_calculator",
+                output_keys=("asaba_shares",),
+            ),
+            WorkflowStep(
+                name="Apply ʿawl / radd",
+                description="Scale proportionally when fardh sum > 1; return residue to fardh heirs when sum < 1.",
+                agent="succession_calculator",
+                output_keys=("awl_radd_outcome",),
+            ),
+            WorkflowStep(
+                name="Cite articles",
+                description="Attach short summaries of CSP arts 85-152 to each heir share.",
+                agent="csp_article_lookup",
+                output_keys=("citations",),
+            ),
+        ),
+        output_keys=("heirs", "radd_applied", "awl_applied", "citations"),
+        executor="succession_calculator",
+    ),
 }
 
 

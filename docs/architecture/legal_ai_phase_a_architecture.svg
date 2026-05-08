@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-labelledby="title desc">
+  <title id="title">Legal AI Platform Phase A Architecture</title>
+  <desc id="desc">Architecture diagram showing frontend apps, FastAPI backend, copilot orchestrator, big agents, verifier, trace layer, data stores, and final responses.</desc>
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f6fff"/>
+      <stop offset="1" stop-color="#5b5ce2"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e7f5ff"/>
+      <stop offset="1" stop-color="#d8ebff"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e9fbe9"/>
+      <stop offset="1" stop-color="#dff5d1"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff5df"/>
+      <stop offset="1" stop-color="#ffe2b5"/>
+    </linearGradient>
+    <linearGradient id="purple" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f0e7ff"/>
+      <stop offset="1" stop-color="#e1d3ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-20%" width="130%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.16"/>
+    </filter>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2454c7"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/>
+    </marker>
+    <marker id="arrowGray" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <style>
+      .bg { fill: #f8fbff; }
+      .title { font: 800 28px Arial, sans-serif; fill: #102a5c; }
+      .subtitle { font: 600 15px Arial, sans-serif; fill: #475569; }
+      .label { font: 700 18px Arial, sans-serif; fill: #102a5c; }
+      .small { font: 500 13px Arial, sans-serif; fill: #334155; }
+      .tiny { font: 500 11px Arial, sans-serif; fill: #475569; }
+      .white { fill: #ffffff; }
+      .whiteText { font: 800 20px Arial, sans-serif; fill: #ffffff; }
+      .whiteSmall { font: 600 12px Arial, sans-serif; fill: #eaf2ff; }
+      .pillText { font: 700 12px Arial, sans-serif; fill: #ffffff; }
+      .box { stroke: #9ab5d9; stroke-width: 1.5; filter: url(#shadow); }
+      .thinBox { stroke: #b8c7dc; stroke-width: 1.2; }
+      .newBadge { font: 800 10px Arial, sans-serif; fill: #7c2d12; }
+      .node { fill: #ffffff; stroke: #b8c7dc; stroke-width: 1.2; }
+      .arrowBlue { stroke: #2454c7; stroke-width: 3; fill: none; marker-end: url(#arrowBlue); }
+      .arrowGreen { stroke: #15803d; stroke-width: 3; fill: none; marker-end: url(#arrowGreen); }
+      .arrowGray { stroke: #64748b; stroke-width: 2.2; fill: none; marker-end: url(#arrowGray); }
+      .dash { stroke-dasharray: 7 6; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1400" height="820"/>
+  <text class="title" x="42" y="45">Legal AI Platform - Current Architecture After Phase A</text>
+  <text class="subtitle" x="42" y="72">Lawyer workspace + client portal + admin console feeding a verifier-gated, traceable multi-agent backend</text>
+
+  <!-- Entry points -->
+  <rect class="box" x="42" y="120" width="190" height="80" rx="12" fill="url(#blue)"/>
+  <text class="whiteText" x="84" y="153">Lawyer UI</text>
+  <text class="whiteSmall" x="72" y="178">frontend workspace</text>
+
+  <rect class="box" x="42" y="222" width="190" height="80" rx="12" fill="url(#green)"/>
+  <text class="label" x="78" y="254">Client Portal</text>
+  <text class="small" x="73" y="280">intake, docs, assistant</text>
+
+  <rect class="box" x="42" y="324" width="190" height="80" rx="12" fill="url(#purple)"/>
+  <text class="label" x="79" y="356">Admin App</text>
+  <text class="small" x="66" y="382">health, users, audit, trace</text>
+
+  <rect class="box" x="42" y="445" width="190" height="170" rx="12" fill="#ffffff"/>
+  <text class="label" x="82" y="475">Inputs</text>
+  <rect class="node" x="65" y="495" width="68" height="48" rx="8"/>
+  <text class="tiny" x="78" y="516">PDF</text>
+  <text class="tiny" x="69" y="533">contracts</text>
+  <rect class="node" x="142" y="495" width="68" height="48" rx="8"/>
+  <text class="tiny" x="154" y="516">OCR</text>
+  <text class="tiny" x="150" y="533">scans</text>
+  <rect class="node" x="65" y="553" width="68" height="48" rx="8"/>
+  <text class="tiny" x="73" y="574">voice</text>
+  <text class="tiny" x="70" y="591">calls</text>
+  <rect class="node" x="142" y="553" width="68" height="48" rx="8"/>
+  <text class="tiny" x="154" y="574">case</text>
+  <text class="tiny" x="150" y="591">data</text>
+
+  <!-- FastAPI gateway -->
+  <rect class="box" x="300" y="104" width="420" height="96" rx="12" fill="url(#blue)"/>
+  <text class="whiteText" x="444" y="139">FastAPI Backend</text>
+  <text class="whiteSmall" x="385" y="166">single app in backend/main.py with routed domains</text>
+  <text class="whiteSmall" x="352" y="187">auth - cases - assistant - /ai - documents - admin - portal</text>
+
+  <path class="arrowBlue" d="M232 160 C252 160 268 152 296 152"/>
+  <path class="arrowBlue" d="M232 262 C262 262 260 172 296 172"/>
+  <path class="arrowBlue" d="M232 364 C265 364 261 188 296 188"/>
+  <path class="arrowGray" d="M232 530 C264 530 262 197 296 192"/>
+
+  <!-- Orchestrator -->
+  <rect class="box" x="322" y="245" width="376" height="228" rx="14" fill="url(#cyan)"/>
+  <text class="label" x="426" y="278">Copilot Orchestrator</text>
+  <text class="small" x="418" y="300">runtime_copilot_orchestrator</text>
+
+  <rect x="365" y="322" width="290" height="32" rx="16" fill="url(#blue)"/>
+  <text class="pillText" x="444" y="342">intent + mode routing</text>
+  <rect x="365" y="364" width="290" height="32" rx="16" fill="url(#blue)"/>
+  <text class="pillText" x="424" y="384">matter classification + workflow plan</text>
+  <rect x="365" y="406" width="290" height="32" rx="16" fill="url(#blue)"/>
+  <text class="pillText" x="424" y="426">select big agent + mini-agent sequence</text>
+  <text class="tiny" x="392" y="456">final response assembly + metadata + trace sidecar</text>
+
+  <path class="arrowBlue" d="M510 200 L510 240"/>
+
+  <!-- Data layer -->
+  <rect class="box" x="280" y="545" width="470" height="212" rx="14" fill="#ffffff"/>
+  <text class="label" x="430" y="578">Knowledge + Data Layer</text>
+  <rect class="node" x="306" y="604" width="132" height="58" rx="10" fill="#edf6ff"/>
+  <text class="small" x="336" y="627">Postgres</text>
+  <text class="tiny" x="322" y="646">cases, docs, traces</text>
+  <rect class="node" x="456" y="604" width="132" height="58" rx="10" fill="#edf6ff"/>
+  <text class="small" x="493" y="627">MinIO</text>
+  <text class="tiny" x="474" y="646">file artifacts</text>
+  <rect class="node" x="606" y="604" width="118" height="58" rx="10" fill="#edf6ff"/>
+  <text class="small" x="637" y="627">FAISS</text>
+  <text class="tiny" x="621" y="646">local vectors</text>
+  <rect class="node" x="306" y="681" width="132" height="58" rx="10" fill="#fff7ed"/>
+  <text class="small" x="326" y="704">LLM Gateway</text>
+  <text class="tiny" x="324" y="723">OpenAI/Groq ready</text>
+  <rect class="node" x="456" y="681" width="132" height="58" rx="10" fill="#fff7ed"/>
+  <text class="small" x="494" y="704">OCR</text>
+  <text class="tiny" x="478" y="723">PDF + images</text>
+  <rect class="node" x="606" y="681" width="118" height="58" rx="10" fill="#fff7ed"/>
+  <text class="small" x="637" y="704">n8n</text>
+  <text class="tiny" x="619" y="723">calls + hooks</text>
+  <path class="arrowGray" d="M510 473 C510 505 512 520 512 541"/>
+
+  <!-- Agent layer -->
+  <rect class="box" x="795" y="104" width="330" height="356" rx="14" fill="url(#purple)"/>
+  <text class="label" x="883" y="137">Big Agent Layer</text>
+  <text class="small" x="847" y="160">registry + descriptors added in Phase A</text>
+  <rect x="1022" y="120" width="62" height="22" rx="11" fill="#fed7aa"/>
+  <text class="newBadge" x="1037" y="135">NEW</text>
+
+  <rect class="node" x="825" y="186" width="128" height="58" rx="10" fill="#ffffff"/>
+  <text class="small" x="849" y="209">Research</text>
+  <text class="tiny" x="842" y="228">legal search + RAG</text>
+  <rect class="node" x="968" y="186" width="128" height="58" rx="10" fill="#ffffff"/>
+  <text class="small" x="996" y="209">Drafting</text>
+  <text class="tiny" x="991" y="228">outlines + cites</text>
+  <rect class="node" x="825" y="262" width="128" height="58" rx="10" fill="#ffffff"/>
+  <text class="small" x="858" y="285">Review</text>
+  <text class="tiny" x="839" y="304">review table v2</text>
+  <rect class="node" x="968" y="262" width="128" height="58" rx="10" fill="#ffffff"/>
+  <text class="small" x="993" y="285">Workflow</text>
+  <text class="tiny" x="987" y="304">blueprint catalog</text>
+  <rect class="node" x="895" y="338" width="128" height="58" rx="10" fill="#ffffff"/>
+  <text class="small" x="928" y="361">Workspace</text>
+  <text class="tiny" x="911" y="380">case workspace v2</text>
+
+  <path class="arrowBlue" d="M698 352 C738 352 750 282 790 282"/>
+
+  <!-- Mini-agent pipeline -->
+  <rect class="box" x="798" y="498" width="330" height="259" rx="14" fill="#ffffff"/>
+  <text class="label" x="872" y="530">Mini-Agent Pipeline</text>
+  <rect class="node" x="828" y="555" width="126" height="44" rx="9" fill="#eef7ff"/>
+  <text class="tiny" x="858" y="581">retrieval</text>
+  <rect class="node" x="972" y="555" width="126" height="44" rx="9" fill="#eef7ff"/>
+  <text class="tiny" x="999" y="581">legal search</text>
+  <rect class="node" x="828" y="615" width="126" height="44" rx="9" fill="#eef7ff"/>
+  <text class="tiny" x="853" y="641">reasoning</text>
+  <rect class="node" x="972" y="615" width="126" height="44" rx="9" fill="#eef7ff"/>
+  <text class="tiny" x="1003" y="641">drafting</text>
+  <rect class="node" x="828" y="675" width="126" height="44" rx="9" fill="#eef7ff"/>
+  <text class="tiny" x="853" y="701">composer</text>
+  <rect class="node" x="972" y="675" width="126" height="44" rx="9" fill="#fee2e2"/>
+  <text class="tiny" x="1006" y="701">verifier</text>
+  <path class="arrowGray" d="M890 460 C890 478 890 483 890 494"/>
+  <path class="arrowGray" d="M1034 460 C1034 478 1034 483 1034 494"/>
+
+  <!-- Trust / observability -->
+  <rect class="box" x="1172" y="104" width="188" height="268" rx="14" fill="url(#orange)"/>
+  <text class="label" x="1210" y="136">Trust Layer</text>
+  <text class="small" x="1200" y="166">Verifier service</text>
+  <text class="tiny" x="1196" y="188">grounded / partial / refused</text>
+  <text class="tiny" x="1196" y="209">422 weak-grounding contract</text>
+  <text class="tiny" x="1196" y="230">citation support checks</text>
+  <line x1="1194" y1="250" x2="1338" y2="250" stroke="#f0b66b" stroke-width="1"/>
+  <text class="small" x="1198" y="279">Guardrails</text>
+  <text class="tiny" x="1196" y="301">rate limiter</text>
+  <text class="tiny" x="1196" y="322">prompt lock</text>
+  <text class="tiny" x="1196" y="343">problem+json errors</text>
+
+  <rect class="box" x="1172" y="410" width="188" height="166" rx="14" fill="url(#green)"/>
+  <text class="label" x="1200" y="443">Observability</text>
+  <text class="tiny" x="1198" y="470">copilot_traces table</text>
+  <text class="tiny" x="1198" y="492">HTTP audit log</text>
+  <text class="tiny" x="1198" y="514">LLM cost + latency metrics</text>
+  <text class="tiny" x="1198" y="536">Admin Trace tab</text>
+
+  <path class="arrowGreen" d="M1128 292 C1144 292 1150 232 1168 232"/>
+  <path class="arrowGreen" d="M1128 698 C1148 698 1148 494 1168 494"/>
+
+  <!-- Final output -->
+  <rect class="box" x="1172" y="620" width="188" height="137" rx="14" fill="#ffffff"/>
+  <text class="label" x="1204" y="650">Final Outputs</text>
+  <text class="tiny" x="1198" y="678">legal answers with metadata</text>
+  <text class="tiny" x="1198" y="700">draft outlines + citations</text>
+  <text class="tiny" x="1198" y="722">review tables</text>
+  <text class="tiny" x="1198" y="744">workflow previews</text>
+
+  <path class="arrowGreen" d="M1128 704 C1144 704 1150 704 1168 704"/>
+
+  <!-- Phase A callouts -->
+  <rect x="787" y="40" width="574" height="36" rx="18" fill="#e0f2fe" stroke="#7dd3fc"/>
+  <text class="small" x="822" y="63">Phase A added: 5 big agents, 7 AI services, verifier contract, copilot traces, admin trace UI, +82 tests</text>
+</svg>

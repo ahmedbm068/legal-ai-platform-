@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ChatMessageBubble, { type MessageFeedbackState } from "../components/ChatMessageBubble";
+import ExecutionTracePanel from "../components/ExecutionTracePanel";
 import LegalEditorPanel from "../components/LegalEditorPanel";
 import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
 import { saveEditorDraftSeed } from "../editorDraftSeed";
@@ -8,7 +9,8 @@ import type { ChatMessage, DraftDocument, DraftDocumentPayload, FeedbackRootCaus
 import { workspaceApi } from "../workspaceApi";
 
 type WorkspaceMode = "chat" | "agent" | "legal_search";
-type ReasoningLevel = "low" | "medium" | "high";
+type ReasoningLevel = "low" | "medium" | "high" | "deep";
+type OutputLanguage = "auto" | "fr" | "ar" | "en";
 type AssistantMode = "chat" | "agent" | "legal_search" | "external";
 type AttachmentStatus = "ready" | "uploading" | "uploaded" | "error";
 type DraftDocumentType = "Email" | "Client update letter" | "Demand letter" | "Legal memo" | "Strategy note" | "Contract clause" | "General draft";
@@ -34,6 +36,7 @@ const REASONING_TOP_K: Record<ReasoningLevel, number> = {
     low: 4,
     medium: 6,
     high: 8,
+    deep: 8,
 };
 
 type BrowserSpeechRecognition = {
@@ -199,12 +202,26 @@ export default function AssistantPage() {
     const [draft, setDraft] = useState("");
     const [notice, setNotice] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [traceMessage, setTraceMessage] = useState<ChatMessage | null>(null);
     const [historySidebarOpen, setHistorySidebarOpen] = useState(false);
     const [historySearch, setHistorySearch] = useState("");
     const [assistantMode, setAssistantMode] = useState<AssistantMode>("chat");
     const [pendingFiles, setPendingFiles] = useState<PendingAssistantFile[]>([]);
     const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("chat");
-    const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>("medium");
+    const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(() => {
+        try {
+            const stored = window.localStorage.getItem("lai.reasoningLevel");
+            if (stored === "low" || stored === "medium" || stored === "high" || stored === "deep") return stored;
+        } catch { /* localStorage unavailable */ }
+        return "medium";
+    });
+    const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>(() => {
+        try {
+            const stored = window.localStorage.getItem("lai.outputLanguage");
+            if (stored === "auto" || stored === "fr" || stored === "ar" || stored === "en") return stored;
+        } catch { /* localStorage unavailable */ }
+        return "auto";
+    });
     const [externalModeEnabled, setExternalModeEnabled] = useState(false);
     const [optimizingPrompt, setOptimizingPrompt] = useState(false);
     const [composerRecording, setComposerRecording] = useState(false);
@@ -563,6 +580,8 @@ export default function AssistantPage() {
             externalModeEnabled,
             topK: REASONING_TOP_K[reasoningLevel],
             reasoningLevel,
+            outputLanguage,
+            returnCandidates: reasoningLevel === "deep",
             displayPrompt: outbound,
             uploadedDocumentIds: uploadResult.uploadedIds,
             uploadedFiles: uploadResult.uploadedFiles.map((item) => ({
@@ -949,10 +968,37 @@ export default function AssistantPage() {
                 </label>
                 <label>
                     <span>{t("reasoningLabel", "Reasoning")}</span>
-                    <select disabled={copilotLoading || optimizingPrompt || composerRecording} onChange={(event) => setReasoningLevel(event.target.value as ReasoningLevel)} value={reasoningLevel}>
+                    <select
+                        disabled={copilotLoading || optimizingPrompt || composerRecording}
+                        onChange={(event) => {
+                            const next = event.target.value as ReasoningLevel;
+                            setReasoningLevel(next);
+                            try { window.localStorage.setItem("lai.reasoningLevel", next); } catch { /* ignore */ }
+                        }}
+                        value={reasoningLevel}
+                    >
                         <option value="low">Fast</option>
                         <option value="medium">Balanced</option>
                         <option value="high">Deep</option>
+                        <option value="deep">Deep + Judge (2x cost)</option>
+                    </select>
+                </label>
+                <label>
+                    <span>{t("outputLanguageLabel", "Language")}</span>
+                    <select
+                        disabled={copilotLoading || optimizingPrompt || composerRecording}
+                        onChange={(event) => {
+                            const next = event.target.value as OutputLanguage;
+                            setOutputLanguage(next);
+                            try { window.localStorage.setItem("lai.outputLanguage", next); } catch { /* ignore */ }
+                        }}
+                        value={outputLanguage}
+                        title={t("outputLanguageHint", "Reply language. Citations stay in their original language.")}
+                    >
+                        <option value="auto">Auto</option>
+                        <option value="fr">Français</option>
+                        <option value="ar">العربية</option>
+                        <option value="en">English</option>
                     </select>
                 </label>
                 {assistantMode === "agent" ? <span>{t("agentModeSafe", "Write actions require confirmation.")}</span> : null}
@@ -1065,6 +1111,7 @@ export default function AssistantPage() {
                                             onTrustReview={(msg, decision) => {
                                                 void handleTrustReview(msg, decision);
                                             }}
+                                            onShowTrace={setTraceMessage}
                                         />
                                     ))}
                                     {copilotLoading ? <TypingIndicator /> : null}
@@ -1136,6 +1183,11 @@ export default function AssistantPage() {
                     </aside>
                 ) : null}
             </section>
+            <ExecutionTracePanel
+                message={traceMessage}
+                language={language}
+                onClose={() => setTraceMessage(null)}
+            />
         </section>
     );
 }

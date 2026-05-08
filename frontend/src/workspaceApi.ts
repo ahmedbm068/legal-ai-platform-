@@ -8,12 +8,17 @@ import type {
     CalendarReminder,
     CaseItem,
     CaseReviewTable,
+    CaseWorkflowCatalog,
+    CaseWorkflowPreview,
+    CaseWorkspaceSnapshot,
     Client,
     ConsultationFromTranscriptResponse,
     ConsultationRequest,
+    CitationInsertionResponse,
     CopilotAttachment,
     CopilotResponse,
     DocumentItem,
+    DraftOutline,
     DraftDocument,
     DraftDocumentAiEditResponse,
     DraftDocumentPayload,
@@ -28,6 +33,8 @@ import type {
     JurisdictionCountry,
     PromptLibraryEntry,
     PromptOptimizationResponse,
+    SuccessionCalculateRequest,
+    SuccessionCalculateResponse,
     ProviderStatusResponse,
     CallSession,
     CallSessionCreateResponse,
@@ -612,7 +619,22 @@ export const workspaceApi = {
         }),
 
     getCaseReviewTable: (token: string, caseId: number) =>
-        request<CaseReviewTable>(`/intelligence/cases/${caseId}/review-table`, {
+        request<CaseReviewTable>(`/cases/${caseId}/review-table`, {
+            token,
+        }),
+
+    getCaseWorkspaceSnapshot: (token: string, caseId: number) =>
+        request<CaseWorkspaceSnapshot>(`/cases/${caseId}/workspace`, {
+            token,
+        }),
+
+    listCaseWorkflows: (token: string, caseId: number) =>
+        request<CaseWorkflowCatalog>(`/cases/${caseId}/workflows`, {
+            token,
+        }),
+
+    previewCaseWorkflow: (token: string, caseId: number, blueprintId: string) =>
+        request<CaseWorkflowPreview>(`/cases/${caseId}/workflows/${blueprintId}`, {
             token,
         }),
 
@@ -760,11 +782,14 @@ export const workspaceApi = {
         message: string,
         options?: {
             topK?: number;
-            reasoningLevel?: "low" | "medium" | "high";
+            reasoningLevel?: "low" | "medium" | "high" | "deep";
             useExternalResearch?: boolean;
             mode?: "default" | "legal_search";
             legalSearchMultilingualOutput?: boolean;
             legalSearchCodeScope?: string[];
+            outputLanguage?: "fr" | "ar" | "en" | "auto";
+            languageStrict?: boolean;
+            returnCandidates?: boolean;
             agentMode?: boolean;
             workspaceCaseId?: number | null;
             workspaceDocumentId?: number | null;
@@ -790,6 +815,9 @@ export const workspaceApi = {
                 mode: options?.mode ?? "default",
                 legal_search_multilingual_output: options?.legalSearchMultilingualOutput ?? false,
                 legal_search_code_scope: options?.legalSearchCodeScope ?? [],
+                output_language: options?.outputLanguage ?? "auto",
+                language_strict: options?.languageStrict ?? true,
+                return_candidates: options?.returnCandidates ?? false,
                 agent_mode: options?.agentMode ?? false,
                 workspace_case_id: options?.workspaceCaseId ?? null,
                 workspace_document_id: options?.workspaceDocumentId ?? null,
@@ -831,7 +859,7 @@ export const workspaceApi = {
             caseId?: number | null;
             chatSessionId?: string | null;
             topK?: number;
-            reasoningLevel?: "low" | "medium" | "high";
+            reasoningLevel?: "low" | "medium" | "high" | "deep";
             useExternalResearch?: boolean;
             mode?: "default" | "legal_search";
             legalSearchMultilingualOutput?: boolean;
@@ -921,6 +949,69 @@ export const workspaceApi = {
             timeoutMs: SLOW_AI_TIMEOUT_MS,
         }),
 
+    createDraftOutline: (
+        token: string,
+        payload: {
+            intent: string;
+            objective?: string | null;
+            caseId?: number | null;
+            jurisdiction?: string | null;
+        }
+    ) =>
+        request<DraftOutline>("/ai/draft/outline", {
+            method: "POST",
+            token,
+            body: {
+                intent: payload.intent,
+                objective: payload.objective ?? null,
+                case_id: payload.caseId ?? null,
+                jurisdiction: payload.jurisdiction ?? null,
+            },
+            timeoutMs: SLOW_AI_TIMEOUT_MS,
+        }),
+
+    insertDraftCitation: (
+        token: string,
+        payload: {
+            body: string;
+            markerKind?: "doc" | "source" | "citation";
+            refId: number;
+            position?: number | null;
+            sources?: Array<Record<string, unknown>>;
+            citations?: Array<Record<string, unknown>>;
+        }
+    ) =>
+        request<CitationInsertionResponse>("/ai/draft/insert-citation", {
+            method: "POST",
+            token,
+            body: {
+                body: payload.body,
+                marker_kind: payload.markerKind ?? "source",
+                ref_id: payload.refId,
+                position: payload.position ?? null,
+                sources: payload.sources ?? [],
+                citations: payload.citations ?? [],
+            },
+        }),
+
+    resolveDraftCitationMarkers: (
+        token: string,
+        payload: {
+            body: string;
+            sources?: Array<Record<string, unknown>>;
+            citations?: Array<Record<string, unknown>>;
+        }
+    ) =>
+        request<CitationInsertionResponse>("/ai/draft/resolve-markers", {
+            method: "POST",
+            token,
+            body: {
+                body: payload.body,
+                sources: payload.sources ?? [],
+                citations: payload.citations ?? [],
+            },
+        }),
+
     exportDraftDocumentDocx: (token: string, documentId: number) =>
         postBlob(`/draft-documents/${documentId}/export/docx`, token),
 
@@ -980,4 +1071,15 @@ export const workspaceApi = {
             token,
         });
     },
+    calculateSuccession: (
+        token: string,
+        body: SuccessionCalculateRequest,
+        options?: { signal?: AbortSignal }
+    ) =>
+        request<SuccessionCalculateResponse>("/ai/succession/calculate", {
+            method: "POST",
+            token,
+            body,
+            signal: options?.signal,
+        }),
 };

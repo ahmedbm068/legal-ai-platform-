@@ -1,9 +1,14 @@
 ﻿from __future__ import annotations
 
 import logging
+import os
 from threading import Thread
 from time import perf_counter
 from uuid import uuid4
+
+from backend.core.logging_config import configure_logging
+
+configure_logging(level=os.getenv("LOG_LEVEL", "INFO"))
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -31,6 +36,7 @@ from backend.api.public import router as public_router
 from backend.api.prompt_library import router as prompt_library_router
 from backend.api.rag import router as rag_router
 from backend.api.search import router as search_router
+from backend.api.succession import router as succession_router
 from backend.api.voice import router as voice_router
 from backend.core.config import settings
 from backend.core.rate_limiter import limiter
@@ -64,6 +70,7 @@ from backend.models.evidence_analysis_review import EvidenceAnalysisReview
 from backend.models.generated_artifact_version import GeneratedArtifactVersion
 from backend.models.image_document_batch import ImageDocumentBatch
 from backend.models.prompt_library_entry import PromptLibraryEntry
+from backend.models.llm_call_log import LLMCallLog
 from backend.models.request_audit_log import RequestAuditLog
 from backend.models.staff_invite import StaffInvite
 from backend.models.tenant import Tenant
@@ -169,6 +176,7 @@ app.include_router(evidence_reviews_router)
 app.include_router(rag_router)
 app.include_router(intelligence_router)
 app.include_router(search_router)
+app.include_router(succession_router)
 app.include_router(voice_router)
 app.include_router(admin_router)
 
@@ -287,17 +295,16 @@ def health():
     return {"status": "ok"}
 
 
-import logging
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
-
-logging.getLogger("copilot.graph").setLevel(logging.DEBUG)
-logging.getLogger("copilot.retrieval").setLevel(logging.DEBUG)
-logging.getLogger("copilot.drafting").setLevel(logging.DEBUG)
-logging.getLogger("copilot.legal_search").setLevel(logging.DEBUG)
-logging.getLogger("copilot.response").setLevel(logging.DEBUG)
-logging.getLogger("copilot").setLevel(logging.DEBUG)
-logging.getLogger("backend.services.ai.copilot_service").setLevel(logging.DEBUG)
+# Per-namespace log levels. Root level + JSON-vs-console formatting are set
+# by `configure_logging()` at the top of this file (driven by LOG_LEVEL and
+# LOG_FORMAT env vars). The lines below only override module verbosity.
+for _name in (
+    "copilot.graph",
+    "copilot.retrieval",
+    "copilot.drafting",
+    "copilot.legal_search",
+    "copilot.response",
+    "copilot",
+    "backend.services.ai.copilot_service",
+):
+    logging.getLogger(_name).setLevel(logging.DEBUG)

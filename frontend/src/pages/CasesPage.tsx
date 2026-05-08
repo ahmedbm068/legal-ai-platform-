@@ -3,10 +3,21 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
 import { saveEditorDraftSeed } from "../editorDraftSeed";
 import IntelligencePanel from "../components/IntelligencePanel";
+import SuccessionCalculatorModal from "../components/SuccessionCalculatorModal";
+import type { CaseReviewTable, CaseWorkflowCatalog, CaseWorkflowPreview, CaseWorkspaceSnapshot, DraftOutline } from "../types";
+import { workspaceApi } from "../workspaceApi";
 
-type CaseTab = "overview" | "documents" | "timeline" | "assistant" | "tasks" | "calendar";
+type CaseTab = "overview" | "workspace" | "documents" | "review" | "workflows" | "drafting" | "timeline" | "assistant" | "tasks" | "calendar";
 
-const VALID_TABS = new Set<CaseTab>(["overview", "documents", "timeline", "assistant", "tasks", "calendar"]);
+const VALID_TABS = new Set<CaseTab>(["overview", "workspace", "documents", "review", "workflows", "drafting", "timeline", "assistant", "tasks", "calendar"]);
+
+const DRAFT_INTENTS = [
+    { id: "draft_client_email_case", label: "Client update email" },
+    { id: "draft_internal_email_case", label: "Internal team email" },
+    { id: "draft_partner_strategy_note_case", label: "Partner strategy memo" },
+    { id: "draft_negotiation_strategy", label: "Negotiation strategy" },
+    { id: "draft_contract_redline_case", label: "Contract redline pack" },
+];
 
 function parseCaseId(value?: string) {
     const parsed = Number(value);
@@ -40,6 +51,27 @@ function statusTone(value: string | null | undefined) {
     return "open";
 }
 
+function compactText(value: unknown, fallback = "None"): string {
+    if (Array.isArray(value)) {
+        return value.length ? value.map((item) => compactText(item, "")).filter(Boolean).join(", ") : fallback;
+    }
+    if (typeof value === "string") {
+        return value.trim() || fallback;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+        return String(value);
+    }
+    if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        return compactText(record.title || record.label || record.name || record.summary || JSON.stringify(record), fallback);
+    }
+    return fallback;
+}
+
+function firstRecordDate(value: Record<string, unknown>) {
+    return compactText(value.date || value.created_at || value.timestamp || value.start_datetime, "No date");
+}
+
 function clientInitials(value: string) {
     const parts = value.trim().split(/\s+/).filter(Boolean);
     const initials = parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
@@ -71,11 +103,16 @@ export default function CasesPage() {
         locale,
         language,
         t,
+        token,
     } = useRoutedWorkspace();
 
     const tabs: Array<{ id: CaseTab; label: string }> = [
         { id: "overview", label: t("tabOverview", "Overview") },
+        { id: "workspace", label: t("tabWorkspace", "Workspace v2") },
         { id: "documents", label: t("tabDocuments", "Documents") },
+        { id: "review", label: t("tabReviewTable", "Review Table") },
+        { id: "workflows", label: t("tabWorkflows", "Workflows") },
+        { id: "drafting", label: t("tabDrafting", "Drafting v2") },
         { id: "timeline", label: t("tabTimeline", "Timeline") },
         { id: "calendar", label: t("tabCalendar", "Calendar") },
         { id: "assistant", label: t("tabAssistant", "Assistant") },
@@ -87,6 +124,24 @@ export default function CasesPage() {
     const rawTab = params.tab;
     const activeTab: CaseTab = (rawTab && VALID_TABS.has(rawTab as CaseTab) ? rawTab : "overview") as CaseTab;
     const [portfolioQuery, setPortfolioQuery] = useState("");
+    const [workspaceSnapshot, setWorkspaceSnapshot] = useState<CaseWorkspaceSnapshot | null>(null);
+    const [workspaceSnapshotLoading, setWorkspaceSnapshotLoading] = useState(false);
+    const [workspaceSnapshotError, setWorkspaceSnapshotError] = useState<string | null>(null);
+    const [reviewTable, setReviewTable] = useState<CaseReviewTable | null>(null);
+    const [reviewTableLoading, setReviewTableLoading] = useState(false);
+    const [reviewTableError, setReviewTableError] = useState<string | null>(null);
+    const [workflowCatalog, setWorkflowCatalog] = useState<CaseWorkflowCatalog | null>(null);
+    const [workflowPreview, setWorkflowPreview] = useState<CaseWorkflowPreview | null>(null);
+    const [successionModalOpen, setSuccessionModalOpen] = useState(false);
+    const [workflowLoading, setWorkflowLoading] = useState(false);
+    const [workflowError, setWorkflowError] = useState<string | null>(null);
+    const [draftIntent, setDraftIntent] = useState(DRAFT_INTENTS[0].id);
+    const [draftObjective, setDraftObjective] = useState("");
+    const [draftOutline, setDraftOutline] = useState<DraftOutline | null>(null);
+    const [draftBody, setDraftBody] = useState("");
+    const [draftingLoading, setDraftingLoading] = useState(false);
+    const [draftingError, setDraftingError] = useState<string | null>(null);
+    const [draftingNotice, setDraftingNotice] = useState<string | null>(null);
 
     useEffect(() => {
         if (routeCaseId && routeCaseId !== selectedCaseId) {
@@ -208,6 +263,94 @@ export default function CasesPage() {
             .slice(0, 8);
     }, [calendarAppointments, consultations, t]);
 
+    const workflowAvailabilityById = useMemo(() => {
+        return new Map((workflowCatalog?.availability || []).map((item) => [item.blueprint_id, item]));
+    }, [workflowCatalog]);
+
+    const citationSources = useMemo(() => {
+        return documents.map((document, index) => ({
+            source_label: `Source ${index + 1}: ${document.filename}`,
+            filename: document.filename,
+            document_id: document.id,
+            case_id: document.case_id,
+            snippet: document.extracted_text?.slice(0, 240) || document.filename,
+            score: 1,
+        }));
+    }, [documents]);
+
+    useEffect(() => {
+        if (!token || !activeCaseId || activeTab !== "workspace") return;
+
+        let cancelled = false;
+        setWorkspaceSnapshotLoading(true);
+        setWorkspaceSnapshotError(null);
+        workspaceApi.getCaseWorkspaceSnapshot(token, activeCaseId)
+            .then((payload) => {
+                if (!cancelled) setWorkspaceSnapshot(payload);
+            })
+            .catch((caught) => {
+                if (!cancelled) setWorkspaceSnapshotError(caught instanceof Error ? caught.message : "Unable to load workspace snapshot.");
+            })
+            .finally(() => {
+                if (!cancelled) setWorkspaceSnapshotLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeCaseId, activeTab, token]);
+
+    useEffect(() => {
+        if (!token || !activeCaseId || activeTab !== "review") return;
+
+        let cancelled = false;
+        setReviewTableLoading(true);
+        setReviewTableError(null);
+        workspaceApi.getCaseReviewTable(token, activeCaseId)
+            .then((payload) => {
+                if (!cancelled) setReviewTable(payload);
+            })
+            .catch((caught) => {
+                if (!cancelled) setReviewTableError(caught instanceof Error ? caught.message : "Unable to load review table.");
+            })
+            .finally(() => {
+                if (!cancelled) setReviewTableLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeCaseId, activeTab, token]);
+
+    useEffect(() => {
+        if (!token || !activeCaseId || activeTab !== "workflows") return;
+
+        let cancelled = false;
+        setWorkflowLoading(true);
+        setWorkflowError(null);
+        workspaceApi.listCaseWorkflows(token, activeCaseId)
+            .then(async (payload) => {
+                if (cancelled) return;
+                setWorkflowCatalog(payload);
+                const firstAvailable = payload.availability.find((item) => item.status === "available")?.blueprint_id;
+                const firstBlueprint = firstAvailable || payload.blueprints[0]?.id;
+                if (firstBlueprint) {
+                    const preview = await workspaceApi.previewCaseWorkflow(token, activeCaseId, firstBlueprint);
+                    if (!cancelled) setWorkflowPreview(preview);
+                }
+            })
+            .catch((caught) => {
+                if (!cancelled) setWorkflowError(caught instanceof Error ? caught.message : "Unable to load workflow catalog.");
+            })
+            .finally(() => {
+                if (!cancelled) setWorkflowLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [activeCaseId, activeTab, token]);
+
     function handleCaseSelect(caseId: number) {
         const selectedCase = cases.find((item) => item.id === caseId);
         if (selectedCase) {
@@ -243,6 +386,102 @@ export default function CasesPage() {
             caseTitle: activeCase.title,
             createdAt: new Date().toISOString(),
         });
+    }
+
+    async function handleWorkflowPreview(blueprintId: string) {
+        if (!token || !activeCaseId) return;
+        setWorkflowLoading(true);
+        setWorkflowError(null);
+        try {
+            setWorkflowPreview(await workspaceApi.previewCaseWorkflow(token, activeCaseId, blueprintId));
+        } catch (caught) {
+            setWorkflowError(caught instanceof Error ? caught.message : "Unable to preview workflow.");
+        } finally {
+            setWorkflowLoading(false);
+        }
+    }
+
+    async function handleGenerateOutline() {
+        if (!token || !activeCase) return;
+        setDraftingLoading(true);
+        setDraftingError(null);
+        setDraftingNotice(null);
+        try {
+            const outline = await workspaceApi.createDraftOutline(token, {
+                intent: draftIntent,
+                objective: draftObjective || activeCase.title,
+                caseId: activeCase.id,
+                jurisdiction: activeCase.jurisdiction_country,
+            });
+            setDraftOutline(outline);
+            const seededBody = [
+                outline.title,
+                "",
+                ...outline.sections.map((section, index) => (
+                    `${index + 1}. ${section.heading}\n${section.purpose}${section.suggested_citations.length ? " [cite:source:1]" : ""}`
+                )),
+            ].join("\n\n");
+            setDraftBody(seededBody);
+            setDraftingNotice("Outline generated. Review the structure, then resolve citation markers or open it in the editor.");
+        } catch (caught) {
+            setDraftingError(caught instanceof Error ? caught.message : "Unable to generate draft outline.");
+        } finally {
+            setDraftingLoading(false);
+        }
+    }
+
+    async function handleResolveDraftMarkers() {
+        if (!token) return;
+        setDraftingLoading(true);
+        setDraftingError(null);
+        setDraftingNotice(null);
+        try {
+            const result = await workspaceApi.resolveDraftCitationMarkers(token, {
+                body: draftBody,
+                sources: citationSources,
+                citations: [],
+            });
+            setDraftBody(result.body);
+            setDraftingNotice(result.reason);
+        } catch (caught) {
+            setDraftingError(caught instanceof Error ? caught.message : "Unable to resolve citation markers.");
+        } finally {
+            setDraftingLoading(false);
+        }
+    }
+
+    function handleOpenDraftInEditor() {
+        if (!activeCase) return;
+        saveEditorDraftSeed({
+            source: "assistant",
+            caseId: activeCase.id,
+            caseTitle: activeCase.title,
+            prompt: draftObjective || draftOutline?.title || "Draft from outline",
+            answer: draftBody || draftOutline?.sections.map((section) => `${section.heading}\n${section.purpose}`).join("\n\n") || "",
+            sources: citationSources.map((source, index) => ({
+                chunk_id: null,
+                document_id: Number(source.document_id) || null,
+                case_id: activeCase.id,
+                filename: String(source.filename),
+                chunk_index: index,
+                score: 1,
+                snippet: String(source.snippet || source.filename),
+            })),
+            citations: citationSources.map((source) => ({
+                label: String(source.source_label),
+                document_id: Number(source.document_id) || null,
+                case_id: activeCase.id,
+                snippet: String(source.snippet || source.filename),
+            })),
+            createdAt: new Date().toISOString(),
+        });
+        navigate(`/editor/${activeCase.id}`);
+    }
+
+    function launchWorkflowInAssistant() {
+        if (!activeCase || !workflowPreview?.blueprint) return;
+        const prompt = `Run or prepare the ${workflowPreview.blueprint.title} workflow for case #${activeCase.id}. Include expected outputs, missing prerequisites, and the next lawyer action.`;
+        navigate(`/assistant/${activeCase.id}?q=${encodeURIComponent(prompt)}`);
     }
 
     return (
@@ -435,6 +674,76 @@ export default function CasesPage() {
                                     </div>
                                 ) : null}
 
+                                {activeTab === "workspace" ? (
+                                    <div className="shell-detail-block lawyer-feature-surface">
+                                        <div className="case-overview-hero">
+                                            <div>
+                                                <p className="shell-page-kicker">Workspace v2</p>
+                                                <h4>One-call matter snapshot</h4>
+                                                <p>Shows the aggregate backend workspace endpoint: case context, timeline, risks, memory, and available Big Agents.</p>
+                                            </div>
+                                            <Link className="shell-inline-link" to={`/assistant/${activeCase.id}`}>
+                                                Ask with this context
+                                            </Link>
+                                        </div>
+                                        {workspaceSnapshotLoading ? <p>Loading workspace snapshot...</p> : null}
+                                        {workspaceSnapshotError ? <p className="shell-error-text">{workspaceSnapshotError}</p> : null}
+                                        {workspaceSnapshot ? (
+                                            <>
+                                                <div className="case-metric-grid">
+                                                    <p><strong>Scope</strong><span>{workspaceSnapshot.scope}</span></p>
+                                                    <p><strong>Timeline events</strong><span>{workspaceSnapshot.timeline.length}</span></p>
+                                                    <p><strong>Risk signals</strong><span>{workspaceSnapshot.risk_signals.length}</span></p>
+                                                    <p><strong>Big Agents</strong><span>{workspaceSnapshot.big_agents.length}</span></p>
+                                                </div>
+                                                <div className="lawyer-feature-grid">
+                                                    <section className="lawyer-feature-card">
+                                                        <h5>Risk Signals</h5>
+                                                        <ul className="shell-list shell-tight-list">
+                                                            {workspaceSnapshot.risk_signals.length ? workspaceSnapshot.risk_signals.slice(0, 5).map((signal, index) => (
+                                                                <li key={`risk-${index}`}>{compactText(signal)}</li>
+                                                            )) : <li>No risk signals surfaced yet.</li>}
+                                                        </ul>
+                                                    </section>
+                                                    <section className="lawyer-feature-card">
+                                                        <h5>Memory</h5>
+                                                        <div className="feature-key-value-list">
+                                                            {Object.entries(workspaceSnapshot.memory).length ? Object.entries(workspaceSnapshot.memory).slice(0, 6).map(([key, value]) => (
+                                                                <p key={key}><strong>{normalizeLabel(key, key)}</strong><span>{compactText(value)}</span></p>
+                                                            )) : <p>No memory snapshot yet.</p>}
+                                                        </div>
+                                                    </section>
+                                                </div>
+                                                <section className="lawyer-feature-card">
+                                                    <h5>Big Agent Catalog Visible To Lawyer</h5>
+                                                    <div className="agent-chip-grid">
+                                                        {workspaceSnapshot.big_agents.map((agent) => (
+                                                            <article key={agent.name} className="agent-chip-card">
+                                                                <strong>{normalizeLabel(agent.name, agent.name)}</strong>
+                                                                <span>{agent.tier}</span>
+                                                                <p>{agent.description}</p>
+                                                                <small>{agent.mini_agents_used.slice(0, 4).join(", ")}</small>
+                                                            </article>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                                <section className="lawyer-feature-card">
+                                                    <h5>Workspace Timeline</h5>
+                                                    <ul className="shell-list shell-tight-list">
+                                                        {workspaceSnapshot.timeline.length ? workspaceSnapshot.timeline.slice(0, 8).map((event, index) => (
+                                                            <li key={`workspace-event-${index}`}>
+                                                                <strong>{compactText(event.title || event.label || event.type, "Event")}</strong>
+                                                                <span>{firstRecordDate(event)}</span>
+                                                                <p>{compactText(event.summary || event.description || event.subtitle, "No detail")}</p>
+                                                            </li>
+                                                        )) : <li>No workspace timeline events yet.</li>}
+                                                    </ul>
+                                                </section>
+                                            </>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+
                                 {activeTab === "documents" ? (
                                     <div className="shell-detail-block">
                                         <p><strong>{documents.length}</strong> {t("documentsLoadedForCase", "document(s) loaded for this case.")}</p>
@@ -446,6 +755,202 @@ export default function CasesPage() {
                                             <Link className="shell-inline-link" to={`/assistant/${activeCase.id}`}>
                                                 {t("askAboutDocuments", "Ask assistant about these documents")}
                                             </Link>
+                                        </div>
+                                    </div>
+                                ) : null}
+
+                                {activeTab === "review" ? (
+                                    <div className="shell-detail-block lawyer-feature-surface">
+                                        <div className="case-overview-hero">
+                                            <div>
+                                                <p className="shell-page-kicker">Review Table v2</p>
+                                                <h4>Vault-style document matrix</h4>
+                                                <p>Every uploaded document is projected against lawyer questions: type, parties, dates, risks, and missing evidence.</p>
+                                            </div>
+                                            <span className="case-status-pill active">
+                                                Coverage {reviewTable ? `${Math.round(reviewTable.coverage * 100)}%` : "--"}
+                                            </span>
+                                        </div>
+                                        {reviewTableLoading ? <p>Loading review table...</p> : null}
+                                        {reviewTableError ? <p className="shell-error-text">{reviewTableError}</p> : null}
+                                        {reviewTable ? (
+                                            <div className="review-table-wrap">
+                                                <table className="lawyer-review-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>Document</th>
+                                                            {reviewTable.questions.map((question) => (
+                                                                <th key={question.id}>{question.label}</th>
+                                                            ))}
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {reviewTable.rows.length ? reviewTable.rows.map((row) => (
+                                                            <tr key={`${row.document_id}-${row.filename}`}>
+                                                                <td>
+                                                                    <strong>{row.filename}</strong>
+                                                                    <span>{row.document_type || "Unknown type"}</span>
+                                                                </td>
+                                                                {reviewTable.questions.map((question) => {
+                                                                    const cell = row.cells.find((item) => item.question_id === question.id);
+                                                                    return (
+                                                                        <td key={`${row.document_id}-${question.id}`} className={`evidence-${cell?.evidence_strength || "none"}`}>
+                                                                            {cell && !cell.is_empty ? cell.values.slice(0, 3).map((value) => <p key={value}>{value}</p>) : <em>Missing</em>}
+                                                                        </td>
+                                                                    );
+                                                                })}
+                                                            </tr>
+                                                        )) : (
+                                                            <tr>
+                                                                <td colSpan={reviewTable.questions.length + 1}>No documents available for review yet.</td>
+                                                            </tr>
+                                                        )}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+
+                                {activeTab === "workflows" ? (
+                                    <div className="shell-detail-block lawyer-feature-surface">
+                                        <div className="case-overview-hero">
+                                            <div>
+                                                <p className="shell-page-kicker">Workflow Blueprints</p>
+                                                <h4>Case-aware legal workflows</h4>
+                                                <p>Lawyers can see which multi-step workflows are available, what each will produce, and why a workflow is blocked.</p>
+                                            </div>
+                                            <button className="shell-inline-link as-button" disabled={!workflowPreview} onClick={launchWorkflowInAssistant} type="button">
+                                                Open in Assistant
+                                            </button>
+                                        </div>
+                                        {workflowLoading ? <p>Loading workflows...</p> : null}
+                                        {workflowError ? <p className="shell-error-text">{workflowError}</p> : null}
+                                        {workflowCatalog ? (
+                                            <div className="workflow-blueprint-layout">
+                                                <div className="workflow-blueprint-list">
+                                                    {workflowCatalog.blueprints.map((blueprint) => {
+                                                        const availability = workflowAvailabilityById.get(blueprint.id);
+                                                        return (
+                                                            <button
+                                                                key={blueprint.id}
+                                                                className={`workflow-blueprint-card ${workflowPreview?.blueprint.id === blueprint.id ? "active" : ""}`}
+                                                                onClick={() => {
+                                                                    if (blueprint.id === "succession_entitlement_analysis") {
+                                                                        setSuccessionModalOpen(true);
+                                                                        return;
+                                                                    }
+                                                                    void handleWorkflowPreview(blueprint.id);
+                                                                }}
+                                                                type="button"
+                                                            >
+                                                                <strong>{blueprint.title}</strong>
+                                                                <span className={`case-status-pill ${availability?.status === "available" ? "active" : "open"}`}>
+                                                                    {availability?.status || "unknown"}
+                                                                </span>
+                                                                <small>{blueprint.harvey_equivalent || blueprint.executor}</small>
+                                                                <p>{blueprint.description}</p>
+                                                                {availability?.missing_prerequisites.length ? (
+                                                                    <em>Missing: {availability.missing_prerequisites.join(", ")}</em>
+                                                                ) : null}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {workflowPreview ? (
+                                                    <article className="workflow-preview-panel">
+                                                        <h5>{workflowPreview.blueprint.title}</h5>
+                                                        <p>{workflowPreview.blueprint.description}</p>
+                                                        <div className="case-metric-grid compact">
+                                                            <p><strong>Runtime</strong><span>{workflowPreview.blueprint.estimated_runtime_seconds}s</span></p>
+                                                            <p><strong>Executor</strong><span>{workflowPreview.blueprint.executor}</span></p>
+                                                            <p><strong>Status</strong><span>{workflowPreview.availability.status}</span></p>
+                                                            <p><strong>Outputs</strong><span>{workflowPreview.blueprint.output_keys.length}</span></p>
+                                                        </div>
+                                                        <ol className="workflow-step-list">
+                                                            {workflowPreview.blueprint.steps.map((step) => (
+                                                                <li key={`${workflowPreview.blueprint.id}-${step.name}`}>
+                                                                    <strong>{step.name}</strong>
+                                                                    <span>{step.agent}</span>
+                                                                    <p>{step.description}</p>
+                                                                </li>
+                                                            ))}
+                                                        </ol>
+                                                    </article>
+                                                ) : null}
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : null}
+
+                                {activeTab === "drafting" ? (
+                                    <div className="shell-detail-block lawyer-feature-surface">
+                                        <div className="case-overview-hero">
+                                            <div>
+                                                <p className="shell-page-kicker">Drafting v2</p>
+                                                <h4>Outline-first drafting with citation markers</h4>
+                                                <p>Generate a deterministic outline, review it, resolve citation markers, then open the draft in the legal editor.</p>
+                                            </div>
+                                            <button className="shell-inline-link as-button" disabled={!draftBody.trim()} onClick={handleOpenDraftInEditor} type="button">
+                                                Open in Editor
+                                            </button>
+                                        </div>
+                                        <div className="drafting-control-grid">
+                                            <label>
+                                                <span>Draft type</span>
+                                                <select value={draftIntent} onChange={(event) => setDraftIntent(event.target.value)}>
+                                                    {DRAFT_INTENTS.map((intent) => (
+                                                        <option key={intent.id} value={intent.id}>{intent.label}</option>
+                                                    ))}
+                                                </select>
+                                            </label>
+                                            <label>
+                                                <span>Objective</span>
+                                                <input
+                                                    value={draftObjective}
+                                                    onChange={(event) => setDraftObjective(event.target.value)}
+                                                    placeholder={`Draft for ${activeCase.title}`}
+                                                />
+                                            </label>
+                                            <button className="shell-inline-link as-button primary-action" disabled={draftingLoading} onClick={() => void handleGenerateOutline()} type="button">
+                                                Generate Outline
+                                            </button>
+                                        </div>
+                                        {draftingError ? <p className="shell-error-text">{draftingError}</p> : null}
+                                        {draftingNotice ? <p className="shell-success-text">{draftingNotice}</p> : null}
+                                        {draftOutline ? (
+                                            <div className="lawyer-feature-grid">
+                                                <section className="lawyer-feature-card">
+                                                    <h5>{draftOutline.title}</h5>
+                                                    <p><strong>Tone:</strong> {draftOutline.tone}</p>
+                                                    <p><strong>Audience:</strong> {draftOutline.audience}</p>
+                                                    <ul className="shell-list shell-tight-list">
+                                                        {draftOutline.sections.map((section) => (
+                                                            <li key={section.heading}>
+                                                                <strong>{section.heading}</strong>
+                                                                <p>{section.purpose}</p>
+                                                                {section.suggested_citations.length ? <span>Suggested citations: {section.suggested_citations.join(", ")}</span> : null}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </section>
+                                                <section className="lawyer-feature-card">
+                                                    <h5>Case hints</h5>
+                                                    <ul className="shell-list shell-tight-list">
+                                                        {draftOutline.case_hints.length ? draftOutline.case_hints.map((hint) => <li key={hint}>{hint}</li>) : <li>No case hints yet.</li>}
+                                                    </ul>
+                                                </section>
+                                            </div>
+                                        ) : null}
+                                        <label className="draft-body-editor">
+                                            <span>Draft body / citation marker sandbox</span>
+                                            <textarea value={draftBody} onChange={(event) => setDraftBody(event.target.value)} placeholder="Generate an outline, or type [cite:source:1] to test citation marker resolution." />
+                                        </label>
+                                        <div className="case-action-row">
+                                            <button className="shell-inline-link as-button" disabled={!draftBody.trim() || !citationSources.length || draftingLoading} onClick={() => void handleResolveDraftMarkers()} type="button">
+                                                Resolve citation markers
+                                            </button>
+                                            <span>{citationSources.length} document source(s) available for citation.</span>
                                         </div>
                                     </div>
                                 ) : null}
@@ -507,6 +1012,13 @@ export default function CasesPage() {
                     </div>
                 </article>
             </div>
+            {successionModalOpen && token ? (
+                <SuccessionCalculatorModal
+                    token={token}
+                    language={language}
+                    onClose={() => setSuccessionModalOpen(false)}
+                />
+            ) : null}
         </section>
     );
 }

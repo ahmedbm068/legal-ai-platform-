@@ -126,7 +126,7 @@ export default function WorkspaceShell() {
                 </div>
 
                 <nav className="shell-nav" aria-label="Primary workspace navigation">
-                    {APP_ROUTES.map((route) => (
+                    {APP_ROUTES.filter((route) => !route.hidden).map((route) => (
                         <NavLink
                             key={route.path}
                             className={({ isActive }) => navClassName(isActive)}

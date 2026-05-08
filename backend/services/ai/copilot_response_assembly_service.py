@@ -374,6 +374,22 @@ class CopilotResponseAssemblyService:
         response.setdefault("fallback_reason", None)
         response.setdefault("scope", "global")
 
+        # If structured-IRAC mode produced a validated payload during this
+        # request, attach it so the frontend can render the five sections as
+        # discrete blocks. Reset the contextvar so it never leaks across
+        # subsequent unrelated calls.
+        try:
+            from backend.services.ai.irac_contract import (
+                get_pending_irac_payload,
+                reset_pending_irac_payload,
+            )
+            pending = get_pending_irac_payload()
+            if pending:
+                response["irac"] = pending
+                reset_pending_irac_payload()
+        except Exception:  # noqa: BLE001 — never break assembly
+            pass
+
         duration_ms = (time.perf_counter() - started) * 1000.0
         _logger.debug(
             "[RESPONSE] response_assembly_end | intent=%s mode=%s grounding=%s "

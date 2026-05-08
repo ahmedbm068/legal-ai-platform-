@@ -22,5 +22,11 @@
   },
   "include": [
     "src"
+  ],
+  "exclude": [
+    "e2e",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/test/**"
   ]
 }

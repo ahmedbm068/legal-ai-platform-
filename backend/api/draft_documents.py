@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query, status
 from sqlalchemy.orm import Session
 
+from backend.core.rate_limiter import limiter
 from backend.api.draft_document_schema import (
     DraftDocumentActionResponse,
     DraftDocumentAiEditRequest,
@@ -15,6 +16,7 @@ from backend.api.draft_document_schema import (
     DraftDocumentVersionOut,
 )
 from backend.core.deps import get_current_user, get_db
+from backend.core.llm_call_context import llm_call_context_dep
 from backend.core.permissions import require_lawyer
 from backend.models.draft_document import DraftDocument
 from backend.models.draft_document_version import DraftDocumentVersion
@@ -131,11 +133,14 @@ def list_draft_document_versions(
 
 
 @router.post("/{document_id}/ai-edit", response_model=DraftDocumentAiEditResponse)
+@limiter.limit("30/minute")
 def propose_ai_edit(
+    request: Request,
     document_id: int,
     payload: DraftDocumentAiEditRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _llm_ctx: str = Depends(llm_call_context_dep),
 ):
     document = draft_document_service.get_document_or_404(db, current_user=current_user, document_id=document_id)
     if payload.case_id:
@@ -151,7 +156,9 @@ def propose_ai_edit(
 
 
 @router.post("/{document_id}/export/docx")
+@limiter.limit("60/minute")
 def export_draft_document_docx(
+    request: Request,
     document_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -172,7 +179,9 @@ def export_draft_document_docx(
 
 
 @router.post("/{document_id}/export/pdf")
+@limiter.limit("60/minute")
 def export_draft_document_pdf(
+    request: Request,
     document_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -189,7 +198,9 @@ def export_draft_document_pdf(
 
 
 @router.post("/{document_id}/send-email", response_model=DraftDocumentActionResponse)
+@limiter.limit("10/minute")
 def send_draft_document_email(
+    request: Request,
     document_id: int,
     payload: DraftDocumentSendEmailRequest,
     db: Session = Depends(get_db),

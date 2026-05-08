@@ -75,7 +75,9 @@ type SendCaseMessageOptions = {
     workspaceMode?: WorkspaceMode;
     externalModeEnabled?: boolean;
     topK?: number;
-    reasoningLevel?: "low" | "medium" | "high";
+    reasoningLevel?: "low" | "medium" | "high" | "deep";
+    outputLanguage?: "fr" | "ar" | "en" | "auto";
+    returnCandidates?: boolean;
     workspaceDocumentId?: number | null;
     uploadedDocumentIds?: string[];
     uploadedFiles?: Array<{
@@ -312,7 +314,15 @@ function createAssistantMessage(response: CopilotResponse): ChatMessage {
         openEditor: response.open_editor,
         draftDocument: response.draft_document,
         rawAnswer: response.answer,
+        verificationState: response.verification_state ?? null,
+        verificationReason: response.verification?.reason ?? null,
         aiInsight: response.ai_insight,
+        language: response.language ?? null,
+        faithfulness: response.faithfulness ?? null,
+        judge: response.judge ?? null,
+        candidates: response.candidates ?? null,
+        irac: response.irac ?? null,
+        retrievalAudit: response.retrieval_audit ?? null,
     });
 }
 
@@ -688,6 +698,8 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
         const requestMode = mode === "legal_search" ? "legal_search" : "default";
         const topK = options?.topK && options.topK > 0 ? options.topK : 6;
         const reasoningLevel = options?.reasoningLevel ?? "medium";
+        const outputLanguage = options?.outputLanguage ?? "auto";
+        const returnCandidates = Boolean(options?.returnCandidates) || reasoningLevel === "deep";
         const useExternalResearch = Boolean(options?.externalModeEnabled) || mode === "legal_search";
         const workspaceDocumentId = options?.workspaceDocumentId ?? null;
         const uploadedDocumentIds = options?.uploadedDocumentIds || [];
@@ -741,6 +753,8 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
                 : await workspaceApi.copilot(token, trimmed, {
                     topK,
                     reasoningLevel,
+                    outputLanguage,
+                    returnCandidates,
                     workspaceCaseId,
                     workspaceDocumentId,
                     useExternalResearch,

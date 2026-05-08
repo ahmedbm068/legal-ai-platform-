@@ -349,6 +349,10 @@ class CopilotRetrievalExecutionService:
             "cache": base_result.get("cache", {"hit": False, "backend": "none"}),
             "jurisdiction": jurisdiction_context,
         }
+        # Preserve retrieval_audit so HyDE+RRF metadata reaches the response
+        # even on the with-external-research synthesis path.
+        if "retrieval_audit" in base_result:
+            payload["retrieval_audit"] = base_result["retrieval_audit"]
         result = self._maybe_finalize(
             payload, reasoning_level, intent, normalized_question, tenant_id, finalize_reasoning_fn,
         )

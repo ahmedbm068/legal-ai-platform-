@@ -1,6 +1,7 @@
 import { Fragment, memo, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import type { ChatMessage, FeedbackRootCause } from "../types";
+import { TrustDrawer } from "./TrustDrawer";
 
 type FeedbackValue = "up" | "down";
 type FeedbackStatus = "idle" | "saving" | "submitted" | "error";
@@ -23,6 +24,7 @@ interface ChatMessageBubbleProps {
   onEditInLegalEditor?: (message: ChatMessage) => void;
   onGenerateDocument?: (message: ChatMessage) => void;
   onTrustReview?: (message: ChatMessage, decision: "approved" | "needs_revision") => void;
+  onShowTrace?: (message: ChatMessage) => void;
 }
 
 interface MessageSection {
@@ -116,6 +118,7 @@ const BUBBLE_TEXT: Record<UiLanguage, Record<string, string>> = {
     copy: "Copy",
     edit: "Edit",
     regenerate: "Regenerate",
+    showYourWork: "Show your work",
     saving: "Saving...",
     saved: "Saved",
     failed: "Failed",
@@ -177,6 +180,7 @@ const BUBBLE_TEXT: Record<UiLanguage, Record<string, string>> = {
     basedOnSources: "Base sur {count} sources",
     copy: "Copier",
     regenerate: "Regenerer",
+    showYourWork: "Afficher le travail",
     saving: "Enregistrement...",
     saved: "Enregistre",
     failed: "Echec",
@@ -230,6 +234,7 @@ const BUBBLE_TEXT: Record<UiLanguage, Record<string, string>> = {
     basedOnSources: "Basiert auf {count} Quellen",
     copy: "Kopieren",
     regenerate: "Neu erzeugen",
+    showYourWork: "Arbeit anzeigen",
     saving: "Speichern...",
     saved: "Gespeichert",
     failed: "Fehlgeschlagen",
@@ -283,6 +288,7 @@ const BUBBLE_TEXT: Record<UiLanguage, Record<string, string>> = {
     basedOnSources: "استناداً إلى {count} مصدر",
     copy: "نسخ",
     regenerate: "إعادة التوليد",
+    showYourWork: "أظهر عملك",
     saving: "جارٍ الحفظ...",
     saved: "تم الحفظ",
     failed: "فشل",
@@ -952,7 +958,7 @@ function verificationSeverity(value: string): "low" | "medium" | "high" {
 }
 
 function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
-  const { language, message, feedback, onCopy, onRegenerate, onFeedback, onAskMissingInfo, onEditInLegalEditor, onGenerateDocument, onTrustReview } = props;
+  const { language, message, feedback, onCopy, onRegenerate, onFeedback, onAskMissingInfo, onEditInLegalEditor, onGenerateDocument, onTrustReview, onShowTrace } = props;
   const [showDownvoteReasonSelector, setShowDownvoteReasonSelector] = useState(false);
   const copy = BUBBLE_TEXT[language] || BUBBLE_TEXT.en;
   const tb = (key: string, fallback: string) => copy[key] || BUBBLE_TEXT.en[key] || fallback;
@@ -965,11 +971,18 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
   const citationCount = safeCitations.length;
   const confidence = message.meta?.confidence;
   const trustPanel = useMemo(() => extractLegalTrustPanelData(message), [message]);
-  const trustState = sourceCount > 0 || citationCount > 0
-    ? trustPanel?.verificationStatus === "verified"
-      ? "Grounded"
-      : "Partial"
-    : "Not grounded";
+  const verificationState = message.meta?.verificationState;
+  const trustState = verificationState === "grounded"
+    ? "Grounded"
+    : verificationState === "refused"
+      ? "Refused"
+      : verificationState === "partial"
+        ? "Partial"
+        : sourceCount > 0 || citationCount > 0
+          ? trustPanel?.verificationStatus === "verified"
+            ? "Grounded"
+            : "Partial"
+          : "Not grounded";
   const answerType = message.meta?.permissionDenied
     ? "Action blocked"
     : message.meta?.actionCategory === "document_generation"
@@ -1024,6 +1037,30 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
             {confidence ? <span className="assistant-meta-badge">{tb("confidence", "Confidence")}: {confidence}</span> : null}
             {sourceCount > 0 ? <span className="assistant-meta-badge">{tb("basedOnSources", "Based on {count} sources").replace("{count}", String(sourceCount))}</span> : null}
             {citationCount > 0 ? <span className="assistant-meta-badge">Citations: {citationCount}</span> : null}
+            {message.meta?.language?.translated ? (
+              <span
+                className="assistant-meta-badge language"
+                title={`Translated from ${message.meta.language.detected_input ?? "?"} → ${message.meta.language.final ?? "?"}. Citations remain in source language.`}
+              >
+                {String(message.meta.language.detected_input ?? "?").toUpperCase()} → {String(message.meta.language.final ?? "?").toUpperCase()}
+              </span>
+            ) : null}
+            {message.meta?.faithfulness && typeof message.meta.faithfulness.score === "number" ? (
+              <span
+                className={`assistant-meta-badge faithfulness ${message.meta.faithfulness.label || ""}`}
+                title={message.meta.faithfulness.summary || "NLI faithfulness vs. retrieved sources"}
+              >
+                Faithfulness: {Math.round((message.meta.faithfulness.score || 0) * 100)}%
+              </span>
+            ) : null}
+            {message.meta?.judge?.chosen ? (
+              <span
+                className="assistant-meta-badge judge"
+                title={`Dual-answer mode. Judge chose ${message.meta.judge.chosen}.`}
+              >
+                Judge: {String(message.meta.judge.chosen).toUpperCase()}
+              </span>
+            ) : null}
             {cache ? <span className="assistant-meta-badge">Cache: {cache.hit ? "hit" : "miss"}</span> : null}
             {tags.map((tag) => (
               <span key={tag} className="assistant-meta-badge tag">
@@ -1066,6 +1103,10 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
               <span className="ai-insight-note">{message.meta.aiInsight.lawyer_note}</span>
             ) : null}
           </div>
+        ) : null}
+
+        {message.role === "assistant" ? (
+          <TrustDrawer message={message} language={language} />
         ) : null}
 
         {message.meta?.attachments?.length ? (
@@ -1398,6 +1439,21 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
               <button type="button" onClick={() => onRegenerate(message)}>
                 {tb("regenerate", "Regenerate")}
               </button>
+              {onShowTrace && message.role === "assistant" && (
+                Boolean(message.meta?.executionTrace?.length) ||
+                Boolean(message.meta?.retrievalAudit) ||
+                Boolean(message.meta?.judge) ||
+                Boolean(message.meta?.irac) ||
+                Boolean(message.meta?.verificationState)
+              ) ? (
+                <button
+                  type="button"
+                  className="assistant-action-trace"
+                  onClick={() => onShowTrace(message)}
+                >
+                  {tb("showYourWork", "Show your work")}
+                </button>
+              ) : null}
               {onGenerateDocument ? (
                 <button type="button" onClick={() => onGenerateDocument(message)}>
                   {tb("generateDocument", "Generate document")}
