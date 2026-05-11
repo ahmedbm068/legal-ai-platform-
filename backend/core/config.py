@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     TRANSCRIPTION_PREWARM_ON_STARTUP: bool = True
     TRANSCRIPTION_REMOTE_ENABLED: bool = True
     N8N_WORKFLOW_WEBHOOK_URL: Optional[str] = None
+    N8N_APPOINTMENT_WEBHOOK_URL: Optional[str] = None
     N8N_WEBHOOK_SECRET: Optional[str] = None
     N8N_REQUEST_TIMEOUT_SECONDS: int = 15
     WHATSAPP_SEND_ENDPOINT: Optional[str] = None

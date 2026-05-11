@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from backend.api.client_portal_schema import (
     ClientPortalAccountOut,
+    ClientPortalAppointmentRequest,
+    ClientPortalAppointmentResponse,
     ClientPortalAssistantRequest,
     ClientPortalAssistantResponse,
     ClientPortalActivityItem,
@@ -44,9 +46,14 @@ from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.models.voice_recording import VoiceRecording
 from backend.services.auth_rate_limiter import RateLimitConfig, auth_rate_limiter
+from backend.services.appointment_n8n_service import (
+    emit_appointment_cancelled,
+    emit_appointment_created,
+)
 from backend.services.calendar_service import (
     appointment_visible_to_client,
     build_case_calendar_entries,
+    normalize_appointment_type,
     serialize_appointment,
 )
 from backend.services.ai.runtime_services import copilot_orchestration_service
@@ -1215,4 +1222,96 @@ def portal_assistant(
         "citations": result.get("citations", []),
         "execution_trace": result.get("execution_trace", []),
         "case_snapshot_version": result.get("case_snapshot_version"),
+    }
+
+
+# ── Client-facing appointment booking ──────────────────────────────────────────
+
+
+@router.post(
+    "/cases/{case_id}/appointments",
+    response_model=ClientPortalAppointmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def book_portal_appointment(
+    case_id: int,
+    payload: ClientPortalAppointmentRequest,
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    case = get_portal_case_or_404(db=db, account=account, case_id=case_id)
+
+    scheduled_at = payload.scheduled_at
+    if scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+    if scheduled_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Appointment must be scheduled in the future.")
+
+    appointment = Appointment(
+        case_id=case.id,
+        tenant_id=account.tenant_id,
+        lawyer_id=case.lawyer_id,
+        client_id=case.client_id,
+        created_by_user_id=None,
+        title=payload.title.strip(),
+        appointment_type=normalize_appointment_type(payload.appointment_type),
+        visibility_scope="shared",
+        status="scheduled",
+        scheduled_at=scheduled_at,
+        duration_minutes=payload.duration_minutes,
+        location=payload.location,
+        timezone_name=(payload.timezone_name or "UTC").strip() or "UTC",
+        notes=payload.notes,
+    )
+    db.add(appointment)
+    db.commit()
+    db.refresh(appointment)
+
+    emit_appointment_created(appointment)
+
+    return {
+        "message": "Appointment booked.",
+        "appointment": serialize_appointment(appointment),
+    }
+
+
+@router.delete(
+    "/appointments/{appointment_id}",
+    response_model=ClientPortalAppointmentResponse,
+)
+def cancel_portal_appointment(
+    appointment_id: int,
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    if not account.client_id:
+        raise HTTPException(status_code=404, detail="Appointment not found.")
+
+    appointment = (
+        db.query(Appointment)
+        .filter(
+            Appointment.id == appointment_id,
+            Appointment.tenant_id == account.tenant_id,
+            Appointment.client_id == account.client_id,
+        )
+        .first()
+    )
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found.")
+
+    if appointment.status == "cancelled":
+        return {
+            "message": "Appointment was already cancelled.",
+            "appointment": serialize_appointment(appointment),
+        }
+
+    appointment.status = "cancelled"
+    db.commit()
+    db.refresh(appointment)
+
+    emit_appointment_cancelled(appointment)
+
+    return {
+        "message": "Appointment cancelled.",
+        "appointment": serialize_appointment(appointment),
     }

@@ -164,11 +164,12 @@ export default function WorkspaceShell() {
                 <div className="shell-content-topbar" aria-label={t("workspacePreferences", "Workspace preferences")}>
                     <label className="shell-language-select compact" aria-label={t("assistantLanguageAria", "Interface language")}>
                         <select
-                            onChange={(event) => setLanguage(event.target.value as "ar" | "en" | "de")}
+                            onChange={(event) => setLanguage(event.target.value as "ar" | "en" | "fr" | "de")}
                             value={language}
                         >
                             <option value="ar">{t("languageArabic", "Arabic")}</option>
                             <option value="en">{t("languageEnglish", "English")}</option>
+                            <option value="fr">{t("languageFrench", "French")}</option>
                             <option value="de">{t("languageGerman", "German")}</option>
                         </select>
                     </label>

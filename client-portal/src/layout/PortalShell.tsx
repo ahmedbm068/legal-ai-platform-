@@ -10,6 +10,7 @@ const ROUTE_BY_VIEW: Record<string, string> = {
     requests: "/requests",
     assistant: "/assistant",
     calendar: "/calendar",
+    book: "/book",
     profile: "/profile",
 };
 

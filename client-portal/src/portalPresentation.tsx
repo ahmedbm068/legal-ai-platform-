@@ -11,7 +11,7 @@ export const PASSWORD_POLICY_REGEX = /^(?=.*[A-Z])(?=.*[^A-Za-z0-9]).{10,}$/;
 export const PASSWORD_HINT =
     "Password must be at least 10 characters and include one uppercase letter and one symbol.";
 
-export type PortalView = "dashboard" | "cases" | "documents" | "requests" | "assistant" | "calendar" | "profile";
+export type PortalView = "dashboard" | "cases" | "documents" | "requests" | "assistant" | "calendar" | "book" | "profile";
 export type ThemeMode = "light" | "dark";
 
 export const NAV_ITEMS: Array<{ id: PortalView; title: string; subtitle: string }> = [
@@ -21,6 +21,7 @@ export const NAV_ITEMS: Array<{ id: PortalView; title: string; subtitle: string 
     { id: "requests", title: "Intake requests", subtitle: "Submit updates and materials" },
     { id: "assistant", title: "AI assistant", subtitle: "Structured legal guidance" },
     { id: "calendar", title: "Calendar", subtitle: "Appointments and AI planning" },
+    { id: "book", title: "Book a meeting", subtitle: "Schedule a new rendez-vous" },
     { id: "profile", title: "Profile", subtitle: "Account and workspace" },
 ];
 

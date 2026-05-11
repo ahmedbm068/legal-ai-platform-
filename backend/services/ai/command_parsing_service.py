@@ -47,7 +47,18 @@ class CommandParsingService:
         "eleven": 11,
         "twelve": 12,
     }
-    SUMMARY_KEYWORDS = ["summarize", "summary", "recap", "overview", "brief", "synopsis", "tldr", "tl;dr"]
+    SUMMARY_KEYWORDS = [
+        # English
+        "summarize", "summary", "recap", "overview", "brief", "synopsis", "tldr", "tl;dr",
+        # French — both accented and unaccented forms; the unaccented "resume"
+        # is also handled by the dedicated branch lower in this file (~line 900)
+        # but we list it here too so it lights up in every code path that
+        # iterates over SUMMARY_KEYWORDS (intent routing, classifier hints, etc.).
+        "résume", "résumer", "résumé", "resumer", "resume",
+        "synthèse", "synthese", "aperçu", "apercu", "vue d'ensemble", "récapitulatif", "recapitulatif",
+        # Arabic
+        "لخص", "ملخص", "تلخيص", "خلاصة", "ملخّص",
+    ]
     SUMMARY_ONLY_HINTS = [
         "summary only",
         "only summary",
@@ -456,6 +467,10 @@ class CommandParsingService:
     def parse(self, message: str) -> Dict[str, Any]:
         original_message = (message or "").strip()
         lowered = self._normalize_for_intent(original_message)
+        # Stash a unicode-preserving lowercased form so non-ASCII keyword
+        # checks (Arabic / Hebrew / etc.) can match against the original
+        # script — the ASCII fold above strips them.
+        self._unicode_lowered_message = self._lowered_with_unicode(original_message)
 
         case_match = self.CASE_PATTERN.search(original_message)
         document_match = self.DOCUMENT_PATTERN.search(original_message)
@@ -886,6 +901,10 @@ class CommandParsingService:
 
     @staticmethod
     def _normalize_for_intent(value: str) -> str:
+        # ASCII-folded form: "résume" -> "resume", "café" -> "cafe".
+        # This MUST stay ASCII because most keyword lists use unaccented English.
+        # Trade-off: it strips Arabic / Cyrillic / CJK entirely, so callers that
+        # need to match those scripts use ``_lowered_with_unicode`` instead.
         normalized = unicodedata.normalize("NFKD", value or "")
         normalized = normalized.encode("ascii", "ignore").decode("ascii")
         normalized = normalized.lower()
@@ -893,8 +912,27 @@ class CommandParsingService:
         normalized = re.sub(r"\s+", " ", normalized).strip()
         return normalized
 
+    @staticmethod
+    def _lowered_with_unicode(value: str) -> str:
+        """Lowercase + whitespace-collapse but preserve non-ASCII characters.
+
+        Used as a *secondary* match target for keywords containing Arabic /
+        Hebrew / Cyrillic / etc. so they aren't silently lost by the ASCII
+        fold in ``_normalize_for_intent``.
+        """
+        return re.sub(r"\s+", " ", (value or "").lower()).strip()
+
     def _looks_like_summary_request(self, *, lowered: str, target_type: Optional[str]) -> bool:
         if self._contains_any(lowered, self.SUMMARY_KEYWORDS):
+            return True
+
+        # The `lowered` argument is ASCII-folded (so accented French still
+        # matches), but that fold strips Arabic / Hebrew / Cyrillic. Re-check
+        # the *raw* lowercased message — held on the parser instance just
+        # before _detect_intent runs — so keywords like "لخص" / "ملخص"
+        # are not silently dropped.
+        unicode_lowered = getattr(self, "_unicode_lowered_message", None)
+        if unicode_lowered and self._contains_any(unicode_lowered, self.SUMMARY_KEYWORDS):
             return True
 
         # In this product context, users often say "resume" meaning "summary/resume of the case".

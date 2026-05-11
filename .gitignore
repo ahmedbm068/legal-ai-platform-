@@ -38,3 +38,17 @@ faiss_metadata.json
 # Local ML model checkpoints and generated artifacts
 docs/ml/models/**/model.safetensors
 docs/ml/outputs/
+
+# Fine-tuned reranker model weights (download separately, do not commit)
+backend/models_local/
+
+# Generated training datasets and progress checkpoints
+data/training/
+
+# Claude Code local settings and MCP configuration
+.claude/
+.mcp.json
+
+# Stray backup and download files
+*.bak
+main (*).pdf

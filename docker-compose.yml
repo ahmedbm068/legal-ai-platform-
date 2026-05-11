@@ -6,19 +6,38 @@ services:
     ports:
       - "5678:5678"
     environment:
-      N8N_HOST: localhost
+      N8N_HOST: ${N8N_PUBLIC_HOST:-localhost}
       N8N_PORT: 5678
-      N8N_PROTOCOL: http
-      WEBHOOK_URL: http://localhost:5678/
+      N8N_PROTOCOL: ${N8N_PUBLIC_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678/}
       LEGAL_AI_BACKEND_URL: ${LEGAL_AI_BACKEND_URL:-http://host.docker.internal:8000}
       # Development default only. Override N8N_WEBHOOK_SECRET outside local demos.
       N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:-dev-only-legal-ai-n8n-secret}
-      GENERIC_TIMEZONE: UTC
+      GENERIC_TIMEZONE: ${N8N_TIMEZONE:-Africa/Tunis}
+      TZ: ${N8N_TIMEZONE:-Africa/Tunis}
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
     volumes:
       - n8n_data:/home/node/.n8n
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # Cloudflare Tunnel: gives n8n a stable public HTTPS URL so the backend
+  # (and Google Calendar / Gmail OAuth callbacks) can reach it without
+  # exposing ports on your laptop. Disabled by default. To enable:
+  #   1. cloudflared tunnel login
+  #   2. cloudflared tunnel create legal-ai-n8n
+  #   3. Put the tunnel token in .env as CLOUDFLARE_TUNNEL_TOKEN=...
+  #   4. docker compose --profile tunnel up -d cloudflared
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: legal_ai_cloudflared
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - n8n
 
   postgres:
     image: postgres:15

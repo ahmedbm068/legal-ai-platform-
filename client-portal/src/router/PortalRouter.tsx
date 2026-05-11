@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import PortalShell from "../layout/PortalShell";
 import PortalAssistantPage from "../pages/PortalAssistantPage";
 import PortalAuthPage from "../pages/PortalAuthPage";
+import PortalBookingPage from "../pages/PortalBookingPage";
 import PortalCalendarPage from "../pages/PortalCalendarPage";
 import PortalCasesPage from "../pages/PortalCasesPage";
 import PortalDashboardPage from "../pages/PortalDashboardPage";
@@ -24,6 +25,7 @@ export default function PortalRouter() {
                     <Route path="/requests" element={<PortalIntakePage />} />
                     <Route path="/assistant" element={<PortalAssistantPage />} />
                     <Route path="/calendar" element={<PortalCalendarPage />} />
+                    <Route path="/book" element={<PortalBookingPage />} />
                     <Route path="/profile" element={<PortalProfilePage />} />
                 </Route>
             </Route>

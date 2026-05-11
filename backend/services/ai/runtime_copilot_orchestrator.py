@@ -28,6 +28,10 @@ from backend.services.ai.copilot_pipeline_contracts import (
 )
 from backend.services.ai.copilot_service import CopilotService
 from backend.services.ai.legal_trust_service import legal_trust_service
+from backend.services.ai.semantic_cache_service import (
+    ScopeKey as SemanticCacheScope,
+    semantic_cache_service,
+)
 
 
 class CopilotGraphState(TypedDict, total=False):
@@ -447,6 +451,46 @@ class RuntimeCopilotOrchestrator:
             save_attachments_to_case=save_attachments_to_case,
             attachment_case_id=attachment_case_id,
         )
+
+        # ── Semantic cache lookup ────────────────────────────────────────────
+        # Skip cache when the user attached files (the response depends on them
+        # and "same question" + "different files" must not collide).
+        cache_scope = SemanticCacheScope(
+            tenant_id=int(tenant_id),
+            user_id=int(user_id) if user_id is not None else None,
+            case_id=int(workspace_case_id) if workspace_case_id is not None else None,
+            document_id=int(workspace_document_id) if workspace_document_id is not None else None,
+            mode=str(mode or "default").lower(),
+            output_language=str(output_language or "auto").lower(),
+            agent_mode=bool(agent_mode),
+        )
+        cache_eligible = not bool(attachments)
+        if cache_eligible:
+            try:
+                cached_hit = semantic_cache_service.lookup(
+                    question=message,
+                    scope=cache_scope,
+                )
+            except Exception:
+                _graph_logger.exception("[GRAPH] semantic_cache lookup_failed")
+                cached_hit = None
+            if cached_hit is not None:
+                cached_response = dict(cached_hit.response)
+                cached_response["cache"] = {
+                    "key": str(cached_response.get("cache", {}).get("key") or ""),
+                    "hit": True,
+                    "backend": "semantic",
+                    "similarity": round(cached_hit.similarity, 4),
+                    "original_question": cached_hit.original_question,
+                }
+                cached_response["call_id"] = request_id
+                _graph_logger.info(
+                    "[GRAPH] semantic_cache hit | rid=%s similarity=%.3f",
+                    request_id,
+                    cached_hit.similarity,
+                )
+                return cached_response
+
         initial_state: CopilotGraphState = {
             # identity
             "request_id": request_id,
@@ -559,6 +603,22 @@ class RuntimeCopilotOrchestrator:
             _graph_logger.exception(
                 "[GRAPH] trace_persistence_failed | rid=%s", request_id
             )
+
+        # ── Semantic cache store ─────────────────────────────────────────────
+        # Same eligibility check as lookup (no attachments). Errors are
+        # swallowed: a cache write must never break the user response.
+        if cache_eligible and isinstance(result, dict):
+            try:
+                semantic_cache_service.store(
+                    question=message,
+                    scope=cache_scope,
+                    response=result,
+                )
+            except Exception:
+                _graph_logger.exception(
+                    "[GRAPH] semantic_cache store_failed | rid=%s", request_id
+                )
+
         return result
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -2843,11 +2903,16 @@ class RuntimeCopilotOrchestrator:
             resolved_intent = "summarize_document"
             reason = "document_review_route"
         elif workflow_kind == "legal_analysis" and original_intent in {"ask_global", "summarize_global"}:
+            # Preserve the summarize-vs-ask distinction when scoping. Without
+            # this branch, "summarize this case" was being collapsed to
+            # ask_case which routes to a context-dump fallback rather than
+            # the structured 8-section summary agent.
+            wants_summary = original_intent == "summarize_global"
             if has_document_scope:
-                resolved_intent = "ask_document"
+                resolved_intent = "summarize_document" if wants_summary else "ask_document"
                 reason = "structured_document_scope_route"
             elif has_case_scope:
-                resolved_intent = "ask_case"
+                resolved_intent = "summarize_case" if wants_summary else "ask_case"
                 reason = "structured_case_scope_route"
 
         if resolved_intent != original_intent:

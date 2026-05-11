@@ -1,11 +1,27 @@
 import type {
   ClientPortalAssistantResponse,
+  ClientPortalCalendarItem,
   ClientPortalDashboard,
   ClientPortalMessageResponse,
   ClientPortalToken,
   PublicIntakeResponse,
   PublicIntakeStatus,
 } from "../types";
+
+export interface BookPortalAppointmentPayload {
+  title: string;
+  scheduled_at: string;
+  duration_minutes?: number;
+  appointment_type?: string;
+  location?: string | null;
+  timezone_name?: string | null;
+  notes?: string | null;
+}
+
+export interface PortalAppointmentResponse {
+  message: string;
+  appointment: ClientPortalCalendarItem;
+}
 
 function resolveApiBaseUrl(): string {
   const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -167,6 +183,35 @@ export async function uploadPortalCaseMaterials(
   });
 
   return parseResponse<ClientPortalDashboard>(response);
+}
+
+export async function bookPortalAppointment(
+  token: string,
+  caseId: number,
+  payload: BookPortalAppointmentPayload
+): Promise<PortalAppointmentResponse> {
+  const response = await fetch(`${API_BASE_URL}/portal/cases/${caseId}/appointments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return parseResponse<PortalAppointmentResponse>(response);
+}
+
+export async function cancelPortalAppointment(
+  token: string,
+  appointmentId: number
+): Promise<PortalAppointmentResponse> {
+  const response = await fetch(`${API_BASE_URL}/portal/appointments/${appointmentId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return parseResponse<PortalAppointmentResponse>(response);
 }
 
 export async function askPortalAssistant(

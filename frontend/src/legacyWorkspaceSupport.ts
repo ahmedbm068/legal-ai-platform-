@@ -12,7 +12,7 @@ export const DEFAULT_LAWYER_PHONE = "+216 24 996 073";
 export const CHAT_GLOBAL_SCOPE_ID = 0;
 
 export type ThemeMode = "dark" | "light";
-export type UiLanguage = "en" | "de" | "ar";
+export type UiLanguage = "en" | "fr" | "de" | "ar";
 export type WorkspaceMode = "chat" | "agent" | "legal_search";
 export type ReasoningLevel = "low" | "medium" | "high";
 export type FeedbackValue = "up" | "down";

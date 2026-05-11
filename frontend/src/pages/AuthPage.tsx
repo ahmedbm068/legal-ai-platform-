@@ -60,17 +60,32 @@ export default function AuthPage() {
     }
 
     return (
-        <section className="shell-page shell-auth-page">
-            <article className="shell-card shell-auth-card">
-                <header className="shell-page-header">
-                    <p className="shell-page-kicker">{t("authKicker", "Secure Access")}</p>
-                    <h2>{mode === "login" ? t("authSignInTitle", "Sign in to your legal workspace") : t("authRegisterTitle", "Create your legal workspace account")}</h2>
-                    <p>
-                        {mode === "login"
-                            ? t("authSignInSubtitle", "Use your existing credentials to open routed workspace pages.")
-                            : t("authRegisterSubtitle", "Register once, then sign in to continue.")}
-                    </p>
-                </header>
+        <section className="shell-auth-page">
+            <aside className="shell-auth-brand">
+                <span className="shell-auth-brand-mark">
+                    <span>Legal AI Platform</span>
+                </span>
+                <div className="shell-auth-brand-headline">
+                    <h1>{t("authBrandHeadline", "Where evidence meets intelligence.")}</h1>
+                    <p>{t("authBrandSubcopy", "A legal workspace where every case, document, and deadline is augmented by AI. Built for lawyers who move fast.")}</p>
+                </div>
+                <div className="shell-auth-brand-meta">
+                    <strong>{SINGLE_FIRM_NAME}</strong>
+                    <span>Encrypted · SOC2 · EU-hosted</span>
+                </div>
+            </aside>
+
+            <div className="shell-auth-form-side">
+                <article className="shell-auth-card">
+                    <header className="shell-page-header">
+                        <p className="shell-page-kicker">{t("authKicker", "Secure Access")}</p>
+                        <h2>{mode === "login" ? t("authSignInTitle", "Sign in to your legal workspace") : t("authRegisterTitle", "Create your legal workspace account")}</h2>
+                        <p>
+                            {mode === "login"
+                                ? t("authSignInSubtitle", "Use your existing credentials to open routed workspace pages.")
+                                : t("authRegisterSubtitle", "Register once, then sign in to continue.")}
+                        </p>
+                    </header>
 
                 <form className="shell-auth-form" onSubmit={handleSubmit}>
                     {mode === "register" ? (
@@ -123,18 +138,19 @@ export default function AuthPage() {
                 {authError ? <p className="shell-error-text">{authError}</p> : null}
                 {authMessage ? <p className="shell-success-text">{authMessage}</p> : null}
 
-                <div className="shell-auth-switch">
-                    {mode === "login" ? (
-                        <button onClick={() => setMode("register")} type="button">
-                            {t("needAccount", "Need an account? Register")}
-                        </button>
-                    ) : (
-                        <button onClick={() => setMode("login")} type="button">
-                            {t("backToLogin", "Already registered? Back to login")}
-                        </button>
-                    )}
-                </div>
-            </article>
+                    <div className="shell-auth-switch">
+                        {mode === "login" ? (
+                            <button onClick={() => setMode("register")} type="button">
+                                {t("needAccount", "Need an account? Register")}
+                            </button>
+                        ) : (
+                            <button onClick={() => setMode("login")} type="button">
+                                {t("backToLogin", "Already registered? Back to login")}
+                            </button>
+                        )}
+                    </div>
+                </article>
+            </div>
         </section>
     );
 }

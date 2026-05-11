@@ -10,8 +10,10 @@ from sqlalchemy.orm import Session, selectinload
 from backend.api.call_schema import CallSessionOut
 from backend.core.config import settings
 from backend.core.deps import get_db
+from backend.models.appointment import Appointment
 from backend.models.call_session import CallSession
 from backend.models.voice_recording import VoiceRecording
+from backend.services.calendar_service import normalize_status, serialize_appointment
 from backend.services.call_transcript_service import build_conversation_transcript, build_call_summary
 
 
@@ -154,4 +156,77 @@ def receive_n8n_event(
         "success": True,
         "message": f"Processed n8n event '{payload.event_type}'.",
         "call_session": call_session,
+    }
+
+
+# ── Appointment sync (Google Calendar → DB via n8n) ────────────────────────────
+
+
+class N8nAppointmentSync(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    appointment_id: int = Field(..., ge=1)
+    scheduled_at: datetime | None = None
+    duration_minutes: int | None = Field(default=None, ge=1, le=24 * 60)
+    status: str | None = Field(default=None, max_length=40)
+    location: str | None = Field(default=None, max_length=255)
+    title: str | None = Field(default=None, max_length=255)
+    notes: str | None = Field(default=None, max_length=4000)
+
+
+class N8nAppointmentSyncResponse(BaseModel):
+    success: bool
+    message: str
+    appointment: dict[str, Any] | None = None
+
+
+@router.post("/appointments/sync", response_model=N8nAppointmentSyncResponse)
+def sync_appointment_from_n8n(
+    payload: N8nAppointmentSync,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Apply an external (Google Calendar) change back to a stored appointment.
+
+    Called by n8n when a lawyer reschedules, renames, or cancels an event in
+    their connected Google Calendar. Tenant scoping is implicit: the
+    appointment_id is the source of truth, and the shared n8n secret gates
+    the route.
+    """
+    _verify_shared_secret(request)
+
+    appointment = (
+        db.query(Appointment)
+        .options(
+            selectinload(Appointment.case),
+            selectinload(Appointment.client),
+            selectinload(Appointment.lawyer),
+            selectinload(Appointment.consultation_request),
+        )
+        .filter(Appointment.id == payload.appointment_id)
+        .first()
+    )
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    if payload.scheduled_at is not None:
+        appointment.scheduled_at = payload.scheduled_at
+    if payload.duration_minutes is not None:
+        appointment.duration_minutes = payload.duration_minutes
+    if payload.status is not None:
+        appointment.status = normalize_status(payload.status)
+    if payload.location is not None:
+        appointment.location = payload.location
+    if payload.title is not None:
+        appointment.title = payload.title.strip() or appointment.title
+    if payload.notes is not None:
+        appointment.notes = payload.notes
+
+    db.commit()
+    db.refresh(appointment)
+
+    return {
+        "success": True,
+        "message": f"Appointment {appointment.id} synced from n8n.",
+        "appointment": serialize_appointment(appointment),
     }

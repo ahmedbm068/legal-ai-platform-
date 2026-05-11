@@ -215,13 +215,11 @@ export default function AssistantPage() {
         } catch { /* localStorage unavailable */ }
         return "medium";
     });
-    const [outputLanguage, setOutputLanguage] = useState<OutputLanguage>(() => {
-        try {
-            const stored = window.localStorage.getItem("lai.outputLanguage");
-            if (stored === "auto" || stored === "fr" || stored === "ar" || stored === "en") return stored;
-        } catch { /* localStorage unavailable */ }
-        return "auto";
-    });
+    // Output language is always auto-detected from the user's prompt — the
+    // backend mirrors the input language back in its reply. The picker UI was
+    // removed by user request; we keep the variable so the `outputLanguage`
+    // field still reaches the copilot endpoint without further refactoring.
+    const outputLanguage: OutputLanguage = "auto";
     const [externalModeEnabled, setExternalModeEnabled] = useState(false);
     const [optimizingPrompt, setOptimizingPrompt] = useState(false);
     const [composerRecording, setComposerRecording] = useState(false);
@@ -849,6 +847,32 @@ export default function AssistantPage() {
                     {t("dropFilesToAttach", "Drop files to attach")}
                 </div>
             ) : null}
+            {activeCaseId && selectedCase ? (
+                <div className="minimal-case-scope-chip" aria-live="polite">
+                    <span className="minimal-case-scope-chip__icon" aria-hidden="true">
+                        <svg viewBox="0 0 20 20" width="14" height="14">
+                            <path d="M3 6.2c0-.9.7-1.6 1.6-1.6h3.2l1.6 1.6h6c.9 0 1.6.7 1.6 1.6v6.4c0 .9-.7 1.6-1.6 1.6H4.6C3.7 15.8 3 15.1 3 14.2V6.2z" fill="currentColor"/>
+                        </svg>
+                    </span>
+                    <span className="minimal-case-scope-chip__label">
+                        <strong>
+                            {t("caseScopedTo", "Working on")}: #{activeCaseId}
+                        </strong>
+                        <em>{selectedCase.title}</em>
+                    </span>
+                    {!routeCaseId ? (
+                        <button
+                            aria-label={t("clearCaseScope", "Clear case scope")}
+                            className="minimal-case-scope-chip__close"
+                            onClick={() => setSelectedCaseId(null)}
+                            title={t("clearCaseScope", "Clear case scope")}
+                            type="button"
+                        >
+                            x
+                        </button>
+                    ) : null}
+                </div>
+            ) : null}
             {pendingFiles.length ? (
                 <div className="minimal-file-chips" aria-label={t("attachedFiles", "Attached files")}>
                     {pendingFiles.map((item) => (
@@ -981,24 +1005,6 @@ export default function AssistantPage() {
                         <option value="medium">Balanced</option>
                         <option value="high">Deep</option>
                         <option value="deep">Deep + Judge (2x cost)</option>
-                    </select>
-                </label>
-                <label>
-                    <span>{t("outputLanguageLabel", "Language")}</span>
-                    <select
-                        disabled={copilotLoading || optimizingPrompt || composerRecording}
-                        onChange={(event) => {
-                            const next = event.target.value as OutputLanguage;
-                            setOutputLanguage(next);
-                            try { window.localStorage.setItem("lai.outputLanguage", next); } catch { /* ignore */ }
-                        }}
-                        value={outputLanguage}
-                        title={t("outputLanguageHint", "Reply language. Citations stay in their original language.")}
-                    >
-                        <option value="auto">Auto</option>
-                        <option value="fr">Français</option>
-                        <option value="ar">العربية</option>
-                        <option value="en">English</option>
                     </select>
                 </label>
                 {assistantMode === "agent" ? <span>{t("agentModeSafe", "Write actions require confirmation.")}</span> : null}

@@ -175,3 +175,20 @@ class ClientPortalAssistantResponse(BaseModel):
     citations: list[dict] = Field(default_factory=list)
     execution_trace: list[dict] = Field(default_factory=list)
     case_snapshot_version: Optional[int] = None
+
+
+class ClientPortalAppointmentRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    title: str = Field(..., min_length=2, max_length=255)
+    scheduled_at: datetime
+    duration_minutes: int = Field(default=30, ge=15, le=8 * 60)
+    appointment_type: Optional[str] = Field(default="meeting", max_length=40)
+    location: Optional[str] = Field(default=None, max_length=255)
+    timezone_name: Optional[str] = Field(default="UTC", max_length=80)
+    notes: Optional[str] = Field(default=None, max_length=4000)
+
+
+class ClientPortalAppointmentResponse(BaseModel):
+    message: str
+    appointment: dict

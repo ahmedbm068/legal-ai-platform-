@@ -340,10 +340,23 @@ def copilot(
             logging.getLogger(__name__).exception("nli_faithfulness_scoring_failed")
     # ── Multilingual post-pass: translate the answer into the requested
     # output language. Citations and statute names stay in source language.
-    # Skipped automatically when output_language == "auto" or already matches.
+    #
+    # When the client sends "auto" we resolve it to the language of the
+    # *user's prompt* so the assistant mirrors the input language. Without
+    # this step the multilingual service treats "auto" as a no-op and the
+    # English LLM output reaches the user unchanged.
+    _target_lang = data.output_language
+    if not _target_lang or _target_lang.strip().lower() == "auto":
+        from backend.services.ai.multilingual_service import detect_language as _detect_lang
+        _target_lang = _detect_lang(data.message or "")
+        logging.getLogger(__name__).info(
+            "auto_language_resolved | input=%r detected=%s",
+            (data.message or "")[:80],
+            _target_lang,
+        )
     multilingual_service.ensure_language(
         response,
-        target_language=data.output_language,
+        target_language=_target_lang,
         language_strict=data.language_strict,
     )
     # ── Strip the candidates payload if the client did not request them

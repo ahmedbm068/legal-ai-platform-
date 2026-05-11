@@ -12,6 +12,11 @@ from backend.models.appointment import Appointment
 from backend.models.case import Case
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.user import User
+from backend.services.appointment_n8n_service import (
+    emit_appointment_cancelled,
+    emit_appointment_created,
+    emit_appointment_updated,
+)
 from backend.services.calendar_service import (
     build_ai_calendar_brief,
     build_case_calendar_entries,
@@ -165,6 +170,7 @@ def create_case_appointment(
     db.refresh(appointment)
 
     appointment = get_tenant_appointment_or_404(db=db, appointment_id=appointment.id, current_user=current_user)
+    emit_appointment_created(appointment)
     message = "Appointment created and calendar AI notes updated."
     return {"message": message, "appointment": serialize_appointment(appointment)}
 
@@ -212,6 +218,8 @@ def update_appointment(
     db.commit()
     db.refresh(appointment)
 
+    emit_appointment_updated(appointment)
+
     return {
         "message": "Appointment updated successfully.",
         "appointment": serialize_appointment(appointment),
@@ -232,6 +240,8 @@ def cancel_appointment(
     appointment.status = "cancelled"
     db.commit()
     db.refresh(appointment)
+
+    emit_appointment_cancelled(appointment)
 
     return {
         "message": "Appointment cancelled.",

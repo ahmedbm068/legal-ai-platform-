@@ -1,0 +1,228 @@
+{
+  "name": "Appointment Lifecycle",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "appointments",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-1",
+      "name": "Webhook: appointment.*",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [220, 320],
+      "webhookId": "appointments-lifecycle"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.body.event_type}}",
+                    "rightValue": "appointment.created",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "created"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.body.event_type}}",
+                    "rightValue": "appointment.updated",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "updated"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "leftValue": "={{$json.body.event_type}}",
+                    "rightValue": "appointment.cancelled",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "cancelled"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "none" }
+      },
+      "id": "switch-1",
+      "name": "Switch by event_type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [460, 320]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"ok\": true }",
+        "options": {}
+      },
+      "id": "respond-1",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [460, 80]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.PORTAL_EMAIL_FROM}}",
+        "toEmail": "={{$json.body.appointment.client.email}}",
+        "subject": "=Confirmation rendez-vous: {{$json.body.appointment.title}}",
+        "emailType": "html",
+        "html": "=<p>Bonjour {{$json.body.appointment.client.name}},</p><p>Votre rendez-vous <b>{{$json.body.appointment.title}}</b> est confirmé pour le <b>{{$json.body.appointment.scheduled_at}}</b> ({{$json.body.appointment.duration_minutes}} min, {{$json.body.appointment.timezone_name}}).</p><p>{{$json.body.appointment.notes || ''}}</p><p>— {{$env.CLIENT_PORTAL_FIRM_NAME}}</p>",
+        "options": {}
+      },
+      "id": "email-confirm",
+      "name": "Email: confirmation",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [760, 200],
+      "credentials": {
+        "smtp": { "id": "REPLACE_WITH_SMTP_CREDENTIAL_ID", "name": "Firm SMTP" }
+      }
+    },
+    {
+      "parameters": {
+        "calendar": { "__rl": true, "value": "primary", "mode": "list" },
+        "start": "={{$json.body.appointment.scheduled_at}}",
+        "end": "={{$json.body.appointment.end_at}}",
+        "summary": "={{$json.body.appointment.title}}",
+        "additionalFields": {
+          "description": "=Client: {{$json.body.appointment.client.name}}\nDossier: {{$json.body.appointment.case_title}}\nID interne: {{$json.body.appointment.appointment_id}}\n{{$json.body.appointment.notes || ''}}",
+          "location": "={{$json.body.appointment.location || ''}}",
+          "attendees": "={{$json.body.appointment.client.email}}"
+        }
+      },
+      "id": "gcal-create",
+      "name": "Google Calendar: create event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.2,
+      "position": [760, 360],
+      "credentials": {
+        "googleCalendarOAuth2Api": { "id": "REPLACE_WITH_GCAL_CREDENTIAL_ID", "name": "Lawyer GCal" }
+      }
+    },
+    {
+      "parameters": {
+        "unit": "minutes",
+        "amount": 1,
+        "resume": "timeInterval"
+      },
+      "id": "wait-24h",
+      "name": "Wait until T-24h",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [760, 540],
+      "notesInFlow": true,
+      "notes": "Replace 'amount' with the difference between scheduled_at - 24h and now() via an upstream Set node if you want real T-24h timing."
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.PORTAL_EMAIL_FROM}}",
+        "toEmail": "={{$json.body.appointment.client.email}}",
+        "subject": "=Rappel rendez-vous demain: {{$json.body.appointment.title}}",
+        "emailType": "html",
+        "html": "=<p>Bonjour {{$json.body.appointment.client.name}}, ceci est un rappel de votre rendez-vous prévu demain à {{$json.body.appointment.scheduled_at}}.</p>",
+        "options": {}
+      },
+      "id": "email-24h",
+      "name": "Email: reminder T-24h",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [980, 540],
+      "credentials": {
+        "smtp": { "id": "REPLACE_WITH_SMTP_CREDENTIAL_ID", "name": "Firm SMTP" }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.PORTAL_EMAIL_FROM}}",
+        "toEmail": "={{$json.body.appointment.client.email}}",
+        "subject": "=Mise à jour rendez-vous: {{$json.body.appointment.title}}",
+        "emailType": "html",
+        "html": "=<p>Bonjour {{$json.body.appointment.client.name}}, votre rendez-vous a été mis à jour.</p><p>Nouvelle date/heure: <b>{{$json.body.appointment.scheduled_at}}</b> ({{$json.body.appointment.duration_minutes}} min)</p>",
+        "options": {}
+      },
+      "id": "email-updated",
+      "name": "Email: updated",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [760, 720],
+      "credentials": {
+        "smtp": { "id": "REPLACE_WITH_SMTP_CREDENTIAL_ID", "name": "Firm SMTP" }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{$env.PORTAL_EMAIL_FROM}}",
+        "toEmail": "={{$json.body.appointment.client.email}}",
+        "subject": "=Annulation rendez-vous: {{$json.body.appointment.title}}",
+        "emailType": "html",
+        "html": "=<p>Bonjour {{$json.body.appointment.client.name}}, votre rendez-vous prévu le {{$json.body.appointment.scheduled_at}} a été annulé.</p>",
+        "options": {}
+      },
+      "id": "email-cancelled",
+      "name": "Email: cancelled",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [760, 900],
+      "credentials": {
+        "smtp": { "id": "REPLACE_WITH_SMTP_CREDENTIAL_ID", "name": "Firm SMTP" }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: appointment.*": {
+      "main": [
+        [
+          { "node": "Respond 200", "type": "main", "index": 0 },
+          { "node": "Switch by event_type", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Switch by event_type": {
+      "main": [
+        [
+          { "node": "Email: confirmation", "type": "main", "index": 0 },
+          { "node": "Google Calendar: create event", "type": "main", "index": 0 },
+          { "node": "Wait until T-24h", "type": "main", "index": 0 }
+        ],
+        [ { "node": "Email: updated", "type": "main", "index": 0 } ],
+        [ { "node": "Email: cancelled", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Wait until T-24h": {
+      "main": [ [ { "node": "Email: reminder T-24h", "type": "main", "index": 0 } ] ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true
+  },
+  "active": false,
+  "tags": [
+    { "name": "appointments" },
+    { "name": "legal-ai" }
+  ]
+}
