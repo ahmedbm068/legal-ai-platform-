@@ -228,6 +228,7 @@ export const api = {
       mode?: "default" | "legal_search";
       legalSearchMultilingualOutput?: boolean;
       legalSearchCodeScope?: string[];
+      legalSearchCaseGrounded?: boolean;
       agentMode?: boolean;
       workspaceCaseId?: number | null;
       workspaceDocumentId?: number | null;
@@ -250,6 +251,7 @@ export const api = {
         mode: options?.mode ?? "default",
         legal_search_multilingual_output: options?.legalSearchMultilingualOutput ?? false,
         legal_search_code_scope: options?.legalSearchCodeScope ?? [],
+        legal_search_case_grounded: options?.legalSearchCaseGrounded ?? false,
         agent_mode: options?.agentMode ?? false,
         workspace_case_id: options?.workspaceCaseId ?? null,
         workspace_document_id: options?.workspaceDocumentId ?? null,

@@ -27,6 +27,7 @@ const COPY: Record<UiLanguage, Record<string, string>> = {
     primary: "primary",
     steelman: "steelman counter-position",
     none: "None flagged",
+    faithfulnessSkipped: "Faithfulness scoring skipped — no grounded claims to score.",
     verifyArticle: "Verify the article number against the official text",
     verifyQuotation: "Verify the quoted rule wording matches the source",
     verifyDate: "Verify the statute is current at the relevant date",
@@ -50,6 +51,7 @@ const COPY: Record<UiLanguage, Record<string, string>> = {
     primary: "principal",
     steelman: "contre-position renforcée",
     none: "Aucun signalé",
+    faithfulnessSkipped: "Notation de fidélité ignorée — aucune revendication fondée à évaluer.",
     verifyArticle: "Vérifier le numéro d’article dans le texte officiel",
     verifyQuotation: "Vérifier que la formulation citée correspond à la source",
     verifyDate: "Vérifier que le texte est en vigueur à la date concernée",
@@ -73,6 +75,7 @@ const COPY: Record<UiLanguage, Record<string, string>> = {
     primary: "primär",
     steelman: "Steelman-Gegenposition",
     none: "Keine markiert",
+    faithfulnessSkipped: "Treue-Bewertung übersprungen — keine fundierten Aussagen.",
     verifyArticle: "Artikelnummer mit dem amtlichen Text abgleichen",
     verifyQuotation: "Wortlaut der zitierten Regel mit der Quelle abgleichen",
     verifyDate: "Geltungsdatum des Gesetzestextes prüfen",
@@ -96,6 +99,7 @@ const COPY: Record<UiLanguage, Record<string, string>> = {
     primary: "أساسي",
     steelman: "موقف مضاد مدعّم",
     none: "لا شيء",
+    faithfulnessSkipped: "تم تخطّي تقييم الأمانة — لا توجد ادعاءات مدعّمة لتقييمها.",
     verifyArticle: "تحقق من رقم المادة في النص الرسمي",
     verifyQuotation: "تحقق من تطابق الاقتباس مع المصدر",
     verifyDate: "تحقق من سريان النص في التاريخ المعني",
@@ -121,12 +125,21 @@ function TrustDrawerImpl({ message, language }: TrustDrawerProps) {
 
   const hasVerifier = Boolean(verificationState || verificationReason);
   const hasJudge = Boolean(judge && (judge.chosen || judge.reasoning || judge.scores));
-  const hasFaithfulness = Boolean(faithfulness && Array.isArray(faithfulness.claims) && faithfulness.claims.length > 0);
+  // Faithfulness is only meaningful when the answer was actually grounded — on
+  // verifier refusal or when scoring was skipped, the only "claim" is the
+  // refusal disclaimer itself, which scores ~0 and misleads the reader.
+  const faithfulnessSkippedReason = faithfulness?.skipped_reason ?? null;
+  const isRefusalOrSkipped =
+    verificationState === "refused" || Boolean(faithfulnessSkippedReason);
+  const hasFaithfulness =
+    Boolean(faithfulness && Array.isArray(faithfulness.claims) && faithfulness.claims.length > 0)
+    && !isRefusalOrSkipped;
+  const showFaithfulnessSkipped = Boolean(faithfulness) && isRefusalOrSkipped;
   const hasMissing = missingFacts.length > 0;
   const hasSources = sources.length > 0;
   const hasRetrieval = Boolean(retrievalAudit);
 
-  if (!hasVerifier && !hasJudge && !hasFaithfulness && !hasMissing && !hasSources && !hasRetrieval) {
+  if (!hasVerifier && !hasJudge && !hasFaithfulness && !showFaithfulnessSkipped && !hasMissing && !hasSources && !hasRetrieval) {
     return null;
   }
 
@@ -216,6 +229,11 @@ function TrustDrawerImpl({ message, language }: TrustDrawerProps) {
                   </li>
                 ))}
               </ul>
+            </div>
+          ) : showFaithfulnessSkipped ? (
+            <div className="trust-section trust-section-faithfulness trust-section-faithfulness-skipped">
+              <h4>{t.faithfulness}</h4>
+              <p className="trust-faithfulness-skipped">{t.faithfulnessSkipped}</p>
             </div>
           ) : null}
 

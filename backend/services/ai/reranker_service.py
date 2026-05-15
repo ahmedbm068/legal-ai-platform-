@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from sentence_transformers import CrossEncoder
 
 from backend.core.config import settings
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _resolve_model_path(model_name: str) -> str:
+    candidate = PROJECT_ROOT / model_name
+    if candidate.exists():
+        return str(candidate)
+    return model_name
+
 
 class RerankerService:
     def __init__(self, model_name: str | None = None) -> None:
-        self.model_name = model_name or settings.RERANKER_MODEL
+        raw_name = model_name or settings.RERANKER_MODEL
+        self.model_name = _resolve_model_path(raw_name)
         self._model: CrossEncoder | None = None
         self._load_error: str | None = None
 

@@ -1,19 +1,22 @@
 """Canonical short summaries for the Tunisian CSP succession articles.
 
 The succession part of the Code de Statut Personnel (arts 85–152) is the
-authoritative source for inheritance shares in Tunisia. Our existing legal
-corpus (`backend/services/ai/data/legal_codes_corpus.json`) chunks the CSP
-by chapter rather than by numbered article, so direct article-level lookup
-returns nothing. To still ship traceable citations alongside the
-calculator's output, this module embeds the rule-level summary of each
-article that the calculator can reference.
+authoritative source for inheritance shares in Tunisia. The legal corpus
+(`backend/services/ai/data/legal_codes_corpus.json`) now indexes the CSP
+article-by-article under ``code_family == "code_personnel_status"``, so
+``_find_in_corpus`` returns the real article text when present.
 
-The summaries here are short, paraphrased descriptions of public law text —
+This module still embeds short paraphrased summaries as a defensive
+fallback: the calculator can produce traceable citations even if the
+corpus is missing, mis-versioned, or doesn't yet include a given article.
+Each ``CitationRef`` carries ``article``, ``code_name``, ``summary``, and
+an optional ``snippet`` populated from the corpus when available.
+
+The summaries are short, paraphrased descriptions of public law text —
 identical in spirit to what a Tunisian succession textbook would print.
-They are intentionally not the full article wording (which would belong in
-the corpus). Each entry returns a ``CitationRef`` with ``article``,
-``code_name``, ``summary`` and an empty ``snippet`` slot that the corpus
-lookup fills opportunistically.
+They are intentionally not the full article wording (which belongs in
+the corpus). Counsel should always verify against the official Journal
+Officiel de la République Tunisienne.
 """
 
 from __future__ import annotations
@@ -173,9 +176,14 @@ def _find_in_corpus(article_key: str) -> dict[str, Any] | None:
     if not article_key:
         return None
     needle = article_key.lower()
+    # The CSP is indexed under ``code_personnel_status`` (its real family),
+    # with ``code_succession`` kept as a legacy alias for older corpora.
+    accepted_families = {"code_personnel_status", "code_succession"}
     for entry in _load_corpus():
+        if entry.get("code_family") not in accepted_families:
+            continue
         article_field = str(entry.get("article") or "").strip().lower()
-        if article_field == needle and entry.get("code_family") == "code_succession":
+        if article_field == needle:
             return entry
     return None
 

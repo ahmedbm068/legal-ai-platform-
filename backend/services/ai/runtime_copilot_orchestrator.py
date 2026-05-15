@@ -418,6 +418,7 @@ class RuntimeCopilotOrchestrator:
         mode: str | None = None,
         legal_search_multilingual_output: bool = False,
         legal_search_code_scope: list[str] | None = None,
+        legal_search_case_grounded: bool = False,
         reasoning_level: str | None = None,
         output_language: str = "auto",
         language_strict: bool = True,
@@ -440,6 +441,7 @@ class RuntimeCopilotOrchestrator:
             mode=str(mode or "default"),
             legal_search_multilingual_output=legal_search_multilingual_output,
             legal_search_code_scope=list(legal_search_code_scope or []),
+            legal_search_case_grounded=bool(legal_search_case_grounded),
             reasoning_level=str(reasoning_level or "medium").strip().lower() or "medium",
             output_language=str(output_language or "auto").strip().lower() or "auto",
             language_strict=bool(language_strict),
@@ -464,7 +466,21 @@ class RuntimeCopilotOrchestrator:
             output_language=str(output_language or "auto").lower(),
             agent_mode=bool(agent_mode),
         )
-        cache_eligible = not bool(attachments)
+        from backend.services.cache_service import _SKIP_CACHE
+        # Skip the semantic cache when the question contains a specific
+        # article/paragraph identifier ("article 200", "§ 2229"). A 0.95
+        # similarity match cannot reliably distinguish article 200 from
+        # article 205 because the digits carry little semantic weight.
+        _question_has_specific_identifier = bool(
+            re.search(r"\barticle\s+\d", message.lower())
+            or re.search(r"§\s*\d", message)
+            or re.search(r"\bart\.?\s*\d", message.lower())
+        )
+        cache_eligible = (
+            not bool(attachments)
+            and not _SKIP_CACHE.get()
+            and not _question_has_specific_identifier
+        )
         if cache_eligible:
             try:
                 cached_hit = semantic_cache_service.lookup(
@@ -910,8 +926,21 @@ class RuntimeCopilotOrchestrator:
             return _chat_state
 
         # ── Prompt optimisation ────────────────────────────────────────────
+        # prompt_optimizer_agent rewrites the query into a generation task
+        # template ("Objective: …\nScope: …\nRequirements:\n- …\nOutput
+        # format:\n- …"). That is correct for RAG/generation intents, but it
+        # POISONS legal_search mode: the template tokens dominate the domain
+        # classifier and the keyword-scored legal-corpus retriever, so the
+        # right code/articles are never retrieved and the answer collapses to
+        # padded boilerplate (the user-reported "wrong articles / no real
+        # answer" in the app). Legal search must receive the clean corrected
+        # query; LegalSearchModeService._optimize_query then applies its own
+        # retrieval-safe normalization. So skip template optimization for
+        # legal_search and let optimized_message stay None (downstream falls
+        # back to the raw corrected message).
         optimized_message: str | None = None
-        if intent in self.OPTIMIZABLE_INTENTS and clean_query:
+        _is_legal_search_mode = requested_mode == "legal_search"
+        if intent in self.OPTIMIZABLE_INTENTS and clean_query and not _is_legal_search_mode:
             optimize_result = prompt_optimizer_agent.optimize_query(
                 raw_query=clean_query,
                 intent=intent,
@@ -1084,8 +1113,29 @@ class RuntimeCopilotOrchestrator:
             workflow_plan=workflow_plan,
             workspace_case_id=workspace_case_id,
             workspace_document_id=workspace_document_id,
+            mode=pipeline_request.mode,
+            legal_search_case_grounded=pipeline_request.legal_search_case_grounded,
         )
         intent = str(parsed.get("intent") or intent).strip() or intent
+
+        # Force-override for Legal Search Mode with "case grounded" toggle OFF.
+        # The intent classifier defaults to ask_case whenever a workspace case
+        # is open. That bypasses the legal-codes retrieval path. When the user
+        # explicitly chose legal_search WITHOUT case grounding, we restore
+        # ask_global so the legal corpus is searched and the fine-tuned
+        # reranker scores articles.
+        if (
+            str(pipeline_request.mode or "").strip().lower() == "legal_search"
+            and not pipeline_request.legal_search_case_grounded
+            and intent in {"ask_case", "ask_document", "summarize_case", "summarize_document"}
+        ):
+            parsed["intent"] = "ask_global"
+            parsed["target_type"] = "global"
+            parsed["target_id"] = None
+            parsed["case_id"] = None
+            parsed["document_id"] = None
+            intent = "ask_global"
+            routing_metadata = {**routing_metadata, "legal_search_override": "forced_ask_global"}
         effective_mode = self._resolve_effective_mode(
             requested_mode=pipeline_request.mode,
             workflow_plan=workflow_plan,
@@ -1200,6 +1250,7 @@ class RuntimeCopilotOrchestrator:
             mode=state["effective_mode"],
             legal_search_multilingual_output=pipeline_request.legal_search_multilingual_output,
             legal_search_code_scope=pipeline_request.legal_search_code_scope,
+            legal_search_case_grounded=pipeline_request.legal_search_case_grounded,
             reasoning_level=pipeline_request.reasoning_level,
             agent_mode=pipeline_request.agent_mode,
             workspace_case_id=state.get("workspace_case_id"),
@@ -1869,6 +1920,21 @@ class RuntimeCopilotOrchestrator:
         # uses different section headers ("Matter Understood" vs "Case Risks").
         if str(result.get("fallback_reason") or "").strip() == "case_context_no_legal_provisions":
             return
+        # ── Preserve a successful source-grounded legal-search answer ────────
+        # When legal_search mode produced a real grounded answer (not a
+        # fallback) backed by retrieved legal sources, the answer is already a
+        # complete statute-cited legal analysis. The generic
+        # final_output_composer builds its text from the global output
+        # contract (generic "Matter Understood / mixed_or_ambiguous"
+        # boilerplate), so replacing the grounded answer with it produces the
+        # empty template the user saw in the app. Keep the grounded answer.
+        if (
+            effective_mode == "legal_search"
+            and not bool(result.get("used_fallback"))
+            and not str(result.get("fallback_reason") or "").strip()
+            and (result.get("sources") or result.get("citations"))
+        ):
+            return
         workflow_kind = str(workflow_plan.get("workflow_kind") or "").strip()
         if workflow_kind != "legal_analysis" and effective_mode != "legal_search":
             return
@@ -2364,6 +2430,7 @@ class RuntimeCopilotOrchestrator:
 
         succession_hit = self._query_contains_markers(query=lowered, markers=self.SUCCESSION_MARKERS) or (
             "code_succession" in normalized_scope
+            or "code_personnel_status" in normalized_scope
         )
         intl_hit = self._query_contains_markers(query=lowered, markers=self.INTERNATIONAL_PRIVATE_MARKERS) or (
             "code_international_prive" in normalized_scope
@@ -2843,6 +2910,8 @@ class RuntimeCopilotOrchestrator:
         workflow_plan: dict[str, Any],
         workspace_case_id: int | None,
         workspace_document_id: int | None,
+        mode: str | None = None,
+        legal_search_case_grounded: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         candidate = dict(parsed)
         original_intent = str(candidate.get("intent") or "ask_global").strip() or "ask_global"
@@ -2851,6 +2920,24 @@ class RuntimeCopilotOrchestrator:
         matter_type = str(workflow_plan.get("matter_type") or "").strip()
         clean_query = str(candidate.get("clean_query") or "").strip().lower()
         reason = "no_override"
+
+        # Legal Search Mode with "case grounded" toggle OFF must keep ask_global
+        # so the legal-codes retrieval path runs (and the fine-tuned reranker
+        # scores articles). Otherwise the workflow router below downgrades
+        # ask_global → ask_case whenever a workspace case is open, which
+        # forces case-document retrieval and skips the legal corpus.
+        if (
+            str(mode or "").strip().lower() == "legal_search"
+            and not legal_search_case_grounded
+            and original_intent in {"ask_global", "summarize_global"}
+        ):
+            candidate["workflow_plan"] = workflow_plan
+            return candidate, {
+                "intent_overridden": False,
+                "original_intent": original_intent,
+                "resolved_intent": original_intent,
+                "reason": "legal_search_codes_only",
+            }
 
         has_case_scope = isinstance(candidate.get("case_id"), int) or isinstance(workspace_case_id, int)
         has_document_scope = isinstance(candidate.get("document_id"), int) or isinstance(workspace_document_id, int)

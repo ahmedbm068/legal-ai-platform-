@@ -737,6 +737,7 @@ export interface CopilotResponse {
       best_source_index: number | null;
     }>;
     summary?: string;
+    skipped_reason?: string | null;
   } | null;
   judge?: {
     chosen?: "A" | "B" | "merge";

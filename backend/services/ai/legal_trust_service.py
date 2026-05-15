@@ -167,9 +167,22 @@ class LegalTrustService:
         for source in sources:
             if not isinstance(source, dict):
                 continue
-            has_document = source.get("document_id") is not None or source.get("chunk_id") is not None
             text = str(source.get("chunk_text") or source.get("snippet") or "").strip()
-            if has_document and len(text) >= 24:
+            if len(text) < 24:
+                continue
+            # Case-document evidence: backed by a DB document/chunk row.
+            has_document = source.get("document_id") is not None or source.get("chunk_id") is not None
+            # Statute / legal-corpus evidence: local legal-code articles and
+            # citations carry NO document_id/chunk_id (they are not case
+            # documents) but ARE an authoritative fact base — they expose a
+            # legal reference/label (e.g. "Article 95", "Code du Statut
+            # Personnel - Article 95") plus full article text. Without this
+            # branch every legal-search answer is wrongly discarded as
+            # "insufficient evidence" because no source has a document_id.
+            filename = str(source.get("filename") or "").strip()
+            label = str(source.get("label") or "").strip()
+            has_legal_reference = bool(label) or "article" in filename.lower()
+            if has_document or has_legal_reference:
                 return True
         return False
 
@@ -371,6 +384,33 @@ class LegalTrustService:
         sources = self._normalize_sources(result=result, output_contract=output_contract)
         has_fact_base = self._has_fact_base(sources=sources, output_contract=output_contract)
 
+        # ── Source-grounded legal-search answers ──────────────────────────────
+        # A successful legal_search result is already grounded in authoritative
+        # statute text from the local legal-code corpus. Such answers are
+        # written as legal prose citing articles ("Article 95 …"), NOT as
+        # sentence→chunk mappings, so the strict case-document verifier — which
+        # demands a citation-coverage / sentence-source-mapping contract built
+        # for case-file RAG — structurally CANNOT pass them and would discard a
+        # correct answer with "Not enough grounded evidence" (the bug the user
+        # saw in the UI: confidence=low, NLI 2%, Partial).
+        #
+        # Gate on mode + a successful (non-fallback) result with a real fact
+        # base. NOTE: result["verification_status"] is NOT usable here — it is
+        # populated *later* by this very trust engine, so it is None on entry.
+        # mode/used_fallback/fallback_reason are the signals that survive the
+        # orchestrator boundary. We still run claim validation + contradiction
+        # detection below to populate a real grounding panel; we only skip the
+        # hard strict-verifier *rejection* (mirrors the case_context bypass).
+        _mode = str(result.get("mode") or "").strip().lower()
+        _used_fallback = bool(result.get("used_fallback"))
+        _fallback_reason = str(result.get("fallback_reason") or "").strip().lower()
+        skip_strict_rejection = (
+            _mode == "legal_search"
+            and not _used_fallback
+            and _fallback_reason in ("", "none")
+            and has_fact_base
+        )
+
         claim_payload: dict[str, Any] = {
             "sentence_to_source_mapping": [],
             "verified_claims": [],
@@ -400,7 +440,7 @@ class LegalTrustService:
                     reason="empty_fact_base",
                     claim_payload=claim_payload,
                 )
-            if not strict_result.success:
+            if not strict_result.success and not skip_strict_rejection:
                 return self._insufficient_evidence_result(
                     reason=";".join(strict_payload.get("fail_reasons") or ["strict_verifier_rejected_answer"]),
                     claim_payload=claim_payload,
@@ -440,8 +480,21 @@ class LegalTrustService:
             has_fact_base=has_fact_base,
         )
 
+        # For source-grounded legal-search answers, preserve the original
+        # grounded legal analysis verbatim. Re-rendering it through
+        # _build_sections/_render_answer would replace the substantive answer
+        # with the case-document section template ("Issue Identification",
+        # "Evidence Mapping", "Not found in provided documents", …) because the
+        # claim validator can't map statute-prose sentences to case chunks.
+        preserve_original_answer = skip_strict_rejection
+        panel_answer = (
+            answer
+            if preserve_original_answer
+            else (structured_answer if force_structured_answer else answer)
+        )
+
         trust_panel = {
-            "answer": structured_answer if force_structured_answer else answer,
+            "answer": panel_answer,
             "confidence_score": confidence_score,
             "evidence_strength": evidence_strength.value,
             "verified_claims": claim_payload.get("verified_claims") or [],
@@ -461,7 +514,11 @@ class LegalTrustService:
         validation_result = output_contract_validator.validate_trust_panel(trust_panel)
         trust_panel = validation_result.normalized_payload or trust_panel
 
-        final_answer = trust_panel["answer"] if force_structured_answer else answer
+        final_answer = (
+            answer
+            if preserve_original_answer
+            else (trust_panel["answer"] if force_structured_answer else answer)
+        )
         return LegalTrustResult(
             answer=final_answer,
             trust_panel=trust_panel,

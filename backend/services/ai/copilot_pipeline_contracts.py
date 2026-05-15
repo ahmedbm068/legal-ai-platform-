@@ -30,6 +30,7 @@ class CopilotPipelineRequest(BaseModel):
     mode: str = "default"
     legal_search_multilingual_output: bool = False
     legal_search_code_scope: list[str] = Field(default_factory=list)
+    legal_search_case_grounded: bool = False
     reasoning_level: str = "medium"
     output_language: str = "auto"
     language_strict: bool = True

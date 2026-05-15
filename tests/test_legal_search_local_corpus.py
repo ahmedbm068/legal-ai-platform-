@@ -14,6 +14,8 @@ class LegalSearchLocalCorpusTests(unittest.TestCase):
         self.assertGreater(len(corpus["tunisia"]), 0)
 
     def test_local_code_retrieval_matches_article_query(self) -> None:
+        # ``code_succession`` is an alias that resolves to ``code_personnel_status``
+        # (the CSP, which is where Tunisian succession law lives).
         results = self.service._retrieve_local_legal_code_sources(
             country="tunisia",
             query="Check article inheritance succession testament",
@@ -24,7 +26,8 @@ class LegalSearchLocalCorpusTests(unittest.TestCase):
         self.assertGreater(len(results), 0)
         references = [str(item.get("reference") or "") for item in results]
         self.assertTrue(any(reference.strip() for reference in references))
-        self.assertTrue(all(item.get("code_family") == "code_succession" for item in results))
+        accepted_families = {"code_personnel_status", "code_succession"}
+        self.assertTrue(all(item.get("code_family") in accepted_families for item in results))
         self.assertTrue(all(item.get("source_origin") == "local_code" for item in results))
 
     def test_jurisdiction_retrieval_prefers_local_sources_before_web_calls(self) -> None:
@@ -86,14 +89,22 @@ class LegalSearchLocalCorpusTests(unittest.TestCase):
         self.assertTrue(all(item.get("source_origin") == "local_code" for item in results[:3]))
 
     def test_infer_case_topic_prefers_succession_family(self) -> None:
+        # Succession in Tunisian law lives inside the Code du Statut Personnel
+        # (CSP), so a succession query should resolve to ``code_personnel_status``.
+        # ``code_succession`` is kept as a legacy alias and still accepted on
+        # input via CODE_SCOPE_ALIASES.
         topic = self.service._infer_case_topic(
             country="tunisia",
             query="Client asks about succession rights of heirs and testament sharing",
             case_focus_terms=["succession", "heirs", "testament"],
             internal_results=[],
-            code_scope=["code_civil", "code_succession", "code_international_prive"],
+            code_scope=["code_civil", "code_personnel_status", "code_international_prive"],
         )
-        self.assertIn("code_succession", topic.get("code_families") or [])
+        families = topic.get("code_families") or []
+        self.assertTrue(
+            "code_personnel_status" in families or "code_succession" in families,
+            f"Expected a personal-status / succession family, got {families!r}",
+        )
 
     def test_legal_analysis_framework_includes_rule_application_and_next_steps(self) -> None:
         framework = self.service._build_legal_analysis_framework(

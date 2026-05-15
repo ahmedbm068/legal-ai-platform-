@@ -365,11 +365,27 @@ User message:
         intent: str,
         workspace_case_id: Optional[int],
         workspace_document_id: Optional[int],
+        mode: Optional[str] = None,
+        legal_search_case_grounded: bool = False,
     ) -> Dict[str, Any]:
         next_parsed = dict(parsed)
         query_text = self._normalize_lookup_text(
             str(next_parsed.get("clean_query") or next_parsed.get("raw_message") or "")
         )
+
+        # Legal Search Mode with "case grounded" toggle OFF (default) must NOT
+        # downgrade ask_global → ask_case. Otherwise pure-law queries get
+        # rerouted to case-document retrieval and never hit legal codes.
+        if (
+            str(mode or "").strip().lower() == "legal_search"
+            and not legal_search_case_grounded
+            and intent in {"ask_global", "summarize_global"}
+        ):
+            next_parsed["intent"] = intent
+            next_parsed["target_type"] = "global"
+            next_parsed["target_id"] = None
+            next_parsed["case_id"] = None
+            return next_parsed
 
         if intent == "summarize_global" and isinstance(workspace_case_id, int):
             next_parsed["intent"] = "summarize_case"

@@ -74,6 +74,7 @@ type WorkspaceMode = "chat" | "agent" | "legal_search";
 type SendCaseMessageOptions = {
     workspaceMode?: WorkspaceMode;
     externalModeEnabled?: boolean;
+    legalSearchCaseGrounded?: boolean;
     topK?: number;
     reasoningLevel?: "low" | "medium" | "high" | "deep";
     outputLanguage?: "fr" | "ar" | "en" | "auto";
@@ -696,6 +697,7 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
 
         const mode = options?.workspaceMode || "chat";
         const requestMode = mode === "legal_search" ? "legal_search" : "default";
+        const legalSearchCaseGrounded = mode === "legal_search" ? Boolean(options?.legalSearchCaseGrounded) : false;
         const topK = options?.topK && options.topK > 0 ? options.topK : 6;
         const reasoningLevel = options?.reasoningLevel ?? "medium";
         const outputLanguage = options?.outputLanguage ?? "auto";
@@ -746,6 +748,7 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
                     useExternalResearch,
                     mode: requestMode,
                     legalSearchMultilingualOutput: mode === "legal_search",
+                    legalSearchCaseGrounded,
                     agentMode: mode === "agent",
                     conversationHistory,
                     signal: abortController.signal,
@@ -760,6 +763,7 @@ export function RoutedWorkspaceProvider({ children }: { children: ReactNode }) {
                     useExternalResearch,
                     mode: requestMode,
                     legalSearchMultilingualOutput: mode === "legal_search",
+                    legalSearchCaseGrounded,
                     agentMode: mode === "agent",
                     conversationHistory,
                     signal: abortController.signal,

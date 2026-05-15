@@ -80,6 +80,7 @@ class CopilotRequest(BaseModel):
     mode: Literal["default", "legal_search"] = "default"
     legal_search_multilingual_output: bool = False
     legal_search_code_scope: List[str] = Field(default_factory=list, max_length=6)
+    legal_search_case_grounded: bool = False
     reasoning_level: Literal["low", "medium", "high", "deep"] = "medium"
     output_language: Literal["fr", "ar", "en", "auto"] = "auto"
     language_strict: bool = True

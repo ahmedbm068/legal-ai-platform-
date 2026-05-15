@@ -395,6 +395,7 @@ class CopilotService(CopilotIntentRoutingMixin, CopilotCaseAnalysisMixin, Copilo
         mode: Optional[str] = None,
         legal_search_multilingual_output: bool = False,
         legal_search_code_scope: Optional[List[str]] = None,
+        legal_search_case_grounded: bool = False,
         reasoning_level: str | None = None,
         agent_mode: bool = False,
         workspace_case_id: Optional[int] = None,
@@ -496,6 +497,8 @@ class CopilotService(CopilotIntentRoutingMixin, CopilotCaseAnalysisMixin, Copilo
             intent=intent,
             workspace_case_id=workspace_case_id,
             workspace_document_id=workspace_document_id,
+            mode=mode,
+            legal_search_case_grounded=legal_search_case_grounded,
         )
         intent = parsed["intent"]
         normalized_role = self._normalize_role(user_role)

@@ -208,6 +208,7 @@ export default function AssistantPage() {
     const [assistantMode, setAssistantMode] = useState<AssistantMode>("chat");
     const [pendingFiles, setPendingFiles] = useState<PendingAssistantFile[]>([]);
     const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("chat");
+    const [legalSearchCaseGrounded, setLegalSearchCaseGrounded] = useState<boolean>(false);
     const [reasoningLevel, setReasoningLevel] = useState<ReasoningLevel>(() => {
         try {
             const stored = window.localStorage.getItem("lai.reasoningLevel");
@@ -576,6 +577,7 @@ export default function AssistantPage() {
         await sendCaseMessage(activeChatScopeId, draftRequestPrompt, {
             workspaceMode,
             externalModeEnabled,
+            legalSearchCaseGrounded,
             topK: REASONING_TOP_K[reasoningLevel],
             reasoningLevel,
             outputLanguage,
@@ -990,6 +992,17 @@ export default function AssistantPage() {
                         {ASSISTANT_MODES.map((mode) => <option key={mode.id} value={mode.id}>{mode.label}</option>)}
                     </select>
                 </label>
+                {assistantMode === "legal_search" ? (
+                    <label title={t("caseGroundedHint", "Include this case's documents alongside the legal codes in the search.")}>
+                        <input
+                            type="checkbox"
+                            disabled={copilotLoading || optimizingPrompt || composerRecording}
+                            checked={legalSearchCaseGrounded}
+                            onChange={(event) => setLegalSearchCaseGrounded(event.target.checked)}
+                        />
+                        <span>{t("caseGrounded", "Case grounded")}</span>
+                    </label>
+                ) : null}
                 <label>
                     <span>{t("reasoningLabel", "Reasoning")}</span>
                     <select

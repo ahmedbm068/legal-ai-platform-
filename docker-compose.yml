@@ -18,6 +18,9 @@ services:
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_SECURE_COOKIE: "false"
+      PORTAL_EMAIL_FROM: ${PORTAL_EMAIL_FROM:-ahmedbm066@gmail.com}
+      CLIENT_PORTAL_FIRM_NAME: ${CLIENT_PORTAL_FIRM_NAME:-Arbi Mostaissier}
     volumes:
       - n8n_data:/home/node/.n8n
     extra_hosts:

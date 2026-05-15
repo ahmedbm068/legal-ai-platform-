@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#f7f8fb; --ink:#1f2733; --muted:#6b7488;
+    --blue:#2f6df6; --blueDeep:#1f43c9; --green:#16a34a;
+    --line:#9aa3b5;
+  }
+  html,body{ background:var(--bg); font-family:'Segoe UI',-apple-system,Roboto,Helvetica,Arial,sans-serif; -webkit-font-smoothing:antialiased; }
+  #board{ width:1680px; padding:46px 50px; background:var(--bg); position:relative; }
+  .row{ display:flex; gap:34px; }
+  .col{ display:flex; flex-direction:column; gap:26px; }
+
+  .card{ border-radius:16px; padding:18px 20px; border:1px solid rgba(31,39,51,.10);
+         box-shadow:0 1px 2px rgba(20,30,60,.04); }
+  .card h3{ font-size:21px; font-weight:800; color:var(--ink); letter-spacing:-.2px; }
+  .card .sub{ font-size:12.5px; color:var(--muted); margin-top:5px; font-weight:500; }
+  .center{ text-align:center; }
+
+  /* color fills */
+  .ui     { background:linear-gradient(135deg,#2f6df6,#1f43c9); }
+  .ui h3,.ui .sub{ color:#fff; } .ui .sub{ color:#d6e2ff; }
+  .soft-b { background:#eef3ff; }
+  .soft-g { background:#eefaf1; }
+  .soft-p { background:#f3eefc; }
+  .soft-n { background:#ffffff; }
+  .soft-y { background:#fdf5e6; }
+  .soft-c { background:#eaf6fb; }
+
+  /* header big box */
+  .hero{ background:linear-gradient(135deg,#2f6df6 0%,#1f43c9 100%);
+         border-radius:18px; padding:22px 26px; text-align:center; color:#fff;
+         box-shadow:0 8px 22px rgba(31,67,201,.28); }
+  .hero h2{ font-size:30px; font-weight:800; letter-spacing:-.4px; }
+  .hero .sub{ color:#cfdcff; font-size:14px; margin-top:7px; font-weight:500; }
+  .hero .domains{ color:#bcd0ff; font-size:12.5px; margin-top:6px; }
+
+  /* pill rows in orchestrator */
+  .pill{ background:linear-gradient(135deg,#3b78f7,#2148d6); color:#fff;
+         border-radius:11px; padding:11px 14px; font-size:14px; font-weight:700;
+         text-align:center; box-shadow:0 2px 6px rgba(33,72,214,.22); }
+
+  .group{ border-radius:18px; padding:20px; }
+  .group > .gh{ text-align:center; font-size:22px; font-weight:800; color:var(--ink); }
+  .group > .gh .tag{ display:inline-block; background:#7c3aed; color:#fff; font-size:10px;
+        font-weight:800; padding:3px 8px; border-radius:6px; vertical-align:middle; margin-left:8px; letter-spacing:.5px;}
+  .group > .gsub{ text-align:center; font-size:12.5px; color:var(--muted); margin:6px 0 16px; font-weight:500;}
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .mini{ background:#fff; border:1px solid rgba(31,39,51,.10); border-radius:12px;
+          padding:13px 14px; }
+  .mini b{ font-size:15px; color:var(--ink); font-weight:700; display:block; }
+  .mini span{ font-size:11.5px; color:var(--muted); }
+
+  .stack-title{ font-size:15px; font-weight:800; color:var(--ink); }
+  .listcard .ln{ font-size:13px; color:#444c5e; margin-top:8px; padding-left:14px; position:relative;}
+  .listcard .ln:before{ content:""; position:absolute; left:0; top:7px; width:6px; height:6px;
+        border-radius:50%; background:var(--blue); }
+  .listcard.g .ln:before{ background:var(--green); }
+  .listcard h3{ margin-bottom:4px; }
+
+  /* arrows via svg overlay */
+  svg.flow{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0;}
+  .colwrap{ position:relative; z-index:1; }
+  .footer{ margin-top:30px; display:flex; justify-content:space-between;
+           font-size:12px; color:var(--muted); }
+  .footer b{ color:var(--ink); }
+</style>
+</head>
+<body>
+<div id="board">
+  <svg class="flow" id="flow">
+    <defs>
+      <marker id="ah-b" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+        <path d="M0,0 L8,3.2 L0,6.4 Z" fill="#2f6df6"/>
+      </marker>
+      <marker id="ah-g" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+        <path d="M0,0 L8,3.2 L0,6.4 Z" fill="#16a34a"/>
+      </marker>
+    </defs>
+  </svg>
+
+  <div class="row" style="align-items:flex-start;">
+
+    <!-- LEFT COLUMN : inputs -->
+    <div class="col" style="width:255px;">
+      <div class="card ui" id="n-ui">
+        <h3>Lawyer UI</h3>
+        <div class="sub">frontend workspace · 8 pages</div>
+      </div>
+      <div class="card soft-g" id="n-portal">
+        <h3>Client Portal</h3>
+        <div class="sub">intake · docs · assistant · mail</div>
+      </div>
+      <div class="card soft-p" id="n-admin">
+        <h3>Admin App</h3>
+        <div class="sub">health · users · audit · trace</div>
+      </div>
+      <div class="card soft-n" id="n-inputs">
+        <h3 style="font-size:18px;">Inputs</h3>
+        <div class="grid2" style="margin-top:12px;">
+          <div class="mini"><b>PDF</b><span>contracts</span></div>
+          <div class="mini"><b>OCR</b><span>scans</span></div>
+          <div class="mini"><b>Voice</b><span>calls</span></div>
+          <div class="mini"><b>Case</b><span>data</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTER COLUMN -->
+    <div class="col" style="width:470px;">
+      <div class="hero" id="n-api">
+        <h2>FastAPI Backend</h2>
+        <div class="sub">single app · backend/main.py · 22 routed domains</div>
+        <div class="domains">auth · cases · assistant · documents · rag · voice · calendar · admin · portal</div>
+      </div>
+
+      <div class="card soft-c" id="n-orch">
+        <h3 class="center">Copilot Orchestrator</h3>
+        <div class="sub center" style="margin-bottom:14px;">runtime_copilot_orchestrator</div>
+        <div class="col" style="gap:10px;">
+          <div class="pill">intent + mode routing</div>
+          <div class="pill">matter classification + workflow plan</div>
+          <div class="pill">select big agent + mini-agent sequence</div>
+          <div class="sub center" style="margin-top:4px;">final response assembly + metadata + trace sidecar</div>
+        </div>
+      </div>
+
+      <div class="card soft-n" id="n-data">
+        <h3 class="center" style="font-size:20px;">Knowledge + Data Layer</h3>
+        <div class="grid2" style="grid-template-columns:1fr 1fr 1fr; margin-top:14px;">
+          <div class="mini"><b>Postgres</b><span>cases · 40+ models</span></div>
+          <div class="mini"><b>FAISS</b><span>local vectors</span></div>
+          <div class="mini"><b>MinIO</b><span>file artifacts</span></div>
+          <div class="mini"><b>LLM Gateway</b><span>OpenAI / Groq</span></div>
+          <div class="mini"><b>OCR</b><span>PDF + images</span></div>
+          <div class="mini"><b>n8n</b><span>calls + hooks</span></div>
+        </div>
+        <div class="mini" style="margin-top:14px;"><b>Semantic Cache</b><span>embedding-similarity response reuse</span></div>
+      </div>
+    </div>
+
+    <!-- AGENT COLUMN -->
+    <div class="col" style="width:430px;">
+      <div class="group soft-p" id="n-big">
+        <div class="gh">Big Agent Layer <span class="tag">5 AGENTS</span></div>
+        <div class="gsub">registry + descriptors · big_agents/</div>
+        <div class="grid2">
+          <div class="mini"><b>Research</b><span>legal search + RAG</span></div>
+          <div class="mini"><b>Drafting</b><span>outlines + cites</span></div>
+          <div class="mini"><b>Review</b><span>review table v2</span></div>
+          <div class="mini"><b>Workflow</b><span>blueprint catalog</span></div>
+        </div>
+        <div class="mini" style="margin-top:14px;"><b>Workspace</b><span>case workspace v2</span></div>
+      </div>
+
+      <div class="group soft-b" id="n-mini">
+        <div class="gh">Mini-Agent Pipeline <span class="tag" style="background:#2f6df6;">~30 AGENTS</span></div>
+        <div class="gsub">backend/services/ai/agents/</div>
+        <div class="grid2">
+          <div class="mini"><b>retrieval</b><span></span></div>
+          <div class="mini"><b>legal search</b><span></span></div>
+          <div class="mini"><b>reasoning</b><span></span></div>
+          <div class="mini"><b>drafting</b><span></span></div>
+          <div class="mini"><b>verifier</b><span>+ strict</span></div>
+          <div class="mini"><b>judge</b><span></span></div>
+          <div class="mini"><b>contradiction</b><span>detection</span></div>
+          <div class="mini"><b>chronology</b><span></span></div>
+          <div class="mini"><b>matter class.</b><span></span></div>
+          <div class="mini"><b>contract redline</b><span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN : trust / obs / outputs -->
+    <div class="col" style="width:280px;">
+      <div class="card soft-y listcard" id="n-trust">
+        <h3>Trust Layer</h3>
+        <div class="ln">verifier · grounded / partial / refused</div>
+        <div class="ln">citation support checks</div>
+        <div class="ln">NLI faithfulness</div>
+        <div class="ln">rate limiter</div>
+        <div class="ln">prompt lock</div>
+      </div>
+      <div class="card soft-g listcard g" id="n-obs">
+        <h3>Observability</h3>
+        <div class="ln">copilot_traces table</div>
+        <div class="ln">HTTP audit log</div>
+        <div class="ln">LLM cost + latency metrics</div>
+        <div class="ln">Admin Trace tab</div>
+      </div>
+      <div class="card soft-n listcard g" id="n-out">
+        <h3>Final Outputs</h3>
+        <div class="ln">legal answers with metadata</div>
+        <div class="ln">draft outlines + citations</div>
+        <div class="ln">review tables</div>
+        <div class="ln">workflow previews</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    <span><b>Legal AI Platform</b> — system architecture</span>
+    <span>generated from codebase · 2026-05-15</span>
+  </div>
+
+</div>
+
+<script>
+function draw(){
+  var board=document.getElementById('board');
+  var svg=document.getElementById('flow');
+  var B=board.getBoundingClientRect();
+  svg.setAttribute('width', board.offsetWidth);
+  svg.setAttribute('height', board.offsetHeight);
+  function box(id){ var r=document.getElementById(id).getBoundingClientRect();
+    return {l:r.left-B.left,r:r.right-B.left,t:r.top-B.top,b:r.bottom-B.top,
+            cx:(r.left+r.right)/2-B.left, cy:(r.top+r.bottom)/2-B.top}; }
+  function add(a,bn,color){
+    var dx=Math.abs(bn.x-a.x);
+    var c=Math.max(28, dx*0.45);
+    var d="M "+a.x+","+a.y+" C "+(a.x+ (a.dir==='r'?c:0))+","+a.y+" "
+          +(bn.x- c)+","+bn.y+" "+bn.x+","+bn.y;
+    var p=document.createElementNS('http://www.w3.org/2000/svg','path');
+    p.setAttribute('d',d);
+    p.setAttribute('fill','none');
+    p.setAttribute('stroke',color);
+    p.setAttribute('stroke-width','2.4');
+    p.setAttribute('marker-end', color==='#16a34a'?'url(#ah-g)':'url(#ah-b)');
+    svg.appendChild(p);
+  }
+  var ui=box('n-ui'),po=box('n-portal'),ad=box('n-admin'),inp=box('n-inputs'),
+      api=box('n-api'),orch=box('n-orch'),data=box('n-data'),big=box('n-big'),
+      mini=box('n-mini'),trust=box('n-trust'),obs=box('n-obs'),out=box('n-out');
+
+  // left clients -> backend (blue)
+  [ui,po,ad,inp].forEach(function(s){
+    add({x:s.r,y:s.cy,dir:'r'}, {x:api.l,y:api.cy + (s===ui?-26:s===po?-8:s===ad?10:28)}, '#2f6df6');
+  });
+  // backend -> orchestrator
+  add({x:api.cx,y:api.b,dir:'d'},{x:orch.cx,y:orch.t},'#2f6df6');
+  // orchestrator -> data layer
+  add({x:orch.cx,y:orch.b,dir:'d'},{x:data.cx,y:data.t},'#2f6df6');
+  // backend -> big agent layer
+  add({x:api.r,y:api.cy,dir:'r'},{x:big.l,y:big.cy},'#2f6df6');
+  // big -> mini
+  add({x:big.cx,y:big.b,dir:'d'},{x:mini.cx,y:mini.t},'#2f6df6');
+  // big -> trust (green output)
+  add({x:big.r,y:big.cy-30,dir:'r'},{x:trust.l,y:trust.cy},'#16a34a');
+  // mini -> observability (green)
+  add({x:mini.r,y:mini.cy-20,dir:'r'},{x:obs.l,y:obs.cy},'#16a34a');
+  // mini -> final outputs (green)
+  add({x:mini.r,y:mini.cy+40,dir:'r'},{x:out.l,y:out.cy},'#16a34a');
+}
+window.addEventListener('load', function(){ setTimeout(draw, 60); });
+</script>
+</body>
+</html>

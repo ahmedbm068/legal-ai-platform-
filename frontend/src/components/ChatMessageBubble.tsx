@@ -1045,7 +1045,10 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
                 {String(message.meta.language.detected_input ?? "?").toUpperCase()} → {String(message.meta.language.final ?? "?").toUpperCase()}
               </span>
             ) : null}
-            {message.meta?.faithfulness && typeof message.meta.faithfulness.score === "number" ? (
+            {message.meta?.faithfulness
+              && typeof message.meta.faithfulness.score === "number"
+              && !message.meta.faithfulness.skipped_reason
+              && message.meta.verificationState !== "refused" ? (
               <span
                 className={`assistant-meta-badge faithfulness ${message.meta.faithfulness.label || ""}`}
                 title={message.meta.faithfulness.summary || "NLI faithfulness vs. retrieved sources"}
@@ -1070,23 +1073,24 @@ function ChatMessageBubbleComponent(props: ChatMessageBubbleProps) {
           </header>
         ) : null}
 
-        {message.role === "assistant" ? (
+        {message.role === "assistant" && (sourceCount > 0 || missingEvidenceCount > 0) ? (
           <div className="legal-quality-strip" aria-label="Legal answer quality">
             <span><strong>{sourceCount}</strong> sources</span>
             <span><strong>{jurisdictionLabel}</strong> jurisdiction</span>
             <span><strong>{String(confidence || "medium")}</strong> confidence</span>
-            <span><strong>{missingEvidenceCount}</strong> missing evidence</span>
-            <span><strong>Required</strong> human review</span>
+            {missingEvidenceCount > 0 ? (
+              <span><strong>{missingEvidenceCount}</strong> missing evidence</span>
+            ) : null}
           </div>
         ) : null}
 
-        {message.role === "assistant" && sourceCount === 0 && citationCount === 0 ? (
+        {message.role === "assistant"
+          && sourceCount === 0
+          && citationCount === 0
+          && message.meta?.verificationState !== "grounded"
+          && message.meta?.verificationState !== "partial" ? (
           <div className="assistant-grounding-warning">
             This answer is not grounded in uploaded case documents. Lawyer review required before legal reliance.
-          </div>
-        ) : message.role === "assistant" ? (
-          <div className="assistant-grounding-warning grounded">
-            Lawyer review required before relying on this output.
           </div>
         ) : null}
 

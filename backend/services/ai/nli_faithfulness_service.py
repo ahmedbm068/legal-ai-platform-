@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from threading import Lock
 from typing import Any, Mapping, Sequence
 
@@ -40,6 +41,28 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_NLI_MODEL = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual"
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _resolve_nli_model() -> str:
+    """Return the configured fine-tuned model path if it exists on disk, else the zero-shot fallback.
+
+    The configured path (``settings.NLI_MODEL``) is treated as project-relative
+    when not absolute, so deployments can override it via env without
+    worrying about the working directory.
+    """
+    try:
+        from backend.core.config import settings
+        configured = settings.NLI_MODEL
+    except Exception:
+        configured = "backend/models_local/legal_nli_v1"
+    candidate = Path(configured)
+    if not candidate.is_absolute():
+        candidate = _PROJECT_ROOT / candidate
+    if candidate.exists():
+        return str(candidate)
+    return DEFAULT_NLI_MODEL
 ENTAILMENT_THRESHOLD = 0.55  # ≥ → "supported"
 CONTRADICTION_THRESHOLD = 0.55  # ≥ → "contradiction"
 MAX_SOURCE_CHARS = 800
@@ -101,13 +124,19 @@ class NLIFaithfulnessService:
     """Scores answer faithfulness against retrieved sources via a multilingual
     NLI cross-encoder."""
 
-    def __init__(self, *, model_name: str = DEFAULT_NLI_MODEL) -> None:
-        self.model_name = model_name
+    def __init__(self, *, model_name: str | None = None) -> None:
+        self.model_name = model_name or _resolve_nli_model()
         self._model: Any | None = None
         self._unavailable_reason: str | None = None
         self._lock = Lock()
 
     def is_available(self) -> bool:
+        try:
+            from backend.core.config import settings
+            if not settings.NLI_ENABLED:
+                return False
+        except Exception:
+            pass
         return self._unavailable_reason is None
 
     def score_response(
@@ -130,6 +159,13 @@ class NLIFaithfulnessService:
         answer: str,
         sources: Sequence[Mapping[str, Any] | str],
     ) -> FaithfulnessReport:
+        if not self.is_available():
+            return FaithfulnessReport(
+                score=0.0,
+                label=LABEL_UNSUPPORTED,
+                summary="NLI faithfulness scoring is disabled.",
+                skipped_reason=self._unavailable_reason or "nli_disabled",
+            )
         if not answer or not answer.strip():
             return FaithfulnessReport(
                 score=0.0,
@@ -177,9 +213,7 @@ class NLIFaithfulnessService:
                 index_map.append((ci, si))
 
         try:
-            # CrossEncoder.predict returns logits over [contradiction, neutral, entailment]
-            # for typical XNLI heads; we apply softmax to recover probabilities.
-            raw_scores = model.predict(pairs, convert_to_numpy=True, show_progress_bar=False)
+            probs = _run_nli_inference(model, pairs)
         except Exception as exc:  # noqa: BLE001 — never break the response
             logger.warning("nli_predict_failed err=%s", exc, exc_info=True)
             return FaithfulnessReport(
@@ -189,11 +223,6 @@ class NLIFaithfulnessService:
                 skipped_reason="inference_error",
             )
 
-        probs = _softmax_rows(raw_scores)
-        # XNLI label order is typically [entailment, neutral, contradiction]
-        # for cross-encoder/nli-* but mDeBERTa-XNLI uses
-        # [entailment, neutral, contradiction] as well. We support both via
-        # the model's id2label if available; otherwise fall back to common order.
         ent_idx, contra_idx = _resolve_label_indices(model)
 
         per_claim_best: list[ClaimScore] = [
@@ -272,20 +301,39 @@ class NLIFaithfulnessService:
         with self._lock:
             if self._model is not None:
                 return self._model
-            try:
-                from sentence_transformers import CrossEncoder
-            except Exception as exc:  # noqa: BLE001
-                self._unavailable_reason = f"sentence_transformers_missing: {exc}"
-                logger.warning("nli_disabled reason=%s", self._unavailable_reason)
-                return None
-            try:
-                self._model = CrossEncoder(self.model_name)
-                logger.info("nli_model_loaded model=%s", self.model_name)
-                return self._model
-            except Exception as exc:  # noqa: BLE001
-                self._unavailable_reason = f"model_load_failed: {exc}"
-                logger.warning("nli_disabled reason=%s", self._unavailable_reason)
-                return None
+            # Try loading as a HuggingFace AutoModel first (fine-tuned XLM-R).
+            # Fall back to sentence-transformers CrossEncoder for the zero-shot model.
+            model_path = Path(self.model_name)
+            is_local_hf = model_path.exists() and (model_path / "config.json").exists()
+            if is_local_hf:
+                try:
+                    import torch
+                    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+                    tok = AutoTokenizer.from_pretrained(self.model_name)
+                    mdl = AutoModelForSequenceClassification.from_pretrained(self.model_name)
+                    mdl.eval()
+                    self._model = {"type": "hf", "model": mdl, "tokenizer": tok}
+                    logger.info("nli_model_loaded type=hf model=%s", self.model_name)
+                    return self._model
+                except Exception as exc:  # noqa: BLE001
+                    self._unavailable_reason = f"hf_model_load_failed: {exc}"
+                    logger.warning("nli_disabled reason=%s", self._unavailable_reason)
+                    return None
+            else:
+                try:
+                    from sentence_transformers import CrossEncoder
+                except Exception as exc:  # noqa: BLE001
+                    self._unavailable_reason = f"sentence_transformers_missing: {exc}"
+                    logger.warning("nli_disabled reason=%s", self._unavailable_reason)
+                    return None
+                try:
+                    self._model = {"type": "crossencoder", "model": CrossEncoder(self.model_name)}
+                    logger.info("nli_model_loaded type=crossencoder model=%s", self.model_name)
+                    return self._model
+                except Exception as exc:  # noqa: BLE001
+                    self._unavailable_reason = f"model_load_failed: {exc}"
+                    logger.warning("nli_disabled reason=%s", self._unavailable_reason)
+                    return None
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -340,6 +388,38 @@ def _split_into_claims(answer: str) -> list[str]:
     return out
 
 
+def _run_nli_inference(model: dict, pairs: list[tuple[str, str]]) -> Any:
+    """Run inference for both HF and CrossEncoder model types.
+
+    Returns a 2-D array of shape (n_pairs, n_labels) with softmax probabilities.
+    """
+    import numpy as np
+
+    if model["type"] == "hf":
+        import torch
+        tok = model["tokenizer"]
+        mdl = model["model"]
+        all_probs = []
+        batch_size = 16
+        for i in range(0, len(pairs), batch_size):
+            batch = pairs[i : i + batch_size]
+            premises   = [p for p, _ in batch]
+            hypotheses = [h for _, h in batch]
+            enc = tok(
+                premises, hypotheses,
+                padding=True, truncation=True, max_length=256,
+                return_tensors="pt",
+            )
+            with torch.no_grad():
+                logits = mdl(**enc).logits
+            probs = torch.softmax(logits, dim=-1).cpu().numpy()
+            all_probs.append(probs)
+        return np.vstack(all_probs)
+    else:
+        raw = model["model"].predict(pairs, convert_to_numpy=True, show_progress_bar=False)
+        return _softmax_rows(raw)
+
+
 def _softmax_rows(scores: Any) -> Any:
     """Apply softmax row-wise to a 2D numeric array — local impl to avoid a
     hard numpy dependency in the typing layer (numpy is already installed).
@@ -355,20 +435,19 @@ def _softmax_rows(scores: Any) -> Any:
     return exp / exp.sum(axis=1, keepdims=True)
 
 
-def _resolve_label_indices(model: Any) -> tuple[int, int]:
-    """Return (entailment_index, contradiction_index) for the model's NLI head.
-
-    Falls back to the common ``[entailment, neutral, contradiction]`` ordering
-    used by ``mDeBERTa-v3-base-xnli-multilingual`` and most XNLI cross-encoders.
-    """
-
+def _resolve_label_indices(model: dict) -> tuple[int, int]:
+    """Return (entailment_index, contradiction_index) for the model's NLI head."""
     try:
-        # CrossEncoder wraps a HF model accessible via .model.config.id2label.
-        id2label = getattr(getattr(model, "model", None), "config", None)
-        labels = getattr(id2label, "id2label", None)
-        if isinstance(labels, dict):
+        if model["type"] == "hf":
+            id2label = model["model"].config.id2label
+        else:
+            # CrossEncoder wraps a HF model at .model.config.id2label
+            id2label = getattr(getattr(model["model"], "model", None), "config", None)
+            id2label = getattr(id2label, "id2label", None)
+
+        if isinstance(id2label, dict):
             ent = contra = None
-            for idx, name in labels.items():
+            for idx, name in id2label.items():
                 norm = str(name).lower()
                 if "entail" in norm:
                     ent = int(idx)
@@ -381,7 +460,7 @@ def _resolve_label_indices(model: Any) -> tuple[int, int]:
     return 0, 2  # mDeBERTa XNLI default
 
 
-nli_faithfulness_service = NLIFaithfulnessService()
+nli_faithfulness_service = NLIFaithfulnessService()  # auto-resolves fine-tuned model if present
 
 
 __all__ = [

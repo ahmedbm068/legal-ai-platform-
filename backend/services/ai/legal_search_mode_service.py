@@ -44,7 +44,12 @@ def _structured_irac_enabled() -> bool:
 
 class LegalSearchModeService:
     SUPPORTED_COUNTRIES = {"tunisia", "germany"}
-    DEFAULT_CODE_SCOPE = ["code_civil", "code_succession", "code_international_prive"]
+    DEFAULT_CODE_SCOPE = [
+        "code_civil",
+        "code_personnel_status",
+        "code_succession",
+        "code_international_prive",
+    ]
     DEFAULT_RESPONSE_SECTION_ORDER = [
         "matter_understood",
         "confirmed_facts",
@@ -66,17 +71,32 @@ class LegalSearchModeService:
         "civil": "code_civil",
         "procedure_civile": "code_civil",
         "procedure_civile_commerciale": "code_civil",
-        "code_succession": "code_succession",
-        "succession": "code_succession",
-        "inheritance": "code_succession",
-        "code_statut_personnel": "code_succession",
-        "statut_personnel": "code_succession",
+        # Personal-status code (the CSP — covers marriage, divorce, filiation,
+        # tutelle AND succession in Tunisian law).
+        "code_personnel_status": "code_personnel_status",
+        "code_statut_personnel": "code_personnel_status",
+        "statut_personnel": "code_personnel_status",
+        "personal_status": "code_personnel_status",
+        "family": "code_personnel_status",
+        "mariage": "code_personnel_status",
+        "marriage": "code_personnel_status",
+        "divorce": "code_personnel_status",
+        "filiation": "code_personnel_status",
+        "tutelle": "code_personnel_status",
+        # Succession aliases resolve to the CSP because the CSP IS where
+        # Tunisian succession law lives. ``code_succession`` is kept as a
+        # legacy alias for older classifier outputs and any future dedicated
+        # succession code.
+        "code_succession": "code_personnel_status",
+        "succession": "code_personnel_status",
+        "inheritance": "code_personnel_status",
         "code_international_prive": "code_international_prive",
         "international_prive": "code_international_prive",
         "droit_international_prive": "code_international_prive",
     }
     CODE_SCOPE_LABELS = {
         "code_civil": "Code Civil",
+        "code_personnel_status": "Code du Statut Personnel",
         "code_succession": "Code de Succession",
         "code_international_prive": "Code International Prive",
     }
@@ -546,15 +566,27 @@ class LegalSearchModeService:
         target_type: Optional[str],
         target_id: Optional[int],
     ) -> str:
-        optimized = prompt_optimizer_agent.optimize_query(
-            raw_query=message,
-            intent=intent,
-            target_type=target_type,
-            target_id=target_id,
-            allow_llm=False,
-        )
-        candidate = optimized.payload.get("optimized_query") if optimized.success else ""
-        return str(candidate or message).strip()
+        """Produce a clean *retrieval* query for legal search.
+
+        ``prompt_optimizer_agent`` is built for generation modes: it wraps the
+        query in an ``Objective:/Scope:/Requirements:/Output format:`` task
+        template. Feeding that template into the domain classifier and the
+        keyword-scored local-corpus retriever poisons both — the boilerplate
+        tokens ("workspace", "evidence", "format", "reasoning") outscore the
+        actual legal terms, so e.g. "polygamie en droit tunisien" routes to
+        Code Civil instead of CSP Article 18, and the template even leaks into
+        the final answer.
+
+        Legal search only wants the agent's typo correction + whitespace
+        normalization, never the template. Apply just those.
+        """
+        cleaned = prompt_optimizer_agent._normalize_text(message)
+        if not cleaned:
+            return message.strip()
+        for wrong, fixed in prompt_optimizer_agent.SPELLING_FIXES.items():
+            cleaned = re.sub(rf"\b{re.escape(wrong)}\b", fixed, cleaned, flags=re.IGNORECASE)
+        cleaned = " ".join(cleaned.replace("\n", " ").split())
+        return cleaned or message.strip()
 
     @staticmethod
     def _cache_backend() -> str:
@@ -619,6 +651,18 @@ class LegalSearchModeService:
         if retrieval_agent is None:
             return []
 
+        # Internal retrieval grounds the answer in the USER'S case/document
+        # context. For a global legal question with no case and no document
+        # selected, there is no such context — a tenant-wide retrieval just
+        # pulls in unrelated documents (e.g. commercial-contract chunks for a
+        # succession question), and those leak into case_focus_terms and skew
+        # the domain classifier toward the wrong code (the user-reported
+        # "wrong articles": succession query → Code Civil Art. 2-11). Skip
+        # internal retrieval entirely when the query is not case/document
+        # scoped so legal_search classifies purely on the question itself.
+        if case_id is None and document_id is None:
+            return []
+
         result = retrieval_agent.retrieve(
             db=db,
             tenant_id=tenant_id,
@@ -667,6 +711,27 @@ class LegalSearchModeService:
                 "assignation",
                 "procedure civile",
                 "procedure commerciale",
+            ],
+            "code_personnel_status": [
+                "mariage",
+                "marriage",
+                "divorce",
+                "filiation",
+                "tutelle",
+                "garde",
+                "pension alimentaire",
+                "statut personnel",
+                "polygamie",
+                "epouse",
+                "epoux",
+                "succession",
+                "inheritance",
+                "heritage",
+                "heritier",
+                "testament",
+                "estate",
+                "partage",
+                "mirath",
             ],
             "code_succession": [
                 "succession",
@@ -725,12 +790,38 @@ class LegalSearchModeService:
             top_k=max(6, top_k),
             preferred_code_families=preferred_code_families,
         )
-        strong_local_hits = sum(1 for item in local_sources if float(item.get("score", 0.0)) >= 44.0)
+        # If the raw query yields no local hits but contains non-Latin script,
+        # translate to a corpus language and retry — this lets Arabic queries
+        # find articles indexed in French without paying the translation LLM
+        # cost on the fast path.
+        translated_queries: Dict[str, str] | None = None
+        if not local_sources and self._contains_non_latin(query):
+            translated_queries = self._translate_query_variants(country=country, query=query)
+            for lang_key in ("fr", "en"):
+                translated = (translated_queries.get(lang_key) or "").strip()
+                if not translated or translated == query:
+                    continue
+                retry = self._retrieve_local_legal_code_sources(
+                    country=country,
+                    query=translated,
+                    case_focus_terms=case_focus_terms,
+                    top_k=max(6, top_k),
+                    preferred_code_families=preferred_code_families,
+                )
+                if retry:
+                    local_sources = retry
+                    break
+        # Lowered from 44.0: a base score of 38 + family bonus (2-4) + any
+        # keyword overlap already indicates a confident local hit. The old
+        # threshold caused short-tail French queries to fall through to
+        # ~8 sequential web searches and time out the request.
+        strong_local_hits = sum(1 for item in local_sources if float(item.get("score", 0.0)) >= 41.0)
         if strong_local_hits >= min(4, max(2, top_k // 2)):
             ranked_local = self._rank_sources(query=query, results=local_sources, top_k=max(6, top_k))
             return ranked_local[: max(6, top_k)]
 
-        translated_queries = self._translate_query_variants(country=country, query=query)
+        if translated_queries is None:
+            translated_queries = self._translate_query_variants(country=country, query=query)
         search_queries = self._build_search_queries(
             country=country,
             translated_queries=translated_queries,
@@ -831,8 +922,11 @@ class LegalSearchModeService:
                 if family not in cls.DEFAULT_CODE_SCOPE:
                     if any(token in joined for token in ["international prive", "conflit de lois", "exequatur"]):
                         family = "code_international_prive"
-                    elif any(token in joined for token in ["succession", "inheritance", "heritage", "testament", "statut personnel"]):
-                        family = "code_succession"
+                    elif any(token in joined for token in [
+                        "statut personnel", "mariage", "divorce", "filiation",
+                        "tutelle", "succession", "inheritance", "heritage", "testament",
+                    ]):
+                        family = "code_personnel_status"
                     else:
                         family = "code_civil"
                 copy["code_family"] = family
@@ -867,14 +961,27 @@ class LegalSearchModeService:
         lowered_query = str(query or "").lower()
         ranked_items: List[Dict[str, Any]] = []
 
-        for rank_index, entry in enumerate(corpus_items, start=1):
+        # Filter by preferred family first, THEN enumerate. Without this,
+        # rank_index reflects the position in the global corpus — and since
+        # the corpus is concatenated [code_civil, code_international_prive,
+        # code_personnel_status, ...], CSP entries start at index 548 and
+        # the rank-decay term (rank_index * 0.05) wipes out the family
+        # bonus and base score, leaving valid hits below the short-circuit
+        # threshold.
+        if preferred:
+            filtered_corpus = [
+                e for e in corpus_items
+                if str(e.get("code_family") or "code_civil").strip().lower() in preferred
+            ]
+        else:
+            filtered_corpus = corpus_items
+
+        for rank_index, entry in enumerate(filtered_corpus, start=1):
             article = str(entry.get("article") or "").strip()
             title = str(entry.get("title") or "").strip()
             summary = str(entry.get("summary") or "").strip()
             url = str(entry.get("url") or "").strip()
             code_family = str(entry.get("code_family") or "code_civil").strip().lower()
-            if preferred and code_family not in preferred:
-                continue
             code_name = str(entry.get("code_name") or self.CODE_SCOPE_LABELS.get(code_family, "Code Civil")).strip()
             raw_keywords = entry.get("keywords")
             raw_tags = entry.get("tags")
@@ -891,10 +998,13 @@ class LegalSearchModeService:
 
             article_bonus = 0.0
             article_number_match = re.search(r"(\d+[a-zA-Z0-9\-]*)", article)
-            if article and article.lower() in lowered_query:
+            article_lowered = article.lower() if article else ""
+            if article_lowered and re.search(rf"\b{re.escape(article_lowered)}\b", lowered_query):
                 article_bonus = 8.0
-            elif article_number_match and article_number_match.group(1).lower() in lowered_query:
-                article_bonus = 5.0
+            elif article_number_match:
+                number_token = article_number_match.group(1).lower()
+                if re.search(rf"\b{re.escape(number_token)}\b", lowered_query):
+                    article_bonus = 5.0
 
             if keyword_overlap <= 0.0 and exact_keyword_hits == 0 and case_bonus <= 0.0 and article_bonus <= 0.0:
                 continue
@@ -1086,8 +1196,11 @@ class LegalSearchModeService:
         terms: List[str] = []
         if "code_civil" in normalized:
             terms.extend(["code civil", "obligations", "contracts", "responsabilite civile"])
-        if "code_succession" in normalized:
-            terms.extend(["succession", "heritage", "testament", "statut personnel"])
+        if "code_personnel_status" in normalized or "code_succession" in normalized:
+            terms.extend([
+                "statut personnel", "mariage", "divorce", "filiation",
+                "succession", "heritage", "testament",
+            ])
         if "code_international_prive" in normalized:
             terms.extend(["droit international prive", "conflit de lois", "exequatur"])
         return terms
@@ -1172,8 +1285,11 @@ class LegalSearchModeService:
         lowered = str(text or "").lower()
         if any(token in lowered for token in ["international prive", "conflit de lois", "exequatur", "foreign judgment"]):
             return "code_international_prive"
-        if any(token in lowered for token in ["succession", "inheritance", "heritage", "testament", "statut personnel"]):
-            return "code_succession"
+        if any(token in lowered for token in [
+            "statut personnel", "mariage", "marriage", "divorce", "filiation",
+            "tutelle", "succession", "inheritance", "heritage", "testament",
+        ]):
+            return "code_personnel_status"
         if any(token in lowered for token in ["code civil", "obligation", "contract", "responsabilite", "procedure civile"]):
             return "code_civil"
         return ""
@@ -1408,14 +1524,16 @@ class LegalSearchModeService:
             )
             if structured_prose:
                 _logger.info("[legal_search] structured_irac_applied=True")
-                return self._ensure_default_legal_response_structure(
-                    answer_body=structured_prose,
-                    query=query,
-                    legal_sources=compact_sources,
-                    confidence=confidence,
-                    verification_status=verification_status,
-                    user_language=normalized_language,
-                )
+                # The IRAC answer is already a complete, contract-defined
+                # structure (Case risks / Applicable law / Legal assessment /
+                # Missing facts / Counsel note). Do NOT run it through
+                # _ensure_default_legal_response_structure: that helper looks
+                # for the 10 DEFAULT_RESPONSE_SECTION_ORDER labels (Matter
+                # Understood / Confirmed Facts / …), none of which match the
+                # IRAC headings, so it would append 10 empty boilerplate
+                # sections after the good answer — the duplicated, bloated
+                # output. Padding is only for the degraded fallback path.
+                return structured_prose.strip()
             # else: fall through to the legacy prose flow below.
 
         if self.client:
@@ -1485,15 +1603,19 @@ INTERNAL CASE RETRIEVAL (use only for section 1 and section 4):
                 )
                 output = llm_gateway.extract_output_text(response).strip()
                 if output:
+                    # The prompt above instructs the model to return the
+                    # 5-section IRAC structure (Case risks / Applicable law /
+                    # Legal assessment / Missing facts / Counsel note). A
+                    # successful response is therefore already well-formed.
+                    # Running it through _ensure_default_legal_response_structure
+                    # would append the 10 DEFAULT_RESPONSE_SECTION_ORDER
+                    # placeholder sections (Matter Understood / Confirmed Facts
+                    # / …) because their labels don't match the IRAC headings —
+                    # producing the duplicated, bloated boilerplate the user
+                    # reported. Return the structured answer as-is; padding is
+                    # reserved for the unstructured text fallbacks below.
                     _logger.info("[legal_search] legal_output_structure_applied=True")
-                    return self._ensure_default_legal_response_structure(
-                        answer_body=output,
-                        query=query,
-                        legal_sources=compact_sources,
-                        confidence=confidence,
-                        verification_status=verification_status,
-                        user_language=normalized_language,
-                    )
+                    return output
             except Exception:
                 pass
 
@@ -1685,6 +1807,17 @@ INTERNAL CASE RETRIEVAL (use only for section 1 and section 4):
             "principles, validate procedural and contractual facts, and confirm article-level support in official legal text "
             "before relying on this conclusion."
         )
+
+    @staticmethod
+    def _contains_non_latin(text: str) -> bool:
+        """True if the text contains Arabic, CJK, or other non-Latin scripts.
+
+        Used to decide whether a query needs translation before searching a
+        Latin-script corpus.
+        """
+        raw = str(text or "")
+        # Arabic / Hebrew / Cyrillic / CJK / Devanagari / Thai
+        return bool(re.search(r"[\u0600-\u06FF\u0590-\u05FF\u0400-\u04FF\u4E00-\u9FFF\u0900-\u097F\u0E00-\u0E7F]", raw))
 
     @staticmethod
     def _detect_user_language(text: str) -> str:

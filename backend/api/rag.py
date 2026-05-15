@@ -38,7 +38,7 @@ from backend.services.ai.verifier_service import (
 from backend.services.ai.multilingual_service import multilingual_service
 from backend.services.ai.nli_faithfulness_service import nli_faithfulness_service
 from backend.services.ai.dual_answer_service import dual_answer_service
-import os as _os
+from backend.core.config import settings
 from backend.services.ai.drafting_outline_service import drafting_outline_service
 from backend.services.ai.citation_insertion_service import citation_insertion_service
 from backend.services.ai.case_context_service import case_context_service
@@ -299,6 +299,7 @@ def copilot(
             mode=data.mode,
             legal_search_multilingual_output=data.legal_search_multilingual_output,
             legal_search_code_scope=data.legal_search_code_scope,
+            legal_search_case_grounded=data.legal_search_case_grounded,
             reasoning_level=data.reasoning_level,
             output_language=data.output_language,
             language_strict=data.language_strict,
@@ -329,10 +330,11 @@ def copilot(
             )
         except Exception:  # noqa: BLE001 — must never break the user response
             logging.getLogger(__name__).exception("dual_answer_enhancement_failed")
-    # ── NLI-based citation faithfulness scoring (opt-in via env). Computed
-    # against the source-language answer BEFORE the multilingual pass so the
-    # premise/hypothesis languages match the retrieved sources.
-    if _os.environ.get("LAI_ENABLE_NLI_FAITHFULNESS", "").lower() in {"1", "true", "yes"}:
+    # ── NLI-based citation faithfulness scoring. Computed against the
+    # source-language answer BEFORE the multilingual pass so the
+    # premise/hypothesis languages match the retrieved sources. Gated by
+    # settings.NLI_ENABLED (typed) and the service's own availability check.
+    if settings.NLI_ENABLED and nli_faithfulness_service.is_available():
         try:
             faithfulness_report = nli_faithfulness_service.score_response(response)
             response["faithfulness"] = faithfulness_report.to_dict()

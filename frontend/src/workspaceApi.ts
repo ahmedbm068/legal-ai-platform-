@@ -65,7 +65,7 @@ function resolveApiBaseUrl(): string {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
-const SLOW_AI_TIMEOUT_MS = 90000;
+const SLOW_AI_TIMEOUT_MS = 180000;
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -787,6 +787,7 @@ export const workspaceApi = {
             mode?: "default" | "legal_search";
             legalSearchMultilingualOutput?: boolean;
             legalSearchCodeScope?: string[];
+            legalSearchCaseGrounded?: boolean;
             outputLanguage?: "fr" | "ar" | "en" | "auto";
             languageStrict?: boolean;
             returnCandidates?: boolean;
@@ -815,6 +816,7 @@ export const workspaceApi = {
                 mode: options?.mode ?? "default",
                 legal_search_multilingual_output: options?.legalSearchMultilingualOutput ?? false,
                 legal_search_code_scope: options?.legalSearchCodeScope ?? [],
+                legal_search_case_grounded: options?.legalSearchCaseGrounded ?? false,
                 output_language: options?.outputLanguage ?? "auto",
                 language_strict: options?.languageStrict ?? true,
                 return_candidates: options?.returnCandidates ?? false,
@@ -863,6 +865,7 @@ export const workspaceApi = {
             useExternalResearch?: boolean;
             mode?: "default" | "legal_search";
             legalSearchMultilingualOutput?: boolean;
+            legalSearchCaseGrounded?: boolean;
             agentMode?: boolean;
             conversationHistory?: Array<{
                 role: "user" | "assistant";
@@ -887,6 +890,7 @@ export const workspaceApi = {
                 use_external_research: options.useExternalResearch ?? false,
                 mode: options.mode ?? "default",
                 legal_search_multilingual_output: options.legalSearchMultilingualOutput ?? false,
+                legal_search_case_grounded: options.legalSearchCaseGrounded ?? false,
                 agent_mode: options.agentMode ?? false,
                 conversation_history: options.conversationHistory ?? [],
             },

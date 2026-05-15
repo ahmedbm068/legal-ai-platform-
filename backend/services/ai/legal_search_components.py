@@ -30,11 +30,17 @@ MISSING_AUTHORITY_NOTE = (
 
 _CODE_SCOPE_LABELS: Dict[str, str] = {
     "code_civil": "Code Civil",
+    "code_personnel_status": "Code du Statut Personnel",
     "code_succession": "Code de Succession",
     "code_international_prive": "Code International Prive",
 }
 
-_DEFAULT_CODE_SCOPE = ["code_civil", "code_succession", "code_international_prive"]
+_DEFAULT_CODE_SCOPE = [
+    "code_civil",
+    "code_personnel_status",
+    "code_succession",
+    "code_international_prive",
+]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -148,6 +154,7 @@ class LegalDomainClassifier:
     # domain → code-family mapping
     _DOMAIN_TO_FAMILY: Dict[str, str] = {
         "civil": "code_civil",
+        "personal_status": "code_personnel_status",
         "succession": "code_succession",
         "private_international_law": "code_international_prive",
     }
@@ -178,31 +185,66 @@ class LegalDomainClassifier:
             ("breach", _T3), ("property", _T3), ("propriete", _T3),
             ("assignation", _T3), ("penalty", _T3),
         ],
-        "code_succession": [
-            # Tier 1
+        "code_personnel_status": [
+            # Tier 1 — strong phrases that anchor the personal-status code
+            ("code du statut personnel", _T1),
+            ("statut personnel", _T1),
+            ("conditions de validite du mariage", _T1),
+            ("contrat de mariage", _T1),
+            ("acte de mariage", _T1),
+            ("garde des enfants", _T1),
+            ("pension alimentaire", _T1),
+            ("autorite parentale", _T1),
             ("reserved share", _T1), ("forced heirship", _T1),
-            ("succession ab intestat", _T1), ("statut personnel", _T1),
             ("partage de succession", _T1),
-            # Tier 2
-            ("succession", _T2), ("inheritance", _T2), ("heritage", _T2),
-            ("heritier", _T2), ("heir", _T2), ("testament", _T2),
+            # Tier 2 — marriage / family law core vocabulary
+            ("mariage", _T2), ("marriage", _T2),
+            ("divorce", _T2), ("repudiation", _T2),
+            ("polygamie", _T2), ("polygamy", _T2),
+            ("epoux", _T2), ("epouse", _T2), ("conjoint", _T2),
+            ("spouse", _T2),
+            ("filiation", _T2), ("paternite", _T2), ("paternity", _T2),
+            ("tutelle", _T2), ("tuteur", _T2), ("tutorship", _T2),
+            ("adoption", _T2), ("kafala", _T2),
+            ("dot", _T2), ("mahr", _T2),
+            ("fiancailles", _T2), ("betrothal", _T2),
+            # Succession lives inside the CSP in Tunisian law
+            ("succession", _T2), ("successorale", _T2), ("successoral", _T2),
+            ("inheritance", _T2), ("heritage", _T2), ("héritage", _T2),
+            ("heritier", _T2), ("héritier", _T2), ("héritière", _T2), ("heir", _T2),
+            ("testament", _T2),
             ("estate", _T2), ("partage", _T2), ("mirath", _T2),
-            ("surviving spouse", _T2), ("legataire", _T2), ("legator", _T2),
-            # Tier 3
+            ("surviving spouse", _T2), ("conjoint survivant", _T2),
+            ("legataire", _T2), ("légataire", _T2), ("legator", _T2),
+            # Tier 3 — contextual
+            ("famille", _T3), ("family", _T3),
+            ("enfant", _T3), ("child", _T3), ("mineur", _T3),
             ("death", _T3), ("deceased", _T3), ("decede", _T3),
             ("will", _T3), ("probate", _T3), ("reserve", _T3),
+        ],
+        # Legacy alias: kept so older classifier outputs / case metadata
+        # using "code_succession" still produce a non-empty marker hit. New
+        # markers belong under ``code_personnel_status`` above.
+        "code_succession": [
+            ("succession ab intestat", _T1),
+            ("reserved share", _T1),
         ],
         "code_international_prive": [
             # Tier 1
             ("conflit de lois", _T1), ("private international law", _T1),
-            ("droit international prive", _T1), ("conflict of laws", _T1),
+            ("droit international prive", _T1), ("droit international privé", _T1),
+            ("conflict of laws", _T1),
             ("applicable law", _T1), ("recognition of foreign", _T1),
             ("international jurisdiction", _T1),
+            ("jugement etranger", _T1), ("jugement étranger", _T1),
+            ("reconnaissance d'un jugement", _T1),
             # Tier 2
             ("exequatur", _T2), ("foreign judgment", _T2),
-            ("competence internationale", _T2), ("foreign party", _T2),
+            ("competence internationale", _T2), ("compétence internationale", _T2),
+            ("foreign party", _T2),
             ("cross-border", _T2), ("domicile abroad", _T2),
             ("choice of law", _T2), ("forum", _T2),
+            ("etranger", _T2), ("étranger", _T2), ("étrangère", _T2),
             # Tier 3
             ("international", _T3), ("foreign", _T3), ("abroad", _T3),
             ("transnational", _T3),
@@ -214,8 +256,17 @@ class LegalDomainClassifier:
         "civil": "code_civil", "civil_liability": "code_civil",
         "contract": "code_civil", "contract_dispute": "code_civil",
         "commercial": "code_civil",
-        "inheritance": "code_succession", "succession": "code_succession",
-        "estate": "code_succession", "family": "code_succession",
+        # Personal-status / family law (incl. succession in Tunisian law)
+        "personal_status": "code_personnel_status",
+        "statut_personnel": "code_personnel_status",
+        "family": "code_personnel_status",
+        "marriage": "code_personnel_status",
+        "mariage": "code_personnel_status",
+        "divorce": "code_personnel_status",
+        "filiation": "code_personnel_status",
+        "tutelle": "code_personnel_status",
+        "inheritance": "code_personnel_status", "succession": "code_personnel_status",
+        "estate": "code_personnel_status",
         "international": "code_international_prive",
         "cross_border": "code_international_prive",
         "private_international_law": "code_international_prive",
@@ -232,10 +283,15 @@ class LegalDomainClassifier:
         return scores
 
     def _apply_negative_rules(self, scores: Dict[str, float]) -> Dict[str, float]:
+        csp = scores.get("code_personnel_status", 0.0)
         succ = scores.get("code_succession", 0.0)
         pil = scores.get("code_international_prive", 0.0)
         civil = scores.get("code_civil", 0.0)
-        # Strong succession signals suppress civil
+        # Strong CSP (family / marriage / divorce / succession) signals
+        # suppress civil — those questions don't belong in the Code Civil.
+        if csp >= 2 and csp > civil:
+            scores["code_civil"] = 0.0
+        # Legacy succession marker
         if succ >= 4 and succ > civil:
             scores["code_civil"] = 0.0
         # Strong PIL signals reduce civil by half

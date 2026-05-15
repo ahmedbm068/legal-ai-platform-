@@ -82,8 +82,10 @@ class Settings(BaseSettings):
     WHATSAPP_AUTO_SEND_ENABLED: bool = False
     OPENROUTER_SITE_URL: Optional[str] = None
     OPENROUTER_APP_NAME: str = "legal-ai-platform"
-    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_MODEL: str = "backend/models_local/legal_reranker_v1"
     RERANKER_ENABLED: bool = True
+    NLI_MODEL: str = "backend/models_local/legal_nli_v1"
+    NLI_ENABLED: bool = True
     RETRIEVAL_LEXICAL_WEIGHT: float = 0.4
     RETRIEVAL_SEMANTIC_WEIGHT: float = 0.6
     RETRIEVAL_MIN_SCORE: float = 0.05
