@@ -83,6 +83,71 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?؟])\s+(?=[A-ZÀ-Ý؀-ۿ0-9])")
 _CITE_TOKEN_RE = re.compile(r"\[cite:[^\]]+\]")
 _HEADING_RE = re.compile(r"^[\s#\d.\-•*]+$")
 
+# IRAC scaffolding lines (section headings + structural placeholders the
+# template emits when a section has no substantive content). These are NOT
+# legal claims: they assert nothing that retrieved statute text could
+# entail, so scoring them as claims drags the faithfulness mean toward zero
+# and produces a misleading aggregate (the real legal content can score
+# ~0.96 while the headline shows ~0.22). They are dropped before NLI runs
+# so the score reflects only verifiable legal assertions.
+#
+# Matching is on a normalised form: lowercased, cite tokens already
+# stripped, leading numbering / bullet / markdown removed, trailing
+# punctuation trimmed. Substring match (``in``) tolerates the interpolated
+# tail of the counsel-note line ("...lawyer. Confidence: high. ...").
+_STRUCTURAL_HEADING_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?\d*\s*[.)]?\s*"
+    r"(case risks|applicable law|legal assessment|"
+    r"missing facts(?:\s*/\s*verification needed)?|counsel note|"
+    r"english summary)\s*[:.]?\s*$",
+    re.IGNORECASE,
+)
+_STRUCTURAL_SENTENCE_FRAGMENTS = (
+    "insufficient case context to identify specific risks",
+    "no directly applicable legal provision was confidently identified",
+    "none flagged at this stage",
+    "the final legal judgment remains with the responsible lawyer",
+    "final legal judgment remains with the responsible lawyer",
+    "structured legal analysis produced from grounded sources",
+    "no answer could be generated",
+    # Interpolated tail of the counsel-note line. After sentence-splitting
+    # on "lawyer. " the trailing "Confidence: X. Verification status: Y."
+    # survives as its own pseudo-sentence; it is metadata, not a claim.
+    "confidence high",
+    "confidence medium",
+    "confidence low",
+    "verification status grounded",
+    "verification status partial",
+    "verification status refused",
+    "verification status unverified",
+)
+
+# Legal-citation / common abbreviations whose trailing period must NOT be
+# treated as a sentence boundary ("Art. 583 CC" is one token, not "Art."
+# followed by a new sentence "583 CC"). Before splitting we replace the
+# space after these with a sentinel so _SENTENCE_SPLIT_RE (which needs
+# ``[.!?]\s+``) cannot break there; the sentinel is restored afterwards.
+_ABBREV_RE = re.compile(
+    r"\b(Art|art|arts|al|para|para|s|ss|no|No|n°|p|pp|cf|e\.g|i\.e|"
+    r"Mr|Mrs|Ms|Dr|vs|etc)\.\s+",
+)
+_NBSP_SENTINEL = chr(0)
+
+
+def _is_structural_sentence(sentence: str) -> bool:
+    """True when ``sentence`` is IRAC scaffolding, not a legal claim.
+
+    Covers numbered/bare section headings ("1. Case risks", "Counsel note:")
+    and the fixed-string placeholders the template emits for empty sections.
+    """
+    s = sentence.strip()
+    if not s:
+        return True
+    if _STRUCTURAL_HEADING_RE.match(s):
+        return True
+    norm = re.sub(r"[\s.;:!?،؛]+", " ", s.lower()).strip()
+    return any(frag in norm for frag in _STRUCTURAL_SENTENCE_FRAGMENTS)
+
 
 @dataclass
 class ClaimScore:
@@ -374,13 +439,34 @@ def _split_into_claims(answer: str) -> list[str]:
     cleaned = _CITE_TOKEN_RE.sub("", answer).strip()
     if not cleaned:
         return []
-    raw_sentences = _SENTENCE_SPLIT_RE.split(cleaned)
+    # Split on sentence boundaries AND line breaks. The IRAC template emits
+    # each section heading on its own line ("1. Case risks\n<body>"); without
+    # the newline split the heading would fuse to the first body sentence and
+    # neither the heading filter nor a clean legal claim would result.
+    line_segments = [seg for seg in re.split(r"\n+", cleaned) if seg.strip()]
+    raw_sentences: list[str] = []
+    for segment in line_segments:
+        # Shield abbreviation periods ("Art. 583") from the sentence
+        # splitter by swapping the following space for a sentinel, then
+        # restore it on each produced fragment so claims read normally.
+        shielded = _ABBREV_RE.sub(
+            lambda m: f"{m.group(0).rstrip()}{_NBSP_SENTINEL}",
+            segment.strip(),
+        )
+        for piece in _SENTENCE_SPLIT_RE.split(shielded):
+            raw_sentences.append(piece.replace(_NBSP_SENTINEL, " "))
     out: list[str] = []
     for raw in raw_sentences:
         s = raw.strip()
         if not s or len(s) < MIN_CLAIM_CHARS:
             continue
         if _HEADING_RE.match(s):
+            continue
+        # Drop IRAC scaffolding (section headings + empty-section
+        # placeholders). They are not assertions the corpus can entail;
+        # scoring them produces a misleading sub-0.3 aggregate even when
+        # every real legal claim is fully supported.
+        if _is_structural_sentence(s):
             continue
         out.append(s)
         if len(out) >= MAX_CLAIMS:
