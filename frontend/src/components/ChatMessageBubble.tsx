@@ -390,6 +390,18 @@ const KNOWN_BARE_SECTION_TITLES = new Set([
   "uncertainty / missing information",
   "counter-arguments / alternative interpretations",
   "risk assessment (per party)",
+  // Structured-IRAC legal-search sections. Without these the numbered
+  // headings ("1. Case risks", "5. Counsel note") fall through to the
+  // numbered-bullet branch and render as a bare bullet followed by loose
+  // paragraphs — the "empty header right before its content" the user saw.
+  // Registering them promotes each to a real <h4> section.
+  "case risks",
+  "applicable law",
+  "legal assessment",
+  "missing facts",
+  "missing facts / verification needed",
+  "counsel note",
+  "english summary",
 ]);
 
 function formatMessageTime(value: string, language: UiLanguage): string {
@@ -481,7 +493,9 @@ function parseSections(content: string, defaultTitle: string): MessageSection[] 
         sections.push(current);
       }
       current = {
-        title: displayLine.trim(),
+        // Use the captured title without the leading "N." so the rendered
+        // <h4> reads "Case risks", matching the bare-title branch.
+        title: numberedKnownHeader[1].trim(),
         paragraphs: [],
         bullets: [],
         tables: [],
