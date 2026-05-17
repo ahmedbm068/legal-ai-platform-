@@ -19,7 +19,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from backend.api import auth, cases, clients, users
+from backend.api import auth, billing, case_messages, cases, clients, users
 from backend.api.admin import router as admin_router
 from backend.api.assistant import router as assistant_router
 from backend.api.appointments import router as appointments_router
@@ -59,6 +59,8 @@ from backend.models.case_memory_entry import CaseMemoryEntry
 from backend.models.client import Client
 from backend.models.client_portal_account import ClientPortalAccount
 from backend.models.client_portal_login_code import ClientPortalLoginCode
+from backend.models.case_message import CaseMessage
+from backend.models.invoice import Invoice, InvoiceLineItem
 from backend.models.consultation_request import ConsultationRequest
 from backend.models.copilot_feedback import CopilotFeedback
 from backend.models.document import Document
@@ -162,6 +164,8 @@ app.include_router(client_portal_router)
 app.include_router(users.router)
 app.include_router(clients.router)
 app.include_router(cases.router)
+app.include_router(case_messages.router)
+app.include_router(billing.router)
 app.include_router(appointments_router)
 app.include_router(legal_calendar_router)
 app.include_router(calls_router)

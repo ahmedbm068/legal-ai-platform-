@@ -3,9 +3,13 @@ import {
     ApiError,
     askPortalAssistant,
     fetchPortalDashboard,
+    fetchPortalThread,
+    fetchPortalUnreadCount,
     loginPortalAccount,
     registerPortalAccount,
     requestPortalLoginCode,
+    sendPortalMessage,
+    sendPortalMessageAttachment,
     submitAuthenticatedPortalIntake,
     uploadPortalCaseMaterials,
     verifyPortalLoginCode,
@@ -15,6 +19,7 @@ import type {
     ClientPortalAccount,
     ClientPortalAssistantResponse,
     ClientPortalDashboard,
+    ClientPortalThread,
 } from "../types";
 
 export type ThemeMode = "light" | "dark";
@@ -69,6 +74,16 @@ export type PortalContextValue = {
     assistantResult: ClientPortalAssistantResponse | null;
     askAssistant: (message: string, caseId?: number | null) => Promise<void>;
     clearAssistant: () => void;
+    // Messaging
+    thread: ClientPortalThread | null;
+    threadLoading: boolean;
+    threadError: string | null;
+    messageSending: boolean;
+    unreadMessages: number;
+    loadThread: (caseId?: number | null) => Promise<void>;
+    sendMessage: (body: string, caseId?: number | null) => Promise<boolean>;
+    sendMessageWithAttachment: (file: File, body: string, caseId?: number | null) => Promise<boolean>;
+    refreshUnreadCount: () => Promise<void>;
 };
 
 const PortalContext = createContext<PortalContextValue | null>(null);
@@ -108,7 +123,15 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
     const [assistantError, setAssistantError] = useState<string | null>(null);
     const [assistantResult, setAssistantResult] = useState<ClientPortalAssistantResponse | null>(null);
 
+    // ── Messaging ──────────────────────────────────────────────────────────────
+    const [thread, setThread] = useState<ClientPortalThread | null>(null);
+    const [threadLoading, setThreadLoading] = useState(false);
+    const [threadError, setThreadError] = useState<string | null>(null);
+    const [messageSending, setMessageSending] = useState(false);
+    const [unreadMessages, setUnreadMessages] = useState(0);
+
     const pollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+    const unreadTimerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
 
     // Theme sync
     useEffect(() => {
@@ -149,6 +172,22 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [dashboard?.jobs, token]);
+
+    // Poll unread message count while authenticated.
+    useEffect(() => {
+        if (!token) return;
+        void fetchPortalUnreadCount(token)
+            .then((res) => setUnreadMessages(res.unread_count))
+            .catch(() => undefined);
+        unreadTimerRef.current = window.setInterval(() => {
+            void fetchPortalUnreadCount(token)
+                .then((res) => setUnreadMessages(res.unread_count))
+                .catch(() => undefined);
+        }, 20000);
+        return () => {
+            if (unreadTimerRef.current !== null) window.clearInterval(unreadTimerRef.current);
+        };
+    }, [token]);
 
     const toggleTheme = useCallback(() => setTheme((prev) => (prev === "light" ? "dark" : "light")), []);
     const clearAuthMessages = useCallback(() => { setAuthError(null); setAuthMessage(null); }, []);
@@ -262,6 +301,9 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         setDashboard(null);
         setSelectedCaseId(null);
         setAssistantResult(null);
+        setThread(null);
+        setUnreadMessages(0);
+        if (unreadTimerRef.current !== null) window.clearInterval(unreadTimerRef.current);
     }, []);
 
     const submitIntake = useCallback(async (formData: FormData): Promise<boolean> => {
@@ -328,6 +370,72 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
         setAssistantError(null);
     }, []);
 
+    // ── Messaging ──────────────────────────────────────────────────────────────
+    const refreshUnreadCount = useCallback(async () => {
+        if (!token) return;
+        try {
+            const res = await fetchPortalUnreadCount(token);
+            setUnreadMessages(res.unread_count);
+        } catch {
+            // Non-fatal: leave the previous count in place.
+        }
+    }, [token]);
+
+    const loadThread = useCallback(async (caseId?: number | null) => {
+        if (!token) return;
+        setThreadLoading(true);
+        setThreadError(null);
+        try {
+            const data = await fetchPortalThread(token, caseId);
+            setThread(data);
+            // Opening the thread marks lawyer messages read server-side.
+            setUnreadMessages(0);
+        } catch (caught) {
+            setThreadError(caught instanceof Error ? caught.message : "Unable to load messages.");
+        } finally {
+            setThreadLoading(false);
+        }
+    }, [token]);
+
+    const sendMessage = useCallback(async (body: string, caseId?: number | null): Promise<boolean> => {
+        if (!token || !body.trim()) return false;
+        setMessageSending(true);
+        setThreadError(null);
+        try {
+            const message = await sendPortalMessage(token, body.trim(), caseId);
+            setThread((prev) =>
+                prev ? { ...prev, messages: [...prev.messages, message] } : prev
+            );
+            return true;
+        } catch (caught) {
+            setThreadError(caught instanceof Error ? caught.message : "Unable to send message.");
+            return false;
+        } finally {
+            setMessageSending(false);
+        }
+    }, [token]);
+
+    const sendMessageWithAttachment = useCallback(
+        async (file: File, body: string, caseId?: number | null): Promise<boolean> => {
+            if (!token || !file) return false;
+            setMessageSending(true);
+            setThreadError(null);
+            try {
+                const message = await sendPortalMessageAttachment(token, file, body.trim(), caseId);
+                setThread((prev) =>
+                    prev ? { ...prev, messages: [...prev.messages, message] } : prev
+                );
+                return true;
+            } catch (caught) {
+                setThreadError(caught instanceof Error ? caught.message : "Unable to send attachment.");
+                return false;
+            } finally {
+                setMessageSending(false);
+            }
+        },
+        [token]
+    );
+
     return (
         <PortalContext.Provider value={{
             theme, toggleTheme,
@@ -339,6 +447,8 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
             submitIntake, submitLoading, submitError, submitMessage, clearSubmitMessages,
             uploadCaseMaterials, uploadLoading,
             assistantBusy, assistantError, assistantResult, askAssistant, clearAssistant,
+            thread, threadLoading, threadError, messageSending, unreadMessages,
+            loadThread, sendMessage, sendMessageWithAttachment, refreshUnreadCount,
         }}>
             {children}
         </PortalContext.Provider>

@@ -3,6 +3,10 @@ import type {
   ArtifactVersionListResponse,
   ArtifactVersionMutationResponse,
   CaseItem,
+  CaseMessage,
+  CaseMessageThread,
+  CaseMessageThreadSummary,
+  CaseMessageUnread,
   Client,
   ConsultationFromTranscriptResponse,
   ConsultationRequest,
@@ -97,6 +101,19 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   return response.json() as Promise<T>;
+}
+
+// Fetch a binary endpoint (e.g. message attachment) with auth, returning a
+// blob object URL the caller can open or revoke.
+async function requestBlobUrl(path: string, token: string): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed with status ${response.status}`);
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 export const api = {
@@ -399,4 +416,36 @@ export const api = {
       method: "POST",
       token,
     }),
+
+  // ── Client <-> lawyer messaging ──────────────────────────────────────────
+
+  listMessageThreads: (token: string) =>
+    request<CaseMessageThreadSummary[]>("/staff/messages/threads", { token }),
+
+  messageUnreadCount: (token: string) =>
+    request<CaseMessageUnread>("/staff/messages/unread-count", { token }),
+
+  getMessageThread: (token: string, caseId: number) =>
+    request<CaseMessageThread>(`/staff/messages/${caseId}`, { token }),
+
+  sendMessage: (token: string, caseId: number, body: string) =>
+    request<CaseMessage>(`/staff/messages/${caseId}`, {
+      method: "POST",
+      token,
+      body: { body },
+    }),
+
+  sendMessageAttachment: (token: string, caseId: number, file: File, body: string) => {
+    const formData = new FormData();
+    formData.append("attachment", file);
+    formData.append("body", body);
+    return request<CaseMessage>(`/staff/messages/${caseId}/attachment`, {
+      method: "POST",
+      token,
+      formData,
+    });
+  },
+
+  messageAttachmentUrl: (token: string, caseId: number, messageId: number) =>
+    requestBlobUrl(`/staff/messages/${caseId}/attachment/${messageId}`, token),
 };

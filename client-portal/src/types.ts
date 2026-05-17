@@ -173,6 +173,67 @@ export interface ExecutionTraceItem {
   [key: string]: unknown;
 }
 
+export interface ClientPortalMessage {
+  id: number;
+  case_id: number;
+  sender_role: "client" | "lawyer";
+  sender_name: string | null;
+  body: string;
+  attachment_filename: string | null;
+  attachment_content_type: string | null;
+  attachment_size: number | null;
+  is_mine: boolean;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface ClientPortalThread {
+  case_id: number;
+  case_title: string;
+  counsel_name: string | null;
+  messages: ClientPortalMessage[];
+  unread_count: number;
+}
+
+export interface ClientPortalUnread {
+  unread_count: number;
+}
+
+export interface ClientPortalInvoiceLineItem {
+  id: number;
+  description: string;
+  hours: number | null;
+  amount: number;
+}
+
+export interface ClientPortalInvoice {
+  id: number;
+  invoice_number: string;
+  case_id: number;
+  description: string;
+  notes: string | null;
+  currency: string;
+  amount_total: number;
+  status: string;
+  issued_at: string;
+  due_at: string | null;
+  paid_at: string | null;
+  payment_status: string | null;
+  line_items: ClientPortalInvoiceLineItem[];
+}
+
+export interface ClientPortalBilling {
+  invoices: ClientPortalInvoice[];
+  total_outstanding: number;
+  currency: string;
+}
+
+export interface ClientPortalPayInvoiceResult {
+  status: string;
+  message: string;
+  invoice: ClientPortalInvoice;
+}
+
 export interface ClientPortalAssistantResponse {
   answer: string;
   confidence: string;

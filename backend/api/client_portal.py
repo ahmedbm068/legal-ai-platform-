@@ -27,15 +27,22 @@ from backend.api.client_portal_schema import (
     ClientPortalLoginCodeRequest,
     ClientPortalLoginCodeVerifyRequest,
     ClientPortalLoginRequest,
+    ClientPortalMessageItem,
     ClientPortalMessageResponse,
     ClientPortalRegisterRequest,
+    ClientPortalBillingResponse,
+    ClientPortalPayInvoiceResponse,
+    ClientPortalSendMessageRequest,
+    ClientPortalThreadResponse,
     ClientPortalToken,
+    ClientPortalUnreadResponse,
 )
 from backend.core.hashing import hash_password, verify_password
 from backend.core.jwt_handler import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY as STAFF_SECRET_KEY
 from backend.core.config import settings
 from backend.database.database import SessionLocal
 from backend.models.case import Case
+from backend.models.case_message import CaseMessage
 from backend.models.appointment import Appointment
 from backend.models.client import Client
 from backend.models.client_portal_account import ClientPortalAccount
@@ -60,6 +67,14 @@ from backend.services.ai.runtime_services import copilot_orchestration_service
 from backend.services.jobs.job_queue_service import background_job_service
 from backend.services.client_portal_mail_service import client_portal_mail_service
 from backend.services.use_cases.ingestion_use_case import ingestion_use_case
+from backend.services.storage_service import stream_file_response, upload_file
+from backend.services.case_messaging_service import mark_messages_read, serialize_message
+from backend.models.invoice import Invoice
+from backend.services.billing_service import (
+    initiate_payment,
+    outstanding_total,
+    serialize_invoice,
+)
 from backend.api.voice import is_supported_audio_upload
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -1314,4 +1329,251 @@ def cancel_portal_appointment(
     return {
         "message": "Appointment cancelled.",
         "appointment": serialize_appointment(appointment),
+    }
+
+
+# ── Messaging (client <-> lawyer, per case) ────────────────────────────────
+
+
+MESSAGE_ATTACHMENT_MAX_MB = 15
+
+
+def resolve_messaging_case(
+    db: Session,
+    account: ClientPortalAccount,
+    case_id: int | None,
+) -> Case:
+    """Pick the case the message thread belongs to.
+
+    If no case_id is given, fall back to the client's most-recently-updated
+    case so the page works out of the box for single-case clients.
+    """
+    if case_id is not None:
+        return get_portal_case_or_404(db=db, account=account, case_id=case_id)
+
+    accessible = get_accessible_case_ids(db, account)
+    if not accessible:
+        raise HTTPException(
+            status_code=404,
+            detail="No case is linked to this portal account yet.",
+        )
+    return get_portal_case_or_404(db=db, account=account, case_id=accessible[0])
+
+
+def serialize_case_message(message: CaseMessage) -> dict:
+    # Client portal always views as the "client" side.
+    return serialize_message(message, viewer_role="client")
+
+
+@router.get("/messages", response_model=ClientPortalThreadResponse)
+def get_message_thread(
+    case_id: int | None = None,
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    case = resolve_messaging_case(db, account, case_id)
+
+    messages = (
+        db.query(CaseMessage)
+        .filter(CaseMessage.case_id == case.id)
+        .order_by(CaseMessage.created_at.asc(), CaseMessage.id.asc())
+        .all()
+    )
+
+    mark_messages_read(db, case.id, from_role="lawyer")
+
+    return {
+        "case_id": case.id,
+        "case_title": case.title,
+        "counsel_name": case.lawyer.name if case.lawyer else None,
+        "messages": [serialize_case_message(m) for m in messages],
+        "unread_count": 0,
+    }
+
+
+@router.post(
+    "/messages",
+    response_model=ClientPortalMessageItem,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_message(
+    payload: ClientPortalSendMessageRequest,
+    case_id: int | None = None,
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    case = resolve_messaging_case(db, account, case_id)
+
+    message = CaseMessage(
+        tenant_id=account.tenant_id,
+        case_id=case.id,
+        portal_account_id=account.id,
+        sender_user_id=None,
+        sender_role="client",
+        sender_name=account.full_name,
+        body=payload.body.strip(),
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+
+    return serialize_case_message(message)
+
+
+@router.post(
+    "/messages/attachment",
+    response_model=ClientPortalMessageItem,
+    status_code=status.HTTP_201_CREATED,
+)
+def send_message_attachment(
+    case_id: int | None = None,
+    body: str = Form(""),
+    attachment: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    case = resolve_messaging_case(db, account, case_id)
+
+    if not attachment or not attachment.filename:
+        raise HTTPException(status_code=400, detail="Attachment file is required.")
+
+    attachment.file.seek(0, 2)
+    size = attachment.file.tell()
+    attachment.file.seek(0)
+    max_bytes = MESSAGE_ATTACHMENT_MAX_MB * 1024 * 1024
+    if size > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Attachment too large. Maximum allowed size is {MESSAGE_ATTACHMENT_MAX_MB} MB.",
+        )
+
+    object_name = upload_file(attachment.file, attachment.filename, prefix="messages")
+
+    message = CaseMessage(
+        tenant_id=account.tenant_id,
+        case_id=case.id,
+        portal_account_id=account.id,
+        sender_user_id=None,
+        sender_role="client",
+        sender_name=account.full_name,
+        body=(body or "").strip(),
+        attachment_filename=attachment.filename,
+        attachment_path=object_name,
+        attachment_content_type=attachment.content_type,
+        attachment_size=size,
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+
+    return serialize_case_message(message)
+
+
+@router.get("/messages/{message_id}/attachment")
+def download_message_attachment(
+    message_id: int,
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    accessible_case_ids = set(get_accessible_case_ids(db, account))
+
+    message = (
+        db.query(CaseMessage)
+        .filter(
+            CaseMessage.id == message_id,
+            CaseMessage.tenant_id == account.tenant_id,
+        )
+        .first()
+    )
+    if not message or message.case_id not in accessible_case_ids:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+    if not message.attachment_path:
+        raise HTTPException(status_code=404, detail="This message has no attachment.")
+
+    return stream_file_response(
+        message.attachment_path,
+        media_type=message.attachment_content_type or "application/octet-stream",
+        filename=message.attachment_filename or "attachment",
+    )
+
+
+@router.get("/messages/unread-count", response_model=ClientPortalUnreadResponse)
+def get_unread_message_count(
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    accessible_case_ids = get_accessible_case_ids(db, account)
+    if not accessible_case_ids:
+        return {"unread_count": 0}
+
+    count = (
+        db.query(CaseMessage)
+        .filter(
+            CaseMessage.tenant_id == account.tenant_id,
+            CaseMessage.case_id.in_(accessible_case_ids),
+            CaseMessage.sender_role == "lawyer",
+            CaseMessage.read_at.is_(None),
+        )
+        .count()
+    )
+    return {"unread_count": int(count)}
+
+
+# ── Billing (client view) ──────────────────────────────────────────────────
+
+
+def _client_invoices(db: Session, account: ClientPortalAccount) -> list[Invoice]:
+    accessible_case_ids = get_accessible_case_ids(db, account)
+    if not accessible_case_ids:
+        return []
+    return (
+        db.query(Invoice)
+        .filter(
+            Invoice.tenant_id == account.tenant_id,
+            Invoice.case_id.in_(accessible_case_ids),
+            Invoice.status != "draft",
+        )
+        .order_by(Invoice.issued_at.desc(), Invoice.id.desc())
+        .all()
+    )
+
+
+@router.get("/billing", response_model=ClientPortalBillingResponse)
+def get_billing(
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    invoices = _client_invoices(db, account)
+    currency = invoices[0].currency if invoices else "USD"
+    return {
+        "invoices": [serialize_invoice(inv) for inv in invoices],
+        "total_outstanding": outstanding_total(invoices),
+        "currency": currency,
+    }
+
+
+@router.post("/billing/{invoice_id}/pay", response_model=ClientPortalPayInvoiceResponse)
+def pay_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    accessible_case_ids = set(get_accessible_case_ids(db, account))
+
+    invoice = (
+        db.query(Invoice)
+        .filter(
+            Invoice.id == invoice_id,
+            Invoice.tenant_id == account.tenant_id,
+        )
+        .first()
+    )
+    if not invoice or invoice.case_id not in accessible_case_ids:
+        raise HTTPException(status_code=404, detail="Invoice not found.")
+
+    result = initiate_payment(db, invoice)
+    return {
+        "status": result.status,
+        "message": result.message,
+        "invoice": serialize_invoice(result.invoice),
     }
