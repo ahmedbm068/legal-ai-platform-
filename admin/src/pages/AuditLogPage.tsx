@@ -1,341 +1,500 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-    apiGetCopilotTrace,
     apiListAuditLog,
-    apiListCopilotTraces,
+    apiListUsers,
     type AuditLogEntry,
-    type CopilotTrace,
+    type AdminUser,
 } from "../lib/api";
+import { useToast } from "../context/ToastContext";
+import { PageHeader } from "../components/ui";
 
-type Tab = "http" | "trace";
+const PAGE_SIZE = 15;
 
-function methodBadge(method: string) {
-    const map: Record<string, string> = {
-        GET: "badge badge-gray",
-        POST: "badge badge-green",
-        PUT: "badge badge-blue",
-        PATCH: "badge badge-yellow",
-        DELETE: "badge badge-red",
-    };
-    return map[method] ?? "badge badge-gray";
+type StatusClass = "" | "success" | "client_error" | "server_error";
+
+interface DerivedAction {
+    label: string;
+    destructive: boolean;
 }
 
-function statusBadge(code: number) {
-    if (code < 300) return "badge badge-green";
-    if (code < 400) return "badge badge-blue";
-    if (code < 500) return "badge badge-yellow";
-    return "badge badge-red";
-}
+/** Turn an HTTP method + path into a human-readable action label. */
+function deriveAction(method: string, path: string): DerivedAction {
+    const m = method.toUpperCase();
+    // First meaningful path segment, e.g. /api/cases/42 -> "cases"
+    const seg =
+        path
+            .split("?")[0]
+            .split("/")
+            .filter((s) => s && s !== "api")[0] ?? "resource";
+    const noun = seg
+        .replace(/[-_]/g, " ")
+        .replace(/s$/, "")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
 
-function verdictBadge(verdict: string | null) {
-    switch (verdict) {
-        case "verified":
-            return "badge badge-green";
-        case "partial":
-            return "badge badge-yellow";
-        case "refused":
-            return "badge badge-blue";
-        case "error":
-            return "badge badge-red";
-        case "unverified":
+    switch (m) {
+        case "POST":
+            return { label: `${noun} Created`, destructive: false };
+        case "PUT":
+        case "PATCH":
+            return { label: `${noun} Updated`, destructive: false };
+        case "DELETE":
+            return { label: `${noun} Deleted`, destructive: true };
         default:
-            return "badge badge-gray";
+            return { label: `${noun} ${m}`, destructive: false };
     }
 }
 
-function HttpAuditTab() {
-    const [entries, setEntries] = useState<AuditLogEntry[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        apiListAuditLog(200)
-            .then(setEntries)
-            .catch((e) => setError(e.message))
-            .finally(() => setLoading(false));
-    }, []);
-
-    if (loading) return <p className="text-slate-400 text-sm">Loading…</p>;
-    if (error)
-        return (
-            <p className="text-yellow-400 text-sm bg-yellow-900/20 border border-yellow-800 rounded-lg px-3 py-2">
-                {error} — audit log endpoint may not be deployed yet.
-            </p>
-        );
-
-    return (
-        <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-            <table className="admin-table">
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>Method</th>
-                        <th>Path</th>
-                        <th>Status</th>
-                        <th>Duration</th>
-                        <th>User</th>
-                        <th>Tenant</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {entries.length === 0 ? (
-                        <tr>
-                            <td colSpan={7} className="text-center text-slate-500 py-8">
-                                No entries yet
-                            </td>
-                        </tr>
-                    ) : (
-                        entries.map((e) => (
-                            <tr key={e.id}>
-                                <td className="text-slate-500 font-mono text-xs whitespace-nowrap">
-                                    {new Date(e.created_at).toLocaleTimeString()}
-                                </td>
-                                <td>
-                                    <span className={methodBadge(e.method)}>{e.method}</span>
-                                </td>
-                                <td className="font-mono text-xs text-slate-300 max-w-xs truncate">
-                                    {e.path}
-                                </td>
-                                <td>
-                                    <span className={statusBadge(e.status_code)}>{e.status_code}</span>
-                                </td>
-                                <td className="text-slate-500 text-xs">{e.duration_ms.toFixed(0)}ms</td>
-                                <td className="text-slate-500 text-xs">
-                                    {e.user_id ? `#${e.user_id}` : "—"}
-                                </td>
-                                <td className="text-slate-500 text-xs">#{e.tenant_id}</td>
-                            </tr>
-                        ))
-                    )}
-                </tbody>
-            </table>
-        </div>
-    );
+function statusClassOf(code: number): StatusClass {
+    if (code >= 500) return "server_error";
+    if (code >= 400) return "client_error";
+    return "success";
 }
 
-function TraceDetail({ callId, onClose }: { callId: string; onClose: () => void }) {
-    const [trace, setTrace] = useState<CopilotTrace | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [loading, setLoading] = useState(true);
+function monogram(name: string): string {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
-    useEffect(() => {
-        apiGetCopilotTrace(callId)
-            .then(setTrace)
-            .catch((e) => setError(e.message))
-            .finally(() => setLoading(false));
-    }, [callId]);
+function fmtTimestamp(iso: string): string {
+    const d = new Date(iso);
+    const date = d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+    });
+    const time = d.toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+    });
+    return `${date} · ${time}`;
+}
 
+interface Row {
+    entry: AuditLogEntry;
+    actorName: string;
+    actorEmail: string | null;
+    isSystem: boolean;
+    action: DerivedAction;
+}
+
+function DetailDrawer({ row, onClose }: { row: Row; onClose: () => void }) {
+    const { entry } = row;
+    const meta = {
+        request_id: `req_${entry.id}`,
+        method: entry.method,
+        path: entry.path,
+        status_code: entry.status_code,
+        duration_ms: Number(entry.duration_ms.toFixed(1)),
+        actor: row.isSystem
+            ? "system"
+            : `${row.actorName}${row.actorEmail ? ` <${row.actorEmail}>` : ""}`,
+        user_id: entry.user_id,
+        tenant_id: entry.tenant_id,
+        created_at: entry.created_at,
+    };
     return (
-        <div className="bg-slate-900 rounded-xl border border-slate-800 p-4 mb-4">
-            <div className="flex items-center justify-between mb-3">
-                <h3 className="text-white font-semibold text-sm">
-                    Reasoning trail · <span className="font-mono text-xs">{callId}</span>
-                </h3>
-                <button className="text-slate-400 hover:text-white text-xs" onClick={onClose}>
-                    Close ✕
-                </button>
-            </div>
-            {loading && <p className="text-slate-400 text-sm">Loading…</p>}
-            {error && <p className="text-yellow-400 text-sm">{error}</p>}
-            {trace && (
-                <div className="space-y-3 text-sm">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                        <div>
-                            <p className="text-slate-500 uppercase tracking-wide mb-0.5">Intent</p>
-                            <p className="text-slate-200 font-mono">{trace.intent ?? "—"}</p>
-                        </div>
-                        <div>
-                            <p className="text-slate-500 uppercase tracking-wide mb-0.5">Big Agent</p>
-                            <p className="text-slate-200 font-mono">{trace.big_agent ?? "—"}</p>
-                        </div>
-                        <div>
-                            <p className="text-slate-500 uppercase tracking-wide mb-0.5">Verdict</p>
-                            <p>
-                                <span className={verdictBadge(trace.verdict)}>
-                                    {trace.verdict ?? "—"}
-                                </span>
-                            </p>
-                        </div>
-                        <div>
-                            <p className="text-slate-500 uppercase tracking-wide mb-0.5">Duration</p>
-                            <p className="text-slate-200">
-                                {trace.duration_ms != null ? `${trace.duration_ms}ms` : "—"}
-                            </p>
+        <div
+            className="fixed inset-0 z-[60] bg-inverse-surface/30 flex justify-end"
+            onMouseDown={onClose}
+        >
+            <div
+                className="h-full w-full max-w-[420px] bg-surface-container-lowest border-l border-outline-variant shadow-2xl flex flex-col"
+                onMouseDown={(e) => e.stopPropagation()}
+            >
+                <div className="h-topbar-height flex items-center justify-between px-lg border-b border-outline-variant shrink-0">
+                    <h2 className="font-section-header text-section-header text-on-surface">
+                        Log Entry Details
+                    </h2>
+                    <button
+                        onClick={onClose}
+                        className="text-secondary hover:text-primary transition-colors"
+                        aria-label="Close"
+                    >
+                        <span className="material-symbols-outlined">close</span>
+                    </button>
+                </div>
+                <div className="p-lg space-y-lg overflow-auto">
+                    <div className="grid grid-cols-2 gap-md">
+                        <Field label="Actor">
+                            {row.isSystem ? "System" : row.actorName}
+                        </Field>
+                        <Field label="Tenant">
+                            {entry.tenant_id != null ? `#${entry.tenant_id}` : "—"}
+                        </Field>
+                        <Field label="Action">{row.action.label}</Field>
+                        <Field label="Status">
+                            <span className={badgeForStatus(entry.status_code)}>
+                                {entry.status_code}
+                            </span>
+                        </Field>
+                        <Field label="Method">{entry.method}</Field>
+                        <Field label="Duration">
+                            {entry.duration_ms.toFixed(0)} ms
+                        </Field>
+                    </div>
+                    <div className="space-y-sm">
+                        <label className="font-label-caps text-label-caps text-secondary uppercase">
+                            Entity / Path
+                        </label>
+                        <div className="bg-surface-container p-sm rounded font-mono text-[12px] text-on-surface-variant break-all">
+                            {entry.path}
                         </div>
                     </div>
-
-                    <div>
-                        <p className="text-slate-500 uppercase tracking-wide text-[10px] mb-1">
-                            Mini-agents used ({trace.mini_agents_used.length})
-                        </p>
-                        <div className="flex flex-wrap gap-1">
-                            {trace.mini_agents_used.length === 0 ? (
-                                <span className="text-slate-600 italic text-xs">none recorded</span>
-                            ) : (
-                                trace.mini_agents_used.map((a) => (
-                                    <span
-                                        key={a}
-                                        className="bg-slate-800 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono text-slate-300"
-                                    >
-                                        {a}
-                                    </span>
-                                ))
-                            )}
-                        </div>
-                    </div>
-
-                    <div>
-                        <p className="text-slate-500 uppercase tracking-wide text-[10px] mb-1">
-                            Pipeline stages ({trace.stages.length})
-                        </p>
-                        <ol className="space-y-1">
-                            {trace.stages.map((s, idx) => (
-                                <li key={`${s.name}-${idx}`} className="flex items-start gap-2 text-xs">
-                                    <span className="text-slate-600 font-mono w-6 shrink-0">
-                                        {String(idx + 1).padStart(2, "0")}
-                                    </span>
-                                    <span className="text-slate-300 font-mono w-48 shrink-0">
-                                        {s.name}
-                                    </span>
-                                    <span
-                                        className={
-                                            s.status === "success"
-                                                ? "badge badge-green"
-                                                : s.status === "skipped"
-                                                    ? "badge badge-gray"
-                                                    : "badge badge-yellow"
-                                        }
-                                    >
-                                        {s.status}
-                                    </span>
-                                    <span className="text-slate-500 truncate">{s.detail}</span>
-                                </li>
-                            ))}
-                        </ol>
+                    <div className="space-y-sm">
+                        <label className="font-label-caps text-label-caps text-secondary uppercase">
+                            Full Metadata
+                        </label>
+                        <pre className="bg-surface-container p-md rounded font-mono text-[11px] text-on-surface-variant overflow-x-auto">
+                            {JSON.stringify(meta, null, 2)}
+                        </pre>
                     </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 }
 
-function CopilotTraceTab() {
-    const [traces, setTraces] = useState<CopilotTrace[]>([]);
+function Field({
+    label,
+    children,
+}: {
+    label: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="space-y-xs">
+            <label className="font-label-caps text-label-caps text-secondary uppercase">
+                {label}
+            </label>
+            <div className="font-body-sm text-body-sm text-on-surface">{children}</div>
+        </div>
+    );
+}
+
+function badgeForStatus(code: number): string {
+    const cls = statusClassOf(code);
+    if (cls === "server_error") return "badge badge-red";
+    if (cls === "client_error") return "badge badge-yellow";
+    return "badge badge-green";
+}
+
+export default function AuditLogPage() {
+    const { addToast } = useToast();
+    const [entries, setEntries] = useState<AuditLogEntry[]>([]);
+    const [users, setUsers] = useState<Map<number, AdminUser>>(new Map());
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
-    const [verdictFilter, setVerdictFilter] = useState<string>("");
-    const [selected, setSelected] = useState<string | null>(null);
+
+    const [search, setSearch] = useState("");
+    const [methodFilter, setMethodFilter] = useState("");
+    const [statusFilter, setStatusFilter] = useState<StatusClass>("");
+    const [page, setPage] = useState(1);
+    const [selected, setSelected] = useState<Row | null>(null);
 
     useEffect(() => {
-        setLoading(true);
-        setError(null);
-        apiListCopilotTraces({ limit: 100, verdict: verdictFilter || undefined })
-            .then((data) => setTraces(data.traces))
-            .catch((e) => setError(e.message))
-            .finally(() => setLoading(false));
-    }, [verdictFilter]);
+        Promise.allSettled([apiListAuditLog(500), apiListUsers()]).then(
+            ([a, u]) => {
+                if (a.status === "fulfilled") setEntries(a.value);
+                else
+                    setError(
+                        a.reason?.message ?? "Audit log endpoint unavailable."
+                    );
+                if (u.status === "fulfilled") {
+                    setUsers(new Map(u.value.map((x) => [x.id, x])));
+                }
+                setLoading(false);
+            }
+        );
+    }, []);
 
-    const verdictCounts = useMemo(() => {
-        const acc: Record<string, number> = {};
-        for (const t of traces) {
-            const v = t.verdict ?? "unknown";
-            acc[v] = (acc[v] ?? 0) + 1;
+    useEffect(() => {
+        setPage(1);
+    }, [search, methodFilter, statusFilter]);
+
+    const rows = useMemo<Row[]>(
+        () =>
+            entries.map((entry) => {
+                const isSystem = entry.user_id == null;
+                const user = entry.user_id != null ? users.get(entry.user_id) : undefined;
+                return {
+                    entry,
+                    isSystem,
+                    actorName: isSystem
+                        ? "System Automator"
+                        : user
+                            ? user.name
+                            : `User #${entry.user_id}`,
+                    actorEmail: user?.email ?? null,
+                    action: deriveAction(entry.method, entry.path),
+                };
+            }),
+        [entries, users]
+    );
+
+    const filtered = useMemo(() => {
+        const q = search.trim().toLowerCase();
+        return rows.filter((r) => {
+            if (methodFilter && r.entry.method.toUpperCase() !== methodFilter)
+                return false;
+            if (statusFilter && statusClassOf(r.entry.status_code) !== statusFilter)
+                return false;
+            if (q) {
+                const hay = `${r.actorName} ${r.actorEmail ?? ""} ${r.entry.path} ${r.action.label
+                    }`.toLowerCase();
+                if (!hay.includes(q)) return false;
+            }
+            return true;
+        });
+    }, [rows, search, methodFilter, statusFilter]);
+
+    const total = filtered.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    const safePage = Math.min(page, totalPages);
+    const pageRows = filtered.slice(
+        (safePage - 1) * PAGE_SIZE,
+        safePage * PAGE_SIZE
+    );
+    const rangeStart = total === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+    const rangeEnd = Math.min(safePage * PAGE_SIZE, total);
+
+    const pageNumbers = useMemo(() => {
+        const nums: (number | "…")[] = [];
+        for (let i = 1; i <= totalPages; i++) {
+            if (i <= 3 || i === totalPages || Math.abs(i - safePage) <= 1)
+                nums.push(i);
+            else if (nums[nums.length - 1] !== "…") nums.push("…");
         }
-        return acc;
-    }, [traces]);
+        return nums;
+    }, [totalPages, safePage]);
+
+    const exportCsv = () => {
+        if (filtered.length === 0) {
+            addToast("Nothing to export with the current filters.", "info");
+            return;
+        }
+        const header = [
+            "Actor",
+            "Email",
+            "Action",
+            "Method",
+            "Entity",
+            "Status",
+            "Duration_ms",
+            "Tenant",
+            "Timestamp",
+        ];
+        const csvEscape = (v: unknown) => {
+            const s = String(v ?? "");
+            return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        };
+        const lines = filtered.map((r) =>
+            [
+                r.actorName,
+                r.actorEmail ?? "",
+                r.action.label,
+                r.entry.method,
+                r.entry.path,
+                r.entry.status_code,
+                r.entry.duration_ms.toFixed(1),
+                r.entry.tenant_id ?? "",
+                r.entry.created_at,
+            ]
+                .map(csvEscape)
+                .join(",")
+        );
+        const blob = new Blob([[header.join(","), ...lines].join("\n")], {
+            type: "text/csv;charset=utf-8;",
+        });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+        addToast(`Exported ${filtered.length} entries.`, "success");
+    };
+
+    const methodOptions = useMemo(() => {
+        const set = new Set(entries.map((e) => e.method.toUpperCase()));
+        return [...set].sort();
+    }, [entries]);
+
+    const selectCls =
+        "block bg-surface-container-lowest border border-outline-variant rounded px-sm py-xs font-body-sm text-body-sm text-on-surface focus:outline-none focus:border-primary-container focus:ring-2 focus:ring-primary-container/20 transition-all";
 
     return (
         <div>
-            {selected && <TraceDetail callId={selected} onClose={() => setSelected(null)} />}
+            <PageHeader title="Audit Log" />
 
-            <div className="flex items-center gap-2 mb-3 text-xs">
-                <span className="text-slate-500">Verdict:</span>
-                {["", "verified", "partial", "unverified", "refused", "error"].map((v) => (
-                    <button
-                        key={v || "all"}
-                        onClick={() => setVerdictFilter(v)}
-                        className={`px-2 py-0.5 rounded ${verdictFilter === v
-                                ? "bg-slate-700 text-white"
-                                : "bg-slate-900 text-slate-400 hover:text-white border border-slate-800"
-                            }`}
-                    >
-                        {v || "all"}
-                        {v && verdictCounts[v] != null && (
-                            <span className="text-slate-500 ml-1">({verdictCounts[v]})</span>
-                        )}
-                    </button>
-                ))}
+            {/* Filters + actions */}
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-md mb-lg">
+                <div className="flex flex-wrap gap-md">
+                    <div className="space-y-xs">
+                        <label className="font-label-caps text-label-caps text-secondary uppercase">
+                            Search
+                        </label>
+                        <div className="relative">
+                            <span className="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-[18px] text-secondary pointer-events-none">
+                                search
+                            </span>
+                            <input
+                                value={search}
+                                onChange={(e) => setSearch(e.target.value)}
+                                placeholder="Actor, path, action…"
+                                className={`${selectCls} pl-8 w-60`}
+                            />
+                        </div>
+                    </div>
+                    <div className="space-y-xs">
+                        <label className="font-label-caps text-label-caps text-secondary uppercase">
+                            Method
+                        </label>
+                        <select
+                            value={methodFilter}
+                            onChange={(e) => setMethodFilter(e.target.value)}
+                            className={`${selectCls} w-36`}
+                        >
+                            <option value="">All Methods</option>
+                            {methodOptions.map((m) => (
+                                <option key={m} value={m}>
+                                    {m}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="space-y-xs">
+                        <label className="font-label-caps text-label-caps text-secondary uppercase">
+                            Status
+                        </label>
+                        <select
+                            value={statusFilter}
+                            onChange={(e) =>
+                                setStatusFilter(e.target.value as StatusClass)
+                            }
+                            className={`${selectCls} w-44`}
+                        >
+                            <option value="">All Statuses</option>
+                            <option value="success">Success (2xx/3xx)</option>
+                            <option value="client_error">Client Error (4xx)</option>
+                            <option value="server_error">Server Error (5xx)</option>
+                        </select>
+                    </div>
+                </div>
+                <button
+                    onClick={exportCsv}
+                    className="flex items-center gap-xs px-md py-sm bg-surface-container-lowest border border-outline-variant rounded text-on-surface font-body-sm text-body-sm hover:bg-surface-container transition-colors h-fit"
+                >
+                    <span className="material-symbols-outlined text-[18px]">
+                        download
+                    </span>
+                    Export CSV
+                </button>
             </div>
 
-            {loading && <p className="text-slate-400 text-sm">Loading…</p>}
-            {error && (
-                <p className="text-yellow-400 text-sm bg-yellow-900/20 border border-yellow-800 rounded-lg px-3 py-2">
-                    {error}
-                </p>
-            )}
-
-            {!loading && !error && (
-                <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+            {/* Table */}
+            <div className="bg-surface-container-lowest border border-outline-variant rounded overflow-hidden">
+                <div className="overflow-x-auto">
                     <table className="admin-table">
                         <thead>
                             <tr>
-                                <th>Time</th>
-                                <th>Call ID</th>
-                                <th>Intent</th>
-                                <th>Big Agent</th>
-                                <th>Mini agents</th>
-                                <th>Verdict</th>
-                                <th>Duration</th>
-                                <th></th>
+                                <th>Actor</th>
+                                <th>Action</th>
+                                <th>Entity</th>
+                                <th>Tenant</th>
+                                <th className="text-right">Timestamp</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            {traces.length === 0 ? (
+                        <tbody className="font-table-data text-table-data">
+                            {loading ? (
                                 <tr>
-                                    <td colSpan={8} className="text-center text-slate-500 py-8">
-                                        No traces yet
+                                    <td colSpan={5} className="text-center text-secondary py-12">
+                                        Loading audit log…
+                                    </td>
+                                </tr>
+                            ) : error ? (
+                                <tr>
+                                    <td colSpan={5} className="py-8">
+                                        <p className="text-center font-body-sm text-body-sm text-on-error-container">
+                                            {error}
+                                        </p>
+                                    </td>
+                                </tr>
+                            ) : pageRows.length === 0 ? (
+                                <tr>
+                                    <td colSpan={5} className="text-center text-secondary py-12">
+                                        No log entries match the current filters.
                                     </td>
                                 </tr>
                             ) : (
-                                traces.map((t) => (
-                                    <tr key={t.id}>
-                                        <td className="text-slate-500 font-mono text-xs whitespace-nowrap">
-                                            {t.created_at
-                                                ? new Date(t.created_at).toLocaleTimeString()
-                                                : "—"}
-                                        </td>
-                                        <td className="font-mono text-xs text-slate-400 max-w-[140px] truncate">
-                                            {t.call_id}
-                                        </td>
-                                        <td className="font-mono text-xs text-slate-300">
-                                            {t.intent ?? "—"}
-                                        </td>
-                                        <td className="font-mono text-xs text-slate-200">
-                                            {t.big_agent ?? "—"}
-                                        </td>
-                                        <td className="text-slate-400 text-xs">
-                                            {t.mini_agents_used.length === 0
-                                                ? "—"
-                                                : `${t.mini_agents_used.length} (${t.mini_agents_used
-                                                    .slice(0, 2)
-                                                    .join(", ")}${t.mini_agents_used.length > 2 ? "…" : ""
-                                                })`}
+                                pageRows.map((r) => (
+                                    <tr
+                                        key={r.entry.id}
+                                        onClick={() => setSelected(r)}
+                                        className="cursor-pointer"
+                                    >
+                                        <td>
+                                            <div className="flex items-center gap-sm">
+                                                {r.isSystem ? (
+                                                    <span className="w-7 h-7 rounded-full bg-primary-container flex items-center justify-center shrink-0">
+                                                        <span className="material-symbols-outlined text-on-primary text-[15px]">
+                                                            settings_suggest
+                                                        </span>
+                                                    </span>
+                                                ) : (
+                                                    <span className="w-7 h-7 rounded-full bg-surface-container-high border border-outline-variant flex items-center justify-center text-[10px] font-bold text-secondary shrink-0">
+                                                        {monogram(r.actorName)}
+                                                    </span>
+                                                )}
+                                                <div className="min-w-0">
+                                                    <div className="text-on-surface font-semibold truncate">
+                                                        {r.actorName}
+                                                    </div>
+                                                    {r.actorEmail && (
+                                                        <div className="text-secondary text-[11px] truncate">
+                                                            {r.actorEmail}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </td>
                                         <td>
-                                            <span className={verdictBadge(t.verdict)}>
-                                                {t.verdict ?? "—"}
-                                            </span>
+                                            {r.action.destructive ? (
+                                                <span className="inline-flex items-center gap-xs text-error font-bold uppercase tracking-tight">
+                                                    <span className="material-symbols-outlined text-[16px]">
+                                                        warning
+                                                    </span>
+                                                    {r.action.label}
+                                                </span>
+                                            ) : (
+                                                <span className="text-on-surface inline-flex items-center gap-sm">
+                                                    {r.action.label}
+                                                    <span
+                                                        className={badgeForStatus(
+                                                            r.entry.status_code
+                                                        )}
+                                                    >
+                                                        {r.entry.status_code}
+                                                    </span>
+                                                </span>
+                                            )}
                                         </td>
-                                        <td className="text-slate-500 text-xs">
-                                            {t.duration_ms != null ? `${t.duration_ms}ms` : "—"}
+                                        <td className="text-secondary font-mono text-[12px] max-w-[260px] truncate">
+                                            {r.entry.path}
                                         </td>
                                         <td>
-                                            <button
-                                                className="text-emerald-400 hover:text-emerald-300 text-xs"
-                                                onClick={() => setSelected(t.call_id)}
-                                            >
-                                                View →
-                                            </button>
+                                            {r.entry.tenant_id != null ? (
+                                                <span className="px-sm py-[2px] bg-surface-container text-on-secondary-container rounded text-[11px] font-bold">
+                                                    TENANT #{r.entry.tenant_id}
+                                                </span>
+                                            ) : (
+                                                <span className="text-secondary">—</span>
+                                            )}
+                                        </td>
+                                        <td className="text-right text-secondary whitespace-nowrap">
+                                            {fmtTimestamp(r.entry.created_at)}
                                         </td>
                                     </tr>
                                 ))
@@ -343,43 +502,63 @@ function CopilotTraceTab() {
                         </tbody>
                     </table>
                 </div>
-            )}
-        </div>
-    );
-}
-
-export default function AuditLogPage() {
-    const [tab, setTab] = useState<Tab>("http");
-
-    return (
-        <div>
-            <div className="mb-6">
-                <h1 className="text-lg font-semibold text-white">Audit & Trace</h1>
-                <p className="text-slate-400 text-sm mt-0.5">
-                    HTTP request log and copilot reasoning trail
-                </p>
             </div>
 
-            <div className="flex items-center gap-1 mb-4 border-b border-slate-800">
-                {([
-                    { id: "http" as const, label: "HTTP Audit" },
-                    { id: "trace" as const, label: "Copilot Trace" },
-                ]).map((t) => (
+            {/* Pagination */}
+            <div className="mt-md flex items-center justify-between">
+                <span className="font-body-sm text-body-sm text-secondary">
+                    {total === 0
+                        ? "Showing 0 of 0 entries"
+                        : `Showing ${rangeStart} to ${rangeEnd} of ${total.toLocaleString()} entries`}
+                </span>
+                <div className="flex items-center gap-xs">
                     <button
-                        key={t.id}
-                        onClick={() => setTab(t.id)}
-                        className={`px-3 py-2 text-sm border-b-2 -mb-px transition ${tab === t.id
-                                ? "border-emerald-500 text-white"
-                                : "border-transparent text-slate-400 hover:text-white"
-                            }`}
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={safePage <= 1}
+                        className="w-8 h-8 flex items-center justify-center border border-outline-variant rounded disabled:opacity-40 enabled:hover:bg-surface-container transition-colors"
+                        aria-label="Previous page"
                     >
-                        {t.label}
+                        <span className="material-symbols-outlined text-[16px]">
+                            chevron_left
+                        </span>
                     </button>
-                ))}
+                    {pageNumbers.map((n, i) =>
+                        n === "…" ? (
+                            <span
+                                key={`g${i}`}
+                                className="px-xs text-secondary font-body-sm text-body-sm"
+                            >
+                                …
+                            </span>
+                        ) : (
+                            <button
+                                key={n}
+                                onClick={() => setPage(n)}
+                                className={`w-8 h-8 flex items-center justify-center rounded text-xs font-bold border transition-colors ${n === safePage
+                                    ? "border-primary bg-primary text-on-primary"
+                                    : "border-outline-variant text-on-surface hover:bg-surface-container"
+                                    }`}
+                            >
+                                {n}
+                            </button>
+                        )
+                    )}
+                    <button
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={safePage >= totalPages}
+                        className="w-8 h-8 flex items-center justify-center border border-outline-variant rounded disabled:opacity-40 enabled:hover:bg-surface-container transition-colors"
+                        aria-label="Next page"
+                    >
+                        <span className="material-symbols-outlined text-[16px]">
+                            chevron_right
+                        </span>
+                    </button>
+                </div>
             </div>
 
-            {tab === "http" && <HttpAuditTab />}
-            {tab === "trace" && <CopilotTraceTab />}
+            {selected && (
+                <DetailDrawer row={selected} onClose={() => setSelected(null)} />
+            )}
         </div>
     );
 }

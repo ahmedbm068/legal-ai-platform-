@@ -15,8 +15,20 @@ from backend.core.permissions import apply_tenant_scope
 from backend.models.case import Case
 from backend.models.case_message import CaseMessage
 from backend.models.user import User
+from backend.core.ws_manager import room_manager
 from backend.services.case_messaging_service import mark_messages_read, serialize_message
 from backend.services.storage_service import stream_file_response, upload_file
+
+
+def _broadcast_message(case_id: int, message: CaseMessage) -> None:
+    """Push a freshly-created message to both staff and portal sockets.
+
+    Serialized without a viewer perspective; the client recomputes
+    ``is_mine`` from ``sender_role``.
+    """
+    payload = serialize_message(message, viewer_role="__broadcast__")
+    payload.pop("is_mine", None)
+    room_manager.broadcast_threadsafe(case_id, {"type": "message", "message": payload})
 
 router = APIRouter(prefix="/staff/messages", tags=["Staff Messaging"])
 
@@ -160,17 +172,19 @@ def unread_count(
 @router.get("/{case_id}", response_model=StaffThreadResponse)
 def get_thread(
     case_id: int,
+    after_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     case = get_staff_case_or_404(db, current_user, case_id)
 
-    messages = (
-        db.query(CaseMessage)
-        .filter(CaseMessage.case_id == case.id)
-        .order_by(CaseMessage.created_at.asc(), CaseMessage.id.asc())
-        .all()
-    )
+    query = db.query(CaseMessage).filter(CaseMessage.case_id == case.id)
+    if after_id is not None:
+        # Delta fetch: only messages newer than the client's last known id.
+        query = query.filter(CaseMessage.id > after_id)
+    messages = query.order_by(
+        CaseMessage.created_at.asc(), CaseMessage.id.asc()
+    ).all()
 
     # Lawyer opened it: clear unseen client messages.
     mark_messages_read(db, case.id, from_role="client")
@@ -205,6 +219,7 @@ def send_message(
     db.commit()
     db.refresh(message)
 
+    _broadcast_message(case.id, message)
     return serialize_message(message, viewer_role="lawyer")
 
 
@@ -250,6 +265,7 @@ def send_message_attachment(
     db.commit()
     db.refresh(message)
 
+    _broadcast_message(case.id, message)
     return serialize_message(message, viewer_role="lawyer")
 
 
@@ -278,3 +294,91 @@ def download_attachment(
         media_type=message.attachment_content_type or "application/octet-stream",
         filename=message.attachment_filename or "attachment",
     )
+
+
+# ── AI assist (lawyer-facing) ──────────────────────────────────────────────
+
+
+class PiiScanRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    text: str = Field("", max_length=8000)
+
+
+def _thread_messages(db: Session, case_id: int) -> list[CaseMessage]:
+    return (
+        db.query(CaseMessage)
+        .filter(CaseMessage.case_id == case_id)
+        .order_by(CaseMessage.created_at.asc(), CaseMessage.id.asc())
+        .all()
+    )
+
+
+@router.post("/{case_id}/ai/suggest")
+def ai_suggest_replies(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Draft 2-3 reply options for the lawyer, grounded in the thread."""
+    from backend.services.ai.messaging_ai_service import suggest_replies
+
+    case = get_staff_case_or_404(db, current_user, case_id)
+    return suggest_replies(db, case, _thread_messages(db, case.id))
+
+
+@router.post("/{case_id}/ai/summarize")
+def ai_summarize_thread(
+    case_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Concise summary of the conversation for the lawyer."""
+    from backend.services.ai.messaging_ai_service import summarize_thread
+
+    case = get_staff_case_or_404(db, current_user, case_id)
+    return summarize_thread(db, case, _thread_messages(db, case.id))
+
+
+@router.post("/ai/scan-pii")
+def ai_scan_pii(
+    payload: PiiScanRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Flag PII in a draft message before it is sent."""
+    from backend.services.ai.messaging_ai_service import scan_pii
+
+    return scan_pii(payload.text)
+
+
+@router.post("/{case_id}/ai/analyze-attachment/{message_id}")
+def ai_analyze_attachment(
+    case_id: int,
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Lightweight insight for a document shared in this thread."""
+    from backend.models.document import Document
+    from backend.services.ai.messaging_ai_service import analyze_attachment
+
+    case = get_staff_case_or_404(db, current_user, case_id)
+    message = (
+        db.query(CaseMessage)
+        .filter(CaseMessage.id == message_id, CaseMessage.case_id == case.id)
+        .first()
+    )
+    if not message or not message.attachment_filename:
+        raise HTTPException(status_code=404, detail="Attachment not found.")
+
+    # Best-effort link to a persisted Document on the same case by filename.
+    document = (
+        db.query(Document)
+        .filter(
+            Document.case_id == case.id,
+            Document.filename == message.attachment_filename,
+        )
+        .order_by(Document.id.desc())
+        .first()
+    )
+    return analyze_attachment(message, document)

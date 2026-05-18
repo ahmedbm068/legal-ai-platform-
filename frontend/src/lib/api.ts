@@ -448,4 +448,37 @@ export const api = {
 
   messageAttachmentUrl: (token: string, caseId: number, messageId: number) =>
     requestBlobUrl(`/staff/messages/${caseId}/attachment/${messageId}`, token),
+
+  // ── AI assist (lawyer-facing) ────────────────────────────────────────────
+  aiSuggestReplies: (token: string, caseId: number) =>
+    request<{ suggestions: string[]; disclaimer?: string; model_used: boolean }>(
+      `/staff/messages/${caseId}/ai/suggest`,
+      { method: "POST", token }
+    ),
+
+  aiSummarizeThread: (token: string, caseId: number) =>
+    request<{ summary: string; model_used: boolean }>(
+      `/staff/messages/${caseId}/ai/summarize`,
+      { method: "POST", token }
+    ),
+
+  aiScanPii: (token: string, text: string) =>
+    request<{
+      has_pii: boolean;
+      pii_items: Array<{ type: string; value: string }>;
+      redacted_text: string;
+    }>(`/staff/messages/ai/scan-pii`, { method: "POST", token, body: { text } }),
+
+  aiAnalyzeAttachment: (token: string, caseId: number, messageId: number) =>
+    request<{
+      available: boolean;
+      document_type?: string | null;
+      summary?: string | null;
+      key_points: string[];
+      parties: string[];
+      important_dates: Array<Record<string, string>>;
+    }>(`/staff/messages/${caseId}/ai/analyze-attachment/${messageId}`, {
+      method: "POST",
+      token,
+    }),
 };

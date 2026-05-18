@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session
 from backend.core.deps import get_current_user, get_db
 from backend.core.permissions import apply_tenant_scope
 from backend.models.case import Case
+from backend.models.client import Client
 from backend.models.invoice import Invoice, InvoiceLineItem
+from backend.models.tenant import Tenant
 from backend.models.user import User
 from backend.services.billing_service import (
     generate_invoice_number,
@@ -64,6 +66,85 @@ def _scoped_invoice_or_404(db: Session, current_user: User, invoice_id: int) -> 
     if not case:
         raise HTTPException(status_code=404, detail="Invoice not found.")
     return invoice
+
+
+@router.get("")
+def list_all_invoices(
+    status_filter: str | None = None,
+    limit: int = 25,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List invoices across the caller's tenant scope (all tenants for admins).
+
+    Paginated. Returns enriched rows (tenant + client names) plus summary
+    totals for outstanding and collected amounts over the full scope.
+    """
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
+
+    scoped = apply_tenant_scope(
+        db.query(Invoice), Invoice.tenant_id, current_user
+    )
+    if status_filter:
+        scoped = scoped.filter(Invoice.status == status_filter.lower())
+
+    total = scoped.count()
+
+    invoices = (
+        scoped.order_by(Invoice.issued_at.desc(), Invoice.id.desc())
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
+
+    # Resolve tenant + client names in bulk to avoid N+1 queries.
+    tenant_ids = {inv.tenant_id for inv in invoices}
+    client_ids = {inv.client_id for inv in invoices if inv.client_id is not None}
+    tenant_names = {
+        t.id: t.name
+        for t in db.query(Tenant).filter(Tenant.id.in_(tenant_ids)).all()
+    } if tenant_ids else {}
+    client_names = {
+        c.id: c.name
+        for c in db.query(Client).filter(Client.id.in_(client_ids)).all()
+    } if client_ids else {}
+
+    # Summary totals over the entire scope (not just this page).
+    summary_rows = apply_tenant_scope(
+        db.query(Invoice.status, Invoice.amount_total),
+        Invoice.tenant_id,
+        current_user,
+    ).all()
+    outstanding = sum(
+        float(amount or 0)
+        for st, amount in summary_rows
+        if (st or "").lower() in ("outstanding", "overdue")
+    )
+    collected = sum(
+        float(amount or 0)
+        for st, amount in summary_rows
+        if (st or "").lower() == "paid"
+    )
+
+    rows = []
+    for inv in invoices:
+        data = serialize_invoice(inv, include_line_items=False)
+        data["tenant_id"] = inv.tenant_id
+        data["tenant_name"] = tenant_names.get(inv.tenant_id)
+        data["client_id"] = inv.client_id
+        data["client_name"] = client_names.get(inv.client_id)
+        rows.append(data)
+
+    return {
+        "invoices": rows,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "total_outstanding": outstanding,
+        "total_collected": collected,
+    }
 
 
 @router.get("/{case_id}")

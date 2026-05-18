@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.api import auth, billing, case_messages, cases, clients, users
+from backend.api import messages_ws
 from backend.api.admin import router as admin_router
 from backend.api.assistant import router as assistant_router
 from backend.api.appointments import router as appointments_router
@@ -183,6 +184,7 @@ app.include_router(search_router)
 app.include_router(succession_router)
 app.include_router(voice_router)
 app.include_router(admin_router)
+app.include_router(messages_ws.router)
 
 
 def initialize_database() -> None:
@@ -254,6 +256,15 @@ def _prewarm_local_transcription_pipeline() -> None:
 @app.on_event("startup")
 def initialize_app_database() -> None:
     initialize_database()
+
+
+@app.on_event("startup")
+async def capture_ws_event_loop() -> None:
+    import asyncio
+
+    from backend.core.ws_manager import room_manager
+
+    room_manager.set_loop(asyncio.get_running_loop())
 
 
 @app.on_event("startup")

@@ -29,6 +29,7 @@ from backend.api.client_portal_schema import (
     ClientPortalLoginRequest,
     ClientPortalMessageItem,
     ClientPortalMessageResponse,
+    ClientPortalPiiScanRequest,
     ClientPortalRegisterRequest,
     ClientPortalBillingResponse,
     ClientPortalPayInvoiceResponse,
@@ -161,17 +162,31 @@ def find_tenant_lawyer(db: Session, tenant_id: int) -> User | None:
 
 def get_portal_tenant_or_404(db: Session, tenant_slug: str) -> Tenant:
     normalized_slug = (tenant_slug or "").strip().lower()
-    if settings.PORTAL_REQUIRE_TENANT_SLUG and not normalized_slug:
-        raise HTTPException(status_code=400, detail="tenant_slug is required.")
+    default_slug = (settings.PORTAL_DEFAULT_TENANT_SLUG or "").strip().lower()
 
-    tenant = (
-        db.query(Tenant)
-        .filter(
-            Tenant.slug == normalized_slug,
-            Tenant.portal_access_enabled.is_(True),
+    if not normalized_slug:
+        if default_slug:
+            normalized_slug = default_slug
+        elif settings.PORTAL_REQUIRE_TENANT_SLUG:
+            raise HTTPException(status_code=400, detail="tenant_slug is required.")
+
+    def lookup(slug: str) -> Tenant | None:
+        return (
+            db.query(Tenant)
+            .filter(
+                Tenant.slug == slug,
+                Tenant.portal_access_enabled.is_(True),
+            )
+            .first()
         )
-        .first()
-    )
+
+    tenant = lookup(normalized_slug)
+
+    # Permanent fallback: an unknown slug resolves to the configured default
+    # tenant instead of hard-404ing the client, as long as a default is set.
+    if not tenant and default_slug and normalized_slug != default_slug:
+        tenant = lookup(default_slug)
+
     if not tenant:
         raise HTTPException(
             status_code=404,
@@ -1360,6 +1375,15 @@ def resolve_messaging_case(
     return get_portal_case_or_404(db=db, account=account, case_id=accessible[0])
 
 
+def _broadcast_case_message(case_id: int, message: CaseMessage) -> None:
+    """Push a portal-created message to staff + portal sockets."""
+    from backend.core.ws_manager import room_manager
+
+    payload = serialize_message(message, viewer_role="__broadcast__")
+    payload.pop("is_mine", None)
+    room_manager.broadcast_threadsafe(case_id, {"type": "message", "message": payload})
+
+
 def serialize_case_message(message: CaseMessage) -> dict:
     # Client portal always views as the "client" side.
     return serialize_message(message, viewer_role="client")
@@ -1368,17 +1392,18 @@ def serialize_case_message(message: CaseMessage) -> dict:
 @router.get("/messages", response_model=ClientPortalThreadResponse)
 def get_message_thread(
     case_id: int | None = None,
+    after_id: int | None = None,
     db: Session = Depends(get_db),
     account: ClientPortalAccount = Depends(get_current_portal_account),
 ):
     case = resolve_messaging_case(db, account, case_id)
 
-    messages = (
-        db.query(CaseMessage)
-        .filter(CaseMessage.case_id == case.id)
-        .order_by(CaseMessage.created_at.asc(), CaseMessage.id.asc())
-        .all()
-    )
+    query = db.query(CaseMessage).filter(CaseMessage.case_id == case.id)
+    if after_id is not None:
+        query = query.filter(CaseMessage.id > after_id)
+    messages = query.order_by(
+        CaseMessage.created_at.asc(), CaseMessage.id.asc()
+    ).all()
 
     mark_messages_read(db, case.id, from_role="lawyer")
 
@@ -1417,7 +1442,19 @@ def send_message(
     db.commit()
     db.refresh(message)
 
+    _broadcast_case_message(case.id, message)
     return serialize_case_message(message)
+
+
+@router.post("/messages/ai/scan-pii")
+def scan_message_pii(
+    payload: ClientPortalPiiScanRequest,
+    account: ClientPortalAccount = Depends(get_current_portal_account),
+):
+    """Warn the client if a draft message contains personal data."""
+    from backend.services.ai.messaging_ai_service import scan_pii
+
+    return scan_pii(payload.text)
 
 
 @router.post(
@@ -1466,6 +1503,7 @@ def send_message_attachment(
     db.commit()
     db.refresh(message)
 
+    _broadcast_case_message(case.id, message)
     return serialize_case_message(message)
 
 

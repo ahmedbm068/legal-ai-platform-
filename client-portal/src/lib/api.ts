@@ -262,6 +262,25 @@ export async function fetchPortalThread(
   return parseResponse<ClientPortalThread>(response);
 }
 
+export async function scanPortalMessagePii(
+  token: string,
+  text: string
+): Promise<{
+  has_pii: boolean;
+  pii_items: Array<{ type: string; value: string }>;
+  redacted_text: string;
+}> {
+  const response = await fetch(`${API_BASE_URL}/portal/messages/ai/scan-pii`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text }),
+  });
+  return parseResponse(response);
+}
+
 export async function sendPortalMessage(
   token: string,
   body: string,
@@ -313,6 +332,23 @@ export async function fetchPortalUnreadCount(
 
 export function portalMessageAttachmentUrl(messageId: number): string {
   return `${API_BASE_URL}/portal/messages/${messageId}/attachment`;
+}
+
+/** Fetches an attachment with auth and returns an object URL usable in
+ *  <img>/<video>/<a>. Caller is responsible for URL.revokeObjectURL. */
+export async function fetchPortalAttachmentObjectUrl(
+  token: string,
+  messageId: number
+): Promise<string> {
+  const response = await fetch(
+    `${API_BASE_URL}/portal/messages/${messageId}/attachment`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, "Unable to load attachment.");
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 // ── Billing ────────────────────────────────────────────────────────────────

@@ -81,6 +81,7 @@ export type PortalContextValue = {
     messageSending: boolean;
     unreadMessages: number;
     loadThread: (caseId?: number | null) => Promise<void>;
+    refreshActiveThread: () => Promise<void>;
     sendMessage: (body: string, caseId?: number | null) => Promise<boolean>;
     sendMessageWithAttachment: (file: File, body: string, caseId?: number | null) => Promise<boolean>;
     refreshUnreadCount: () => Promise<void>;
@@ -132,6 +133,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
 
     const pollTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
     const unreadTimerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
+    const threadCaseRef = useRef<number | null>(null);
 
     // Theme sync
     useEffect(() => {
@@ -383,6 +385,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
 
     const loadThread = useCallback(async (caseId?: number | null) => {
         if (!token) return;
+        threadCaseRef.current = caseId ?? null;
         setThreadLoading(true);
         setThreadError(null);
         try {
@@ -394,6 +397,31 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
             setThreadError(caught instanceof Error ? caught.message : "Unable to load messages.");
         } finally {
             setThreadLoading(false);
+        }
+    }, [token]);
+
+    // Silent live refresh: re-fetch the open thread on an interval without a
+    // loading flicker, replacing state only when the message set changed.
+    const refreshActiveThread = useCallback(async () => {
+        if (!token) return;
+        const caseId = threadCaseRef.current;
+        try {
+            const data = await fetchPortalThread(token, caseId);
+            if (threadCaseRef.current !== caseId) return;
+            setThread((prev) => {
+                if (
+                    prev &&
+                    prev.messages.length === data.messages.length &&
+                    prev.messages[prev.messages.length - 1]?.id ===
+                        data.messages[data.messages.length - 1]?.id
+                ) {
+                    return prev;
+                }
+                return data;
+            });
+            setUnreadMessages(0);
+        } catch {
+            /* keep last good thread on transient failure */
         }
     }, [token]);
 
@@ -448,7 +476,7 @@ export function PortalProvider({ children }: { children: React.ReactNode }) {
             uploadCaseMaterials, uploadLoading,
             assistantBusy, assistantError, assistantResult, askAssistant, clearAssistant,
             thread, threadLoading, threadError, messageSending, unreadMessages,
-            loadThread, sendMessage, sendMessageWithAttachment, refreshUnreadCount,
+            loadThread, refreshActiveThread, sendMessage, sendMessageWithAttachment, refreshUnreadCount,
         }}>
             {children}
         </PortalContext.Provider>

@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class ClientPortalRegisterRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    tenant_slug: str = Field(..., min_length=2, max_length=80)
+    tenant_slug: str = Field("", max_length=80)
     full_name: str = Field(..., min_length=2)
     email: EmailStr
     password: str = Field(..., min_length=10, max_length=256)
@@ -225,6 +225,12 @@ class ClientPortalSendMessageRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     body: str = Field(..., min_length=1, max_length=8000)
+
+
+class ClientPortalPiiScanRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    text: str = Field("", max_length=8000)
 
 
 class ClientPortalUnreadResponse(BaseModel):
