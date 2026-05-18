@@ -1085,3 +1085,39 @@ export interface ChatMessage {
     retrievalAudit?: CopilotResponse["retrieval_audit"];
   };
 }
+
+// ── Client <-> lawyer messaging ────────────────────────────────────────────
+
+export interface CaseMessage {
+  id: number;
+  case_id: number;
+  sender_role: "client" | "lawyer";
+  sender_name: string | null;
+  body: string;
+  attachment_filename: string | null;
+  attachment_content_type: string | null;
+  attachment_size: number | null;
+  is_mine: boolean;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface CaseMessageThread {
+  case_id: number;
+  case_title: string;
+  client_name: string | null;
+  messages: CaseMessage[];
+}
+
+export interface CaseMessageThreadSummary {
+  case_id: number;
+  case_title: string;
+  client_name: string | null;
+  last_message_preview: string | null;
+  last_message_at: string | null;
+  unread_count: number;
+}
+
+export interface CaseMessageUnread {
+  unread_count: number;
+}

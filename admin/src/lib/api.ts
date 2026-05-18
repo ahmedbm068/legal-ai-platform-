@@ -106,6 +106,12 @@ export interface SystemHealth {
     total_cases: number;
     total_documents: number;
     total_audit_entries: number;
+    // 24h request-health metrics (added; older deployments may omit these)
+    requests_24h?: number;
+    errors_24h?: number;
+    error_rate_24h?: number;
+    p95_latency_ms?: number;
+    active_tenants_24h?: number;
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────
@@ -130,6 +136,87 @@ export function apiListAuditLog(limit = 200): Promise<AuditLogEntry[]> {
 
 export function apiSystemHealth(): Promise<SystemHealth> {
     return request<SystemHealth>("/admin/health");
+}
+
+// ─── Billing & Invoices ───────────────────────────────────────────────────────
+
+export interface InvoiceLineItem {
+    id: number;
+    description: string;
+    hours: number | null;
+    amount: number;
+}
+
+export interface Invoice {
+    id: number;
+    invoice_number: string;
+    case_id: number;
+    description: string;
+    notes: string | null;
+    currency: string;
+    amount_total: number;
+    status: string;
+    issued_at: string;
+    due_at: string | null;
+    paid_at: string | null;
+    payment_status: string | null;
+    tenant_id: number;
+    tenant_name: string | null;
+    client_id: number | null;
+    client_name: string | null;
+}
+
+export interface InvoiceList {
+    invoices: Invoice[];
+    total: number;
+    limit: number;
+    offset: number;
+    total_outstanding: number;
+    total_collected: number;
+}
+
+export function apiListInvoices(params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+}): Promise<InvoiceList> {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status_filter", params.status);
+    if (params?.limit != null) q.set("limit", String(params.limit));
+    if (params?.offset != null) q.set("offset", String(params.offset));
+    const qs = q.toString();
+    return request<InvoiceList>(`/staff/billing${qs ? `?${qs}` : ""}`);
+}
+
+export interface CreateInvoiceLineItem {
+    description: string;
+    hours?: number | null;
+    amount: number;
+}
+
+export function apiCreateInvoice(payload: {
+    case_id: number;
+    description: string;
+    notes?: string | null;
+    currency?: string;
+    line_items: CreateInvoiceLineItem[];
+}): Promise<Invoice> {
+    return request<Invoice>("/staff/billing", {
+        method: "POST",
+        body: JSON.stringify(payload),
+    });
+}
+
+export function apiMarkInvoicePaid(invoiceId: number): Promise<Invoice> {
+    return request<Invoice>(`/staff/billing/${invoiceId}/mark-paid`, {
+        method: "POST",
+    });
+}
+
+export function apiVoidInvoice(invoiceId: number): Promise<Invoice> {
+    return request<Invoice>(`/staff/billing/${invoiceId}/void`, {
+        method: "POST",
+    });
 }
 
 // ─── Big Agent Catalog ────────────────────────────────────────────────────────

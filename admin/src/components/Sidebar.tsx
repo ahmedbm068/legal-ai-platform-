@@ -1,65 +1,60 @@
-import { NavLink, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+import { NavLink } from "react-router-dom";
 
 const NAV = [
-    { to: "/users", label: "Users", icon: "👤" },
-    { to: "/cases", label: "Cases", icon: "📁" },
-    { to: "/big-agents", label: "Big Agents", icon: "🧠" },
-    { to: "/audit", label: "Audit Log", icon: "📋" },
-    { to: "/health", label: "System Health", icon: "📊" },
+    { to: "/overview", label: "Overview", icon: "dashboard" },
+    { to: "/users", label: "Users & Staff", icon: "group" },
+    { to: "/clients", label: "Clients", icon: "person_book" },
+    { to: "/cases", label: "Cases", icon: "folder_shared" },
+    { to: "/billing", label: "Billing & Invoices", icon: "payments" },
+    { to: "/jobs", label: "Background Jobs", icon: "settings_backup_restore" },
+    { to: "/audit", label: "Audit Log", icon: "history" },
 ];
 
+const linkClass = (isActive: boolean) =>
+    [
+        "flex items-center gap-md px-sm py-sm rounded transition-colors cursor-pointer active:opacity-80",
+        isActive
+            ? "text-primary font-bold bg-secondary-container"
+            : "text-secondary hover:bg-surface-container",
+    ].join(" ");
+
 export default function Sidebar() {
-    const { user, logout } = useAuth();
-    const navigate = useNavigate();
-
-    const handleLogout = () => {
-        logout();
-        navigate("/login");
-    };
-
     return (
-        <aside className="flex flex-col w-56 min-h-full bg-[#0a1628] border-r border-slate-800 shrink-0">
-            {/* Logo */}
-            <div className="px-5 py-5 border-b border-slate-800">
-                <div className="flex items-center gap-2">
-                    <span className="text-brand-400 text-xl font-bold leading-none">⚖</span>
-                    <div>
-                        <p className="text-white text-sm font-semibold leading-tight">Legal AI</p>
-                        <p className="text-slate-500 text-xs">Admin Console</p>
+        <nav className="bg-surface text-primary font-body-md fixed left-0 top-0 h-full w-sidebar-width border-r border-outline-variant flex flex-col overflow-y-auto px-md py-lg z-50">
+            <div className="mb-xl px-sm flex items-center gap-sm">
+                <div className="w-8 h-8 bg-surface-container-high rounded-full flex items-center justify-center border border-outline-variant">
+                    <span className="material-symbols-outlined text-[16px] text-primary">domain</span>
+                </div>
+                <div>
+                    <div className="font-page-header text-page-header text-primary leading-none">
+                        Lexington
+                    </div>
+                    <div className="font-label-caps text-label-caps text-secondary uppercase mt-xs">
+                        Practice Admin
                     </div>
                 </div>
             </div>
 
-            {/* Nav */}
-            <nav className="flex-1 py-4 px-2">
+            <ul className="flex flex-col gap-xs flex-grow">
                 {NAV.map((item) => (
-                    <NavLink
-                        key={item.to}
-                        to={item.to}
-                        className={({ isActive }) =>
-                            `flex items-center gap-3 px-3 py-2 mb-1 rounded-lg text-sm transition-colors ${isActive
-                                ? "bg-brand-600/20 text-brand-400 font-medium"
-                                : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                            }`
-                        }
-                    >
-                        <span>{item.icon}</span>
-                        {item.label}
-                    </NavLink>
+                    <li key={item.to}>
+                        <NavLink to={item.to} className={({ isActive }) => linkClass(isActive)}>
+                            <span className="material-symbols-outlined">{item.icon}</span>
+                            <span>{item.label}</span>
+                        </NavLink>
+                    </li>
                 ))}
-            </nav>
+            </ul>
 
-            {/* Footer */}
-            <div className="px-4 py-4 border-t border-slate-800">
-                <p className="text-slate-500 text-xs mb-1 truncate">{user?.email}</p>
-                <button
-                    onClick={handleLogout}
-                    className="text-xs text-slate-400 hover:text-red-400 transition-colors"
+            <div className="mt-auto pt-md border-t border-outline-variant">
+                <NavLink
+                    to="/settings"
+                    className={({ isActive }) => linkClass(isActive)}
                 >
-                    Sign out
-                </button>
+                    <span className="material-symbols-outlined">settings</span>
+                    <span>Settings</span>
+                </NavLink>
             </div>
-        </aside>
+        </nav>
     );
 }

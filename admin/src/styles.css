@@ -17,15 +17,29 @@ body,
 }
 
 body {
-    font-family: "IBM Plex Sans", Inter, system-ui, sans-serif;
-    background: #0f172a;
-    color: #e2e8f0;
+    font-family: "Inter", system-ui, sans-serif;
+    background: #fbf9f4;
+    color: #1b1c19;
+    -webkit-font-smoothing: antialiased;
+}
+
+.material-symbols-outlined {
+    font-family: "Material Symbols Outlined";
+    font-weight: normal;
+    font-style: normal;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    direction: ltr;
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
 }
 
 ::-webkit-scrollbar-track {
@@ -33,73 +47,82 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: #334155;
-    border-radius: 3px;
+    background: #c4c6cf;
+    border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: #475569;
+    background: #74777f;
 }
 
-/* Table */
+/* ── Shared admin primitives ─────────────────────────────────────────── */
+
 .admin-table {
     width: 100%;
     border-collapse: collapse;
+    text-align: left;
 }
 
 .admin-table th {
-    padding: 10px 14px;
-    text-align: left;
+    padding: 8px 16px;
     font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: #94a3b8;
-    border-bottom: 1px solid #1e293b;
+    color: #5e5f5b;
+    border-bottom: 1px solid #c4c6cf;
+    white-space: nowrap;
 }
 
 .admin-table td {
-    padding: 11px 14px;
-    font-size: 13.5px;
-    color: #cbd5e1;
-    border-bottom: 1px solid #1e293b;
+    padding: 10px 16px;
+    font-size: 13px;
+    color: #1b1c19;
+    border-bottom: 1px solid #c4c6cf;
 }
 
-.admin-table tr:hover td {
-    background: #1e293b44;
+.admin-table tbody tr {
+    transition: background-color 120ms ease;
 }
 
-/* Badge */
+.admin-table tbody tr:hover td {
+    background: #f0eee9;
+}
+
+/* Pill badges */
 .badge {
     display: inline-flex;
     align-items: center;
     padding: 2px 8px;
-    border-radius: 9999px;
+    border-radius: 0.25rem;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    white-space: nowrap;
 }
 
 .badge-green {
-    background: #14532d44;
-    color: #4ade80;
+    background: #e3efeb;
+    color: #2f5d3f;
 }
 
 .badge-red {
-    background: #7f1d1d44;
-    color: #f87171;
+    background: #fceeed;
+    color: #93000a;
 }
 
 .badge-yellow {
-    background: #78350f44;
-    color: #fbbf24;
+    background: #fef3c7;
+    color: #92400e;
 }
 
 .badge-blue {
-    background: #1e3a5f44;
-    color: #60a5fa;
+    background: #d6e3ff;
+    color: #31476b;
 }
 
 .badge-gray {
-    background: #1e293b;
-    color: #94a3b8;
+    background: #e4e2dd;
+    color: #5e5f5b;
 }

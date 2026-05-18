@@ -6,7 +6,7 @@ export default function RequireAdmin() {
 
     if (loading) {
         return (
-            <div className="flex items-center justify-center h-full text-slate-400 text-sm">
+            <div className="flex items-center justify-center min-h-screen bg-surface text-secondary font-body-sm text-body-sm">
                 Checking session…
             </div>
         );

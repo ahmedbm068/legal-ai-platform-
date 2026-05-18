@@ -8,6 +8,7 @@ import CasesPage from "../pages/CasesPage";
 import DashboardPage from "../pages/DashboardPage";
 import DocumentsPage from "../pages/DocumentsPage";
 import LegalEditorPage from "../pages/LegalEditorPage";
+import MessagesPage from "../pages/MessagesPage";
 import SettingsPage from "../pages/SettingsPage";
 import ProtectedRoute from "./ProtectedRoute";
 
@@ -35,6 +36,9 @@ export default function AppRouter() {
 
                     <Route path="editor" element={<LegalEditorPage />} />
                     <Route path="editor/:caseId" element={<LegalEditorPage />} />
+
+                    <Route path="messages" element={<MessagesPage />} />
+                    <Route path="messages/:caseId" element={<MessagesPage />} />
 
                     <Route path="calendar" element={<CalendarPage />} />
                     <Route path="calendar/:caseId" element={<CalendarPage />} />

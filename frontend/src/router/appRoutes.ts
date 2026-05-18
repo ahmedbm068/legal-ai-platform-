@@ -38,6 +38,11 @@ export const APP_ROUTES: AppRoute[] = [
         hidden: true,
     },
     {
+        path: "/messages",
+        label: "Messages",
+        description: "Secure client conversations per case",
+    },
+    {
         path: "/calendar",
         label: "Calendar",
         description: "Deadlines and why-they-matter",

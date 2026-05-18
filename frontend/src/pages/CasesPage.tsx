@@ -4,8 +4,12 @@ import { useRoutedWorkspace } from "../context/RoutedWorkspaceContext";
 import { saveEditorDraftSeed } from "../editorDraftSeed";
 import IntelligencePanel from "../components/IntelligencePanel";
 import SuccessionCalculatorModal from "../components/SuccessionCalculatorModal";
-import type { CaseReviewTable, CaseWorkflowCatalog, CaseWorkflowPreview, CaseWorkspaceSnapshot, DraftOutline } from "../types";
+import type { CaseReviewTable, CaseWorkflowCatalog, CaseWorkflowPreview, CaseWorkspaceSnapshot, DraftOutline, JurisdictionCountry } from "../types";
 import { workspaceApi } from "../workspaceApi";
+import { api } from "../lib/api";
+
+const CASE_STATUS_OPTIONS = ["open", "in_progress", "closed", "archived"] as const;
+const JURISDICTION_OPTIONS: JurisdictionCountry[] = ["tunisia", "germany"];
 
 type CaseTab = "overview" | "workspace" | "documents" | "review" | "workflows" | "drafting" | "timeline" | "assistant" | "tasks" | "calendar";
 
@@ -104,6 +108,7 @@ export default function CasesPage() {
         language,
         t,
         token,
+        refreshWorkspace,
     } = useRoutedWorkspace();
 
     const tabs: Array<{ id: CaseTab; label: string }> = [
@@ -142,6 +147,16 @@ export default function CasesPage() {
     const [draftingLoading, setDraftingLoading] = useState(false);
     const [draftingError, setDraftingError] = useState<string | null>(null);
     const [draftingNotice, setDraftingNotice] = useState<string | null>(null);
+    const [createOpen, setCreateOpen] = useState(false);
+    const [createSaving, setCreateSaving] = useState(false);
+    const [createError, setCreateError] = useState<string | null>(null);
+    const [createForm, setCreateForm] = useState({
+        title: "",
+        description: "",
+        status: "open" as (typeof CASE_STATUS_OPTIONS)[number],
+        client_id: 0,
+        jurisdiction_country: "tunisia" as JurisdictionCountry,
+    });
 
     useEffect(() => {
         if (routeCaseId && routeCaseId !== selectedCaseId) {
@@ -369,6 +384,54 @@ export default function CasesPage() {
         }
     }
 
+    function handleOpenCreate() {
+        setCreateError(null);
+        setCreateForm({
+            title: "",
+            description: "",
+            status: "open",
+            client_id: activeClientId ?? clients[0]?.id ?? 0,
+            jurisdiction_country: (activeCase?.jurisdiction_country as JurisdictionCountry) ?? "tunisia",
+        });
+        setCreateOpen(true);
+    }
+
+    async function handleCreateCase(event: React.FormEvent) {
+        event.preventDefault();
+        if (!token) return;
+
+        const title = createForm.title.trim();
+        if (title.length < 2) {
+            setCreateError(t("caseTitleTooShort", "Case title must be at least 2 characters."));
+            return;
+        }
+        if (!createForm.client_id) {
+            setCreateError(t("caseClientRequired", "Select a client for this case."));
+            return;
+        }
+
+        setCreateSaving(true);
+        setCreateError(null);
+        try {
+            const created = await api.createCase(token, {
+                title,
+                description: createForm.description.trim(),
+                status: createForm.status,
+                client_id: createForm.client_id,
+                jurisdiction_country: createForm.jurisdiction_country,
+            });
+            await refreshWorkspace();
+            setCreateOpen(false);
+            setFocusedClientId(created.client_id);
+            setSelectedCaseId(created.id);
+            navigate(`/cases/${created.id}/overview`);
+        } catch (caught) {
+            setCreateError(caught instanceof Error ? caught.message : t("caseCreateFailed", "Unable to create case."));
+        } finally {
+            setCreateSaving(false);
+        }
+    }
+
     function handleTabSelect(tab: CaseTab) {
         if (!activeCaseId) return;
         if (tab === "calendar") {
@@ -486,10 +549,21 @@ export default function CasesPage() {
 
     return (
         <section className="shell-page">
-            <header className="shell-page-header">
-                <p className="shell-page-kicker">{t("casesKicker", "Cases")}</p>
-                <h2>{t("casesTitle", "Client portfolios with case intelligence")}</h2>
-                <p>{t("casesSubtitle", "Each client opens as a matter portfolio: cases, status, documents, timeline, assistant, and tasks.")}</p>
+            <header className="shell-page-header case-page-header-row">
+                <div>
+                    <p className="shell-page-kicker">{t("casesKicker", "Cases")}</p>
+                    <h2>{t("casesTitle", "Client portfolios with case intelligence")}</h2>
+                    <p>{t("casesSubtitle", "Each client opens as a matter portfolio: cases, status, documents, timeline, assistant, and tasks.")}</p>
+                </div>
+                <button
+                    className="shell-inline-link as-button primary-action"
+                    type="button"
+                    onClick={handleOpenCreate}
+                    disabled={!clients.length}
+                    title={!clients.length ? t("createClientFirst", "Create a client before opening a case.") : undefined}
+                >
+                    {t("newCase", "+ New case")}
+                </button>
             </header>
 
             <div className="shell-grid shell-grid-2 case-portfolio-layout">
@@ -1012,6 +1086,96 @@ export default function CasesPage() {
                     </div>
                 </article>
             </div>
+            {createOpen ? (
+                <div
+                    className="calendar-modal-backdrop"
+                    role="presentation"
+                    onClick={(event) => {
+                        if (event.target === event.currentTarget && !createSaving) setCreateOpen(false);
+                    }}
+                >
+                    <form className="calendar-event-modal case-create-modal" onSubmit={handleCreateCase} role="dialog" aria-modal="true" aria-label={t("newCase", "New case")}>
+                        <div className="case-detail-heading">
+                            <div>
+                                <p className="shell-page-kicker">{t("casesKicker", "Cases")}</p>
+                                <h3>{t("createCaseTitle", "Open a new case")}</h3>
+                                <p>{t("createCaseSubtitle", "Cases are owned by you and attached to one of your clients.")}</p>
+                            </div>
+                        </div>
+
+                        <label className="case-create-field">
+                            <span>{t("caseTitleLabel", "Case title")}</span>
+                            <input
+                                value={createForm.title}
+                                onChange={(event) => setCreateForm((current) => ({ ...current, title: event.target.value }))}
+                                placeholder={t("caseTitlePlaceholder", "e.g. Estate succession — Ben Salah family")}
+                                autoFocus
+                                required
+                            />
+                        </label>
+
+                        <label className="case-create-field">
+                            <span>{t("client", "Client")}</span>
+                            <select
+                                value={createForm.client_id}
+                                onChange={(event) => setCreateForm((current) => ({ ...current, client_id: Number(event.target.value) }))}
+                                required
+                            >
+                                <option value={0} disabled>{t("selectClient", "Select a client...")}</option>
+                                {clients.map((client) => (
+                                    <option key={client.id} value={client.id}>{client.name}</option>
+                                ))}
+                            </select>
+                        </label>
+
+                        <div className="case-create-row">
+                            <label className="case-create-field">
+                                <span>{t("status", "Status")}</span>
+                                <select
+                                    value={createForm.status}
+                                    onChange={(event) => setCreateForm((current) => ({ ...current, status: event.target.value as (typeof CASE_STATUS_OPTIONS)[number] }))}
+                                >
+                                    {CASE_STATUS_OPTIONS.map((value) => (
+                                        <option key={value} value={value}>{normalizeLabel(value, value)}</option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label className="case-create-field">
+                                <span>{t("jurisdiction", "Jurisdiction")}</span>
+                                <select
+                                    value={createForm.jurisdiction_country}
+                                    onChange={(event) => setCreateForm((current) => ({ ...current, jurisdiction_country: event.target.value as JurisdictionCountry }))}
+                                >
+                                    {JURISDICTION_OPTIONS.map((value) => (
+                                        <option key={value} value={value}>{normalizeLabel(value, value)}</option>
+                                    ))}
+                                </select>
+                            </label>
+                        </div>
+
+                        <label className="case-create-field">
+                            <span>{t("description", "Description")}</span>
+                            <textarea
+                                value={createForm.description}
+                                onChange={(event) => setCreateForm((current) => ({ ...current, description: event.target.value }))}
+                                placeholder={t("caseDescriptionPlaceholder", "Short summary of the matter (optional).")}
+                                rows={4}
+                            />
+                        </label>
+
+                        {createError ? <p className="shell-error-text">{createError}</p> : null}
+
+                        <div className="case-action-row">
+                            <button className="shell-inline-link as-button" type="button" onClick={() => setCreateOpen(false)} disabled={createSaving}>
+                                {t("cancel", "Cancel")}
+                            </button>
+                            <button className="shell-inline-link as-button primary-action" type="submit" disabled={createSaving}>
+                                {createSaving ? t("creating", "Creating...") : t("createCase", "Create case")}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            ) : null}
             {successionModalOpen && token ? (
                 <SuccessionCalculatorModal
                     token={token}

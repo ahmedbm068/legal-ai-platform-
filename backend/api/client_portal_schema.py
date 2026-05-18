@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 class ClientPortalRegisterRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    tenant_slug: str = Field(..., min_length=2, max_length=80)
+    tenant_slug: str = Field("", max_length=80)
     full_name: str = Field(..., min_length=2)
     email: EmailStr
     password: str = Field(..., min_length=10, max_length=256)
@@ -192,3 +192,84 @@ class ClientPortalAppointmentRequest(BaseModel):
 class ClientPortalAppointmentResponse(BaseModel):
     message: str
     appointment: dict
+
+
+# ── Messaging (client <-> lawyer, per case) ─────────────────────────────────
+
+
+class ClientPortalMessageItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    case_id: int
+    sender_role: str
+    sender_name: Optional[str] = None
+    body: str
+    attachment_filename: Optional[str] = None
+    attachment_content_type: Optional[str] = None
+    attachment_size: Optional[int] = None
+    is_mine: bool = False
+    read_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class ClientPortalThreadResponse(BaseModel):
+    case_id: int
+    case_title: str
+    counsel_name: Optional[str] = None
+    messages: list[ClientPortalMessageItem] = Field(default_factory=list)
+    unread_count: int = 0
+
+
+class ClientPortalSendMessageRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    body: str = Field(..., min_length=1, max_length=8000)
+
+
+class ClientPortalPiiScanRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    text: str = Field("", max_length=8000)
+
+
+class ClientPortalUnreadResponse(BaseModel):
+    unread_count: int = 0
+
+
+# ── Billing ─────────────────────────────────────────────────────────────────
+
+
+class ClientPortalInvoiceLineItem(BaseModel):
+    id: int
+    description: str
+    hours: Optional[float] = None
+    amount: float
+
+
+class ClientPortalInvoiceItem(BaseModel):
+    id: int
+    invoice_number: str
+    case_id: int
+    description: str
+    notes: Optional[str] = None
+    currency: str
+    amount_total: float
+    status: str
+    issued_at: datetime
+    due_at: Optional[datetime] = None
+    paid_at: Optional[datetime] = None
+    payment_status: Optional[str] = None
+    line_items: list[ClientPortalInvoiceLineItem] = Field(default_factory=list)
+
+
+class ClientPortalBillingResponse(BaseModel):
+    invoices: list[ClientPortalInvoiceItem] = Field(default_factory=list)
+    total_outstanding: float = 0.0
+    currency: str = "USD"
+
+
+class ClientPortalPayInvoiceResponse(BaseModel):
+    status: str
+    message: str
+    invoice: ClientPortalInvoiceItem

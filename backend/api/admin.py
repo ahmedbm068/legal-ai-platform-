@@ -46,11 +46,37 @@ def system_health(
     total_documents = db.query(Document).filter(Document.archived_at.is_(None)).count()
     total_audit_entries = db.query(RequestAuditLog).count()
 
+    # ── 24h request health, derived from the existing audit log ──────────────
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent = (
+        db.query(
+            RequestAuditLog.status_code,
+            RequestAuditLog.duration_ms,
+            RequestAuditLog.tenant_id,
+        )
+        .filter(RequestAuditLog.created_at >= since)
+        .all()
+    )
+    requests_24h = len(recent)
+    errors_24h = sum(1 for r in recent if (r.status_code or 0) >= 500)
+    error_rate_24h = (errors_24h / requests_24h) if requests_24h else 0.0
+    p95_latency_ms = _percentile(
+        [float(r.duration_ms) for r in recent if r.duration_ms is not None], 95.0
+    )
+    active_tenants_24h = len(
+        {r.tenant_id for r in recent if r.tenant_id is not None}
+    )
+
     return {
         "total_users": total_users,
         "total_cases": total_cases,
         "total_documents": total_documents,
         "total_audit_entries": total_audit_entries,
+        "requests_24h": requests_24h,
+        "errors_24h": errors_24h,
+        "error_rate_24h": round(error_rate_24h, 4),
+        "p95_latency_ms": round(p95_latency_ms, 1),
+        "active_tenants_24h": active_tenants_24h,
     }
 
 

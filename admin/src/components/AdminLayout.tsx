@@ -1,14 +1,14 @@
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
+import TopBar from "./TopBar";
 
 export default function AdminLayout() {
     return (
-        <div className="flex h-full">
+        <div className="min-h-screen bg-surface text-on-surface font-body-md">
             <Sidebar />
-            <main className="flex-1 overflow-auto bg-[#0f172a]">
-                <div className="max-w-6xl mx-auto px-8 py-8">
-                    <Outlet />
-                </div>
+            <TopBar />
+            <main className="ml-sidebar-width mt-topbar-height p-lg max-w-[1440px] mx-auto">
+                <Outlet />
             </main>
         </div>
     );

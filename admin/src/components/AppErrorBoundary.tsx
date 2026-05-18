@@ -38,26 +38,26 @@ export class AppErrorBoundary extends React.Component<{ children: React.ReactNod
     render() {
         if (this.state.hasError) {
             return (
-                <div className="flex h-screen items-center justify-center bg-[#0f172a]">
-                    <div className="bg-[#1e293b] rounded-xl p-8 max-w-md w-full text-center shadow-lg">
-                        <p className="text-slate-400 text-xs uppercase tracking-widest mb-2">Admin Console</p>
-                        <h2 className="text-white text-xl font-semibold mb-2">Something went wrong</h2>
-                        <p className="text-slate-400 text-sm mb-6">{this.state.message}</p>
+                <div className="flex min-h-screen items-center justify-center bg-surface px-md">
+                    <div className="bg-surface-container-lowest border border-outline-variant rounded p-xl max-w-md w-full text-center">
+                        <p className="font-label-caps text-label-caps text-secondary uppercase mb-sm">Admin Console</p>
+                        <h2 className="font-display-title text-display-title text-primary mb-sm">Something went wrong</h2>
+                        <p className="font-body-sm text-body-sm text-secondary mb-lg">{this.state.message}</p>
                         {import.meta.env.DEV && this.state.componentStack && (
-                            <pre className="text-left text-xs text-slate-500 bg-slate-900 rounded-lg p-3 mb-6 overflow-auto max-h-40">
+                            <pre className="text-left text-xs text-secondary bg-surface-container rounded p-md mb-lg overflow-auto max-h-40">
                                 {this.state.componentStack}
                             </pre>
                         )}
-                        <div className="flex gap-3 justify-center">
+                        <div className="flex gap-sm justify-center">
                             <button
-                                className="border border-slate-600 text-slate-300 hover:border-slate-400 text-sm font-medium px-5 py-2 rounded-lg"
+                                className="border border-outline text-on-surface hover:bg-surface-container font-body-sm text-body-sm font-semibold px-lg py-sm rounded transition-colors"
                                 onClick={this.softReset}
                                 type="button"
                             >
                                 Try again
                             </button>
                             <button
-                                className="bg-brand-500 hover:bg-brand-400 text-white text-sm font-medium px-6 py-2 rounded-lg"
+                                className="bg-primary-container text-on-primary hover:opacity-90 font-body-sm text-body-sm font-semibold px-lg py-sm rounded transition-opacity"
                                 onClick={this.hardRecover}
                                 type="button"
                             >

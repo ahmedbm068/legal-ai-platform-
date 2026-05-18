@@ -2,8 +2,13 @@ import type {
   ClientPortalAssistantResponse,
   ClientPortalCalendarItem,
   ClientPortalDashboard,
+  ClientPortalBilling,
+  ClientPortalMessage,
   ClientPortalMessageResponse,
+  ClientPortalPayInvoiceResult,
+  ClientPortalThread,
   ClientPortalToken,
+  ClientPortalUnread,
   PublicIntakeResponse,
   PublicIntakeStatus,
 } from "../types";
@@ -42,6 +47,10 @@ function resolveApiBaseUrl(): string {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
+
+export function portalApiBaseUrl(): string {
+  return API_BASE_URL;
+}
 
 export class ApiError extends Error {
   status: number;
@@ -234,4 +243,132 @@ export async function askPortalAssistant(
   });
 
   return parseResponse<ClientPortalAssistantResponse>(response);
+}
+
+// ── Messaging (client <-> lawyer, per case) ────────────────────────────────
+
+function caseQuery(caseId?: number | null): string {
+  return caseId != null ? `?case_id=${caseId}` : "";
+}
+
+export async function fetchPortalThread(
+  token: string,
+  caseId?: number | null
+): Promise<ClientPortalThread> {
+  const response = await fetch(`${API_BASE_URL}/portal/messages${caseQuery(caseId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return parseResponse<ClientPortalThread>(response);
+}
+
+export async function scanPortalMessagePii(
+  token: string,
+  text: string
+): Promise<{
+  has_pii: boolean;
+  pii_items: Array<{ type: string; value: string }>;
+  redacted_text: string;
+}> {
+  const response = await fetch(`${API_BASE_URL}/portal/messages/ai/scan-pii`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ text }),
+  });
+  return parseResponse(response);
+}
+
+export async function sendPortalMessage(
+  token: string,
+  body: string,
+  caseId?: number | null
+): Promise<ClientPortalMessage> {
+  const response = await fetch(`${API_BASE_URL}/portal/messages${caseQuery(caseId)}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ body }),
+  });
+
+  return parseResponse<ClientPortalMessage>(response);
+}
+
+export async function sendPortalMessageAttachment(
+  token: string,
+  file: File,
+  body: string,
+  caseId?: number | null
+): Promise<ClientPortalMessage> {
+  const formData = new FormData();
+  formData.append("attachment", file);
+  formData.append("body", body);
+
+  const response = await fetch(
+    `${API_BASE_URL}/portal/messages/attachment${caseQuery(caseId)}`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    }
+  );
+
+  return parseResponse<ClientPortalMessage>(response);
+}
+
+export async function fetchPortalUnreadCount(
+  token: string
+): Promise<ClientPortalUnread> {
+  const response = await fetch(`${API_BASE_URL}/portal/messages/unread-count`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return parseResponse<ClientPortalUnread>(response);
+}
+
+export function portalMessageAttachmentUrl(messageId: number): string {
+  return `${API_BASE_URL}/portal/messages/${messageId}/attachment`;
+}
+
+/** Fetches an attachment with auth and returns an object URL usable in
+ *  <img>/<video>/<a>. Caller is responsible for URL.revokeObjectURL. */
+export async function fetchPortalAttachmentObjectUrl(
+  token: string,
+  messageId: number
+): Promise<string> {
+  const response = await fetch(
+    `${API_BASE_URL}/portal/messages/${messageId}/attachment`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!response.ok) {
+    throw new ApiError(response.status, "Unable to load attachment.");
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+// ── Billing ────────────────────────────────────────────────────────────────
+
+export async function fetchPortalBilling(token: string): Promise<ClientPortalBilling> {
+  const response = await fetch(`${API_BASE_URL}/portal/billing`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return parseResponse<ClientPortalBilling>(response);
+}
+
+export async function payPortalInvoice(
+  token: string,
+  invoiceId: number
+): Promise<ClientPortalPayInvoiceResult> {
+  const response = await fetch(`${API_BASE_URL}/portal/billing/${invoiceId}/pay`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  return parseResponse<ClientPortalPayInvoiceResult>(response);
 }

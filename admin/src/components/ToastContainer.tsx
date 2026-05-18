@@ -3,23 +3,23 @@ import type { Toast } from "../context/ToastContext";
 
 const KIND_CLASSES: Record<Toast["kind"], { wrapper: string; icon: string; label: string }> = {
     success: {
-        wrapper: "bg-emerald-950 border-emerald-700 text-emerald-100",
-        icon: "bg-emerald-900 text-emerald-400",
+        wrapper: "bg-surface-container-lowest border-outline-variant text-on-surface",
+        icon: "bg-[#e3efeb] text-[#2f5d3f]",
         label: "✓",
     },
     error: {
-        wrapper: "bg-red-950 border-red-700 text-red-100",
-        icon: "bg-red-900 text-red-400",
+        wrapper: "bg-surface-container-lowest border-error-container text-on-surface",
+        icon: "bg-err-bg text-on-error-container",
         label: "✕",
     },
     warning: {
-        wrapper: "bg-amber-950 border-amber-700 text-amber-100",
-        icon: "bg-amber-900 text-amber-400",
+        wrapper: "bg-surface-container-lowest border-outline-variant text-on-surface",
+        icon: "bg-warn-bg text-warn-fg",
         label: "!",
     },
     info: {
-        wrapper: "bg-slate-800 border-slate-600 text-slate-100",
-        icon: "bg-slate-700 text-slate-300",
+        wrapper: "bg-surface-container-lowest border-outline-variant text-on-surface",
+        icon: "bg-surface-container-high text-secondary",
         label: "i",
     },
 };

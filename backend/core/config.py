@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     PORTAL_LOGIN_CODE_EXPIRE_MINUTES: int = 10
     PORTAL_ALLOW_CONSOLE_CODE_FALLBACK: bool = True
     PORTAL_REQUIRE_TENANT_SLUG: bool = True
+    # When a registration/login arrives with a blank or unknown tenant slug,
+    # fall back to this tenant slug instead of returning 404. Empty disables the fallback.
+    PORTAL_DEFAULT_TENANT_SLUG: str = "arbi-mostaissier"
     STAFF_INVITE_ONLY: bool = True
     STAFF_DEFAULT_TENANT_NAME: str = "Arbi Mostaissier"
 

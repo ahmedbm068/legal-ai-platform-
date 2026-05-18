@@ -1114,6 +1114,64 @@
     margin-top: 0.75rem;
 }
 
+.case-page-header-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.case-create-modal {
+    width: min(560px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    padding: 1.4rem;
+    overflow-y: auto;
+}
+
+.case-create-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--shell-muted);
+}
+
+.case-create-field input,
+.case-create-field select,
+.case-create-field textarea {
+    font: inherit;
+    font-weight: 500;
+    color: var(--shell-text, inherit);
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--shell-border);
+    border-radius: 8px;
+    background: var(--shell-panel);
+}
+
+.case-create-field textarea {
+    resize: vertical;
+    min-height: 84px;
+}
+
+.case-create-row {
+    display: flex;
+    gap: 0.85rem;
+    flex-wrap: wrap;
+}
+
+.case-create-row .case-create-field {
+    flex: 1 1 180px;
+}
+
+.case-create-modal .case-action-row {
+    justify-content: flex-end;
+    margin-top: 0.4rem;
+}
+
 .assistant-launch-card {
     justify-content: space-between;
     border: 1px solid var(--shell-border);

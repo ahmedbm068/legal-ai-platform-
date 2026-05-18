@@ -3,6 +3,10 @@ import type {
   ArtifactVersionListResponse,
   ArtifactVersionMutationResponse,
   CaseItem,
+  CaseMessage,
+  CaseMessageThread,
+  CaseMessageThreadSummary,
+  CaseMessageUnread,
   Client,
   ConsultationFromTranscriptResponse,
   ConsultationRequest,
@@ -97,6 +101,19 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   return response.json() as Promise<T>;
+}
+
+// Fetch a binary endpoint (e.g. message attachment) with auth, returning a
+// blob object URL the caller can open or revoke.
+async function requestBlobUrl(path: string, token: string): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Request failed with status ${response.status}`);
+  }
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
 }
 
 export const api = {
@@ -396,6 +413,71 @@ export const api = {
 
   selectArtifactVersion: (token: string, versionId: number) =>
     request<ArtifactVersionMutationResponse>(`/ai/artifacts/versions/${versionId}/select`, {
+      method: "POST",
+      token,
+    }),
+
+  // ── Client <-> lawyer messaging ──────────────────────────────────────────
+
+  listMessageThreads: (token: string) =>
+    request<CaseMessageThreadSummary[]>("/staff/messages/threads", { token }),
+
+  messageUnreadCount: (token: string) =>
+    request<CaseMessageUnread>("/staff/messages/unread-count", { token }),
+
+  getMessageThread: (token: string, caseId: number) =>
+    request<CaseMessageThread>(`/staff/messages/${caseId}`, { token }),
+
+  sendMessage: (token: string, caseId: number, body: string) =>
+    request<CaseMessage>(`/staff/messages/${caseId}`, {
+      method: "POST",
+      token,
+      body: { body },
+    }),
+
+  sendMessageAttachment: (token: string, caseId: number, file: File, body: string) => {
+    const formData = new FormData();
+    formData.append("attachment", file);
+    formData.append("body", body);
+    return request<CaseMessage>(`/staff/messages/${caseId}/attachment`, {
+      method: "POST",
+      token,
+      formData,
+    });
+  },
+
+  messageAttachmentUrl: (token: string, caseId: number, messageId: number) =>
+    requestBlobUrl(`/staff/messages/${caseId}/attachment/${messageId}`, token),
+
+  // ── AI assist (lawyer-facing) ────────────────────────────────────────────
+  aiSuggestReplies: (token: string, caseId: number) =>
+    request<{ suggestions: string[]; disclaimer?: string; model_used: boolean }>(
+      `/staff/messages/${caseId}/ai/suggest`,
+      { method: "POST", token }
+    ),
+
+  aiSummarizeThread: (token: string, caseId: number) =>
+    request<{ summary: string; model_used: boolean }>(
+      `/staff/messages/${caseId}/ai/summarize`,
+      { method: "POST", token }
+    ),
+
+  aiScanPii: (token: string, text: string) =>
+    request<{
+      has_pii: boolean;
+      pii_items: Array<{ type: string; value: string }>;
+      redacted_text: string;
+    }>(`/staff/messages/ai/scan-pii`, { method: "POST", token, body: { text } }),
+
+  aiAnalyzeAttachment: (token: string, caseId: number, messageId: number) =>
+    request<{
+      available: boolean;
+      document_type?: string | null;
+      summary?: string | null;
+      key_points: string[];
+      parties: string[];
+      important_dates: Array<Record<string, string>>;
+    }>(`/staff/messages/${caseId}/ai/analyze-attachment/${messageId}`, {
       method: "POST",
       token,
     }),

@@ -16,6 +16,7 @@ function routeIcon(path: string) {
         "/assistant": ["M5 5.5h10v7H9l-4 3v-10Z", "M8 8.5h4", "M8 10.5h2.5"],
         "/documents": ["M6 3.8h5l3 3v9.4H6V3.8Z", "M11 3.8v3h3", "M8 10h4", "M8 12.3h4"],
         "/editor": ["M5 14.5h10", "M7 12.5l5.8-5.8 1.5 1.5-5.8 5.8H7v-1.5Z"],
+        "/messages": ["M4 5.5h12v8H8l-3 2.5v-2.5H4v-8Z", "M7 8.5h6", "M7 10.5h4"],
         "/calendar": ["M5 6.5h10v9H5v-9Z", "M7.5 4.5v3", "M12.5 4.5v3", "M5 9h10"],
         "/settings": ["M10 6.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z", "M10 3.5v2", "M10 14.5v2", "M3.5 10h2", "M14.5 10h2"],
     };
@@ -65,6 +66,10 @@ export default function WorkspaceShell() {
         "/editor": {
             label: t("navEditorLabel", "Legal Editor"),
             description: t("navEditorDesc", "Draft, verify, version, and export"),
+        },
+        "/messages": {
+            label: t("navMessagesLabel", "Messages"),
+            description: t("navMessagesDesc", "Secure client conversations per case"),
         },
         "/calendar": {
             label: t("navCalendarLabel", "Calendar"),
